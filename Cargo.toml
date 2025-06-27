@@ -1,0 +1,26 @@
+[package]
+name = "chonker-tui"
+version = "10.0.0"
+edition = "2021"
+description = "CHONKER v10.0 - Spatial-Intelligence Document Chunker with Retro Terminal UI"
+authors = ["Jack <jack@chonker.ai>"]
+
+[dependencies]
+ratatui = "0.26"
+crossterm = "0.27"
+tokio = { version = "1.0", features = ["full"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+clap = { version = "4.0", features = ["derive"] }
+color-eyre = "0.6"
+rand = "0.8"
+
+# PDF processing
+pdf-extract = "0.7"
+rfd = "0.14"
+
+# Database
+rusqlite = { version = "0.31", features = ["bundled"] }
+
+# Image handling
+image = "0.24"
