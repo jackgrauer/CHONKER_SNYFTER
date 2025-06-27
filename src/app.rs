@@ -783,27 +783,61 @@ impl eframe::App for ChonkerApp {
         
         // RIGHT PANEL SECOND (CentralPanel gets remaining space)
         egui::CentralPanel::default().show(ctx, |ui| {
-            ui.heading("Markdown Output");
-            ui.separator();
+            // Use the enhanced MarkdownEditor component
+            self.markdown_editor.render(ui);
             
-            // Test content
-            ui.colored_label(egui::Color32::GREEN, "RIGHT PANEL WORKS!");
-            
-            // Editable markdown area
-            ui.add(
-                egui::TextEdit::multiline(&mut self.markdown_content)
-                    .desired_width(f32::INFINITY)
-                    .desired_rows(20)
-                    .hint_text("Markdown output will appear here...")
-            );
-            
-            if !self.chunks.is_empty() {
-                ui.separator();
-                ui.label(format!("Ready to display {} chunks as markdown", self.chunks.len()));
+            // Update markdown content when chunks are available
+            if !self.chunks.is_empty() && self.markdown_editor.content.len() < 100 {
+                let mut markdown = String::from("# Document Analysis\n\n");
                 
-                if ui.button("Copy All").clicked() {
-                    self.copy_all_chunks();
+                markdown.push_str(&format!("**File:** {}\n", 
+                    self.selected_file.as_ref()
+                        .and_then(|f| f.file_name())
+                        .map(|n| n.to_string_lossy())
+                        .unwrap_or_default()
+                ));
+                
+                markdown.push_str(&format!("**Chunks:** {}\n", self.chunks.len()));
+                markdown.push_str(&format!("**Characters:** {}\n\n", 
+                    self.chunks.iter().map(|c| c.char_count).sum::<usize>()
+                ));
+                
+                let adversarial_count = self.chunks.iter()
+                    .filter(|c| c.element_types.contains(&"adversarial_content".to_string()))
+                    .count();
+                
+                if adversarial_count > 0 {
+                    markdown.push_str(&format!("**⚠️ Adversarial Content:** {} chunks detected\n\n", adversarial_count));
+                } else {
+                    markdown.push_str("**✅ Status:** Clean content detected\n\n");
                 }
+                
+                markdown.push_str("---\n\n");
+                
+                for (i, chunk) in self.chunks.iter().enumerate() {
+                    let is_adversarial = chunk.element_types.contains(&"adversarial_content".to_string());
+                    let status_icon = if is_adversarial { "⚠️" } else { "✅" };
+                    
+                    markdown.push_str(&format!(
+                        "## {} Chunk {} - {}\n\n",
+                        status_icon,
+                        chunk.id,
+                        chunk.page_range
+                    ));
+                    
+                    if is_adversarial {
+                        markdown.push_str("**⚠️ ADVERSARIAL CONTENT DETECTED**\n\n");
+                    }
+                    
+                    markdown.push_str(&format!("{}\n\n", chunk.content));
+                    
+                    if i < self.chunks.len() - 1 {
+                        markdown.push_str("---\n\n");
+                    }
+                }
+                
+                // Update the markdown editor content
+                self.markdown_editor.set_content(markdown);
             }
         });
     }
