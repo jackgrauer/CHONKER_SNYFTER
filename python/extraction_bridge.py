@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/Library/Frameworks/Python.framework/Versions/3.12/bin/python3
 """
 CHONKER Extraction Bridge
 Wraps Magic-PDF and Docling for high-quality PDF extraction
@@ -12,131 +12,253 @@ from pathlib import Path
 from typing import Dict, List, Any, Optional
 import traceback
 
+# Docling v2 imports
+try:
+    from docling.document_converter import DocumentConverter
+    from docling.datamodel.base_models import InputFormat
+    from docling.datamodel.pipeline_options import PdfPipelineOptions
+    from docling.document_converter import PdfFormatOption
+    DOCLING_AVAILABLE = True
+except ImportError:
+    DOCLING_AVAILABLE = False
+
 def extract_with_magic_pdf(pdf_path: str, page_num: Optional[int] = None) -> Dict[str, Any]:
     """
-    Extract content using Magic-PDF
+    Extract content using Magic-PDF via CLI interface (more reliable than direct API)
     """
     try:
-        # Import Magic-PDF (install with: pip install magic-pdf[full])
-        from magic_pdf.pipe.UNIPipe import UNIPipe
-        from magic_pdf.pipe.OCRPipe import OCRPipe
-        from magic_pdf.pipe.TXTMode import TXTMode
+        import subprocess
+        import tempfile
+        import os
         
-        # Configure extraction pipeline
-        pipe = UNIPipe()
-        
-        # Extract content
-        with open(pdf_path, 'rb') as f:
-            pdf_bytes = f.read()
-        
-        result = pipe.pipe_analyze(pdf_bytes)
-        
-        # Process results
-        extractions = []
-        for page_idx, page_data in enumerate(result.get('pages', [])):
-            if page_num is not None and page_idx != page_num - 1:
-                continue
+        # Create a temporary output directory
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_dir = Path(temp_dir) / "magic_output"
+            output_dir.mkdir(exist_ok=True)
+            
+            # Use magic-pdf CLI command (simplified)
+            cmd = [
+                "magic-pdf",
+                "-p", str(pdf_path),
+                "-o", str(output_dir),
+                "-m", "auto"  # auto mode
+            ]
+            
+            try:
+                result = subprocess.run(
+                    cmd, 
+                    capture_output=True, 
+                    text=True, 
+                    timeout=60,  # 60 second timeout
+                    check=False
+                )
                 
-            page_content = {
-                'page_number': page_idx + 1,
-                'text': page_data.get('text', ''),
-                'tables': page_data.get('tables', []),
-                'figures': page_data.get('figures', []),
-                'formulas': page_data.get('formulas', []),
-                'confidence': page_data.get('confidence', 0.8),
-                'layout_boxes': page_data.get('layout_boxes', []),
-                'tool': 'magic-pdf'
-            }
-            extractions.append(page_content)
+                # Check if CLI ran successfully
+                if result.returncode != 0:
+                    # CLI failed, try PyMuPDF-based extraction instead
+                    return extract_with_pymupdf(pdf_path, page_num)
+                
+                # Try to find and parse output files
+                text_files = list(output_dir.glob("**/*.txt"))
+                json_files = list(output_dir.glob("**/*.json"))
+                
+                extractions = []
+                
+                if text_files:
+                    # Process text output
+                    for text_file in text_files:
+                        with open(text_file, 'r', encoding='utf-8') as f:
+                            text_content = f.read().strip()
+                            
+                        page_content = {
+                            'page_number': 1,  # Magic-PDF CLI output doesn't always separate pages
+                            'text': text_content,
+                            'tables': [],
+                            'figures': [],
+                            'formulas': [],
+                            'confidence': 0.8,
+                            'layout_boxes': [],
+                            'tool': 'magic-pdf'
+                        }
+                        extractions.append(page_content)
+                        break  # Use first text file found
+                
+                if not extractions:
+                    # No usable output, fall back to PyMuPDF
+                    return extract_with_pymupdf(pdf_path, page_num)
+                
+                return {
+                    'success': True,
+                    'tool': 'magic-pdf',
+                    'extractions': extractions,
+                    'metadata': {
+                        'total_pages': len(extractions),
+                        'processing_time': 0
+                    }
+                }
+                
+            except subprocess.TimeoutExpired:
+                return {
+                    'success': False,
+                    'error': 'Magic-PDF extraction timed out (60s)',
+                    'tool': 'magic-pdf'
+                }
+            except subprocess.SubprocessError as e:
+                return {
+                    'success': False,
+                    'error': f'Magic-PDF CLI error: {str(e)}',
+                    'tool': 'magic-pdf'
+                }
         
-        return {
-            'success': True,
-            'tool': 'magic-pdf',
-            'extractions': extractions,
-            'metadata': {
-                'total_pages': len(result.get('pages', [])),
-                'processing_time': result.get('processing_time', 0)
-            }
-        }
-        
-    except ImportError:
+    except ImportError as e:
         return {
             'success': False,
-            'error': 'Magic-PDF not installed. Run: pip install magic-pdf[full]',
+            'error': f'Magic-PDF not properly installed: {str(e)}',
             'tool': 'magic-pdf'
         }
+    except FileNotFoundError as e:
+        if 'magic-pdf.json' in str(e):
+            return {
+                'success': False,
+                'error': 'Magic-PDF configuration error - try updating the package',
+                'tool': 'magic-pdf'
+            }
+        else:
+            return {
+                'success': False,
+                'error': f'PDF file not found: {str(e)}',
+                'tool': 'magic-pdf'
+            }
     except Exception as e:
         return {
             'success': False,
-            'error': str(e),
+            'error': f'Magic-PDF extraction failed: {str(e)}',
             'traceback': traceback.format_exc(),
             'tool': 'magic-pdf'
         }
 
-def extract_with_docling(pdf_path: str, page_num: Optional[int] = None) -> Dict[str, Any]:
+def extract_with_pymupdf(pdf_path: str, page_num: Optional[int] = None) -> Dict[str, Any]:
     """
-    Extract content using Docling
+    Extract content using PyMuPDF (used as fallback for Magic-PDF)
     """
     try:
-        # Import Docling (install with: pip install docling)
-        from docling.document_converter import DocumentConverter
-        from docling.datamodel.base_models import InputFormat
-        from docling.datamodel.pipeline_options import PdfPipelineOptions
+        import fitz  # PyMuPDF
         
-        # Configure pipeline
-        pipeline_options = PdfPipelineOptions()
-        pipeline_options.do_ocr = True
-        pipeline_options.do_table_structure = True
-        
-        converter = DocumentConverter(
-            format_options={
-                InputFormat.PDF: pipeline_options
-            }
-        )
-        
-        # Extract content
-        result = converter.convert(pdf_path)
-        
-        # Process results
+        doc = fitz.open(pdf_path)
         extractions = []
-        for page_idx, page_data in enumerate(result.document.pages):
-            if page_num is not None and page_idx != page_num - 1:
-                continue
+        
+        pages_to_process = [page_num - 1] if page_num else range(len(doc))
+        
+        for page_idx in pages_to_process:
+            if page_idx < len(doc):
+                page = doc[page_idx]
+                text = page.get_text()
                 
-            page_content = {
-                'page_number': page_idx + 1,
-                'text': page_data.text,
-                'tables': [table.to_dict() for table in page_data.tables],
-                'figures': [fig.to_dict() for fig in page_data.figures],
-                'formulas': [formula.to_dict() for formula in page_data.formulas],
-                'confidence': getattr(page_data, 'confidence', 0.85),
-                'layout_boxes': [box.to_dict() for box in page_data.layout_boxes],
-                'tool': 'docling'
-            }
-            extractions.append(page_content)
+                page_content = {
+                    'page_number': page_idx + 1,
+                    'text': text,
+                    'tables': [],
+                    'figures': [],
+                    'formulas': [],
+                    'confidence': 0.7,  # PyMuPDF generally good for text
+                    'layout_boxes': [],
+                    'tool': 'pymupdf'
+                }
+                extractions.append(page_content)
+        
+        doc.close()
         
         return {
             'success': True,
-            'tool': 'docling',
+            'tool': 'pymupdf',
             'extractions': extractions,
             'metadata': {
-                'total_pages': len(result.document.pages),
-                'processing_time': getattr(result, 'processing_time', 0)
+                'total_pages': len(doc),
+                'processing_time': 0
             }
         }
         
     except ImportError:
+        # Fall back to PyPDF2 if PyMuPDF not available
+        return fallback_extraction(pdf_path, page_num)
+    except Exception as e:
+        return {
+            'success': False,
+            'error': f'PyMuPDF extraction failed: {str(e)}',
+            'tool': 'pymupdf'
+        }
+
+def extract_with_docling(pdf_path: str, page_num: Optional[int] = None) -> Dict[str, Any]:
+    """
+    Extract content using Docling v2 API
+    """
+    if not DOCLING_AVAILABLE:
         return {
             'success': False,
             'error': 'Docling not installed. Run: pip install docling',
             'tool': 'docling'
         }
+    
+    try:
+        # Configure pipeline options for Docling v2
+        pipeline_options = PdfPipelineOptions()
+        pipeline_options.do_ocr = True  # Enable OCR for scanned PDFs
+        pipeline_options.do_table_structure = True  # Enable table recognition
+        
+        # Create converter with format-specific options
+        converter = DocumentConverter(
+            format_options={
+                InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options)
+            }
+        )
+        
+        # Convert the document
+        if page_num is not None:
+            # Docling v2 supports page limiting
+            result = converter.convert(pdf_path, max_num_pages=1, start_page=page_num)
+        else:
+            result = converter.convert(pdf_path)
+        
+        # Export to markdown (Docling v2 feature)
+        markdown_content = result.document.export_to_markdown()
+        
+        # Convert to our expected format
+        extractions = []
+        
+        # Simple approach: treat the entire markdown as one extraction
+        # In practice, you might want to parse pages separately
+        page_count = len(result.document.pages) if hasattr(result.document, 'pages') else 1
+        tables_found = len(result.document.tables) if hasattr(result.document, 'tables') else 0
+        
+        extraction = {
+            'page_number': 1,
+            'text': markdown_content,
+            'tables': [],  # Tables are embedded in markdown
+            'figures': [],  # Figures are embedded in markdown
+            'formulas': [],  # Formulas are embedded in markdown
+            'confidence': 0.95,  # Docling v2 is generally high confidence
+            'layout_boxes': [],
+            'tool': 'docling_v2'
+        }
+        extractions.append(extraction)
+        
+        return {
+            'success': True,
+            'tool': 'docling_v2',
+            'extractions': extractions,
+            'metadata': {
+                'total_pages': page_count,
+                'tables_found': tables_found,
+                'processing_time': 0
+            }
+        }
+        
     except Exception as e:
         return {
             'success': False,
-            'error': str(e),
+            'error': f'Docling v2 extraction failed: {str(e)}',
             'traceback': traceback.format_exc(),
-            'tool': 'docling'
+            'tool': 'docling_v2'
         }
 
 def fallback_extraction(pdf_path: str, page_num: Optional[int] = None) -> Dict[str, Any]:

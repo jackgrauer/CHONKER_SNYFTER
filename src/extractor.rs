@@ -104,7 +104,7 @@ impl Extractor {
     }
     
     async fn run_python_extraction(&self, pdf_path: &PathBuf, page_num: Option<usize>) -> Result<ExtractionResult> {
-        let mut cmd = Command::new("python3");
+        let mut cmd = Command::new("/Library/Frameworks/Python.framework/Versions/3.12/bin/python3");
         cmd.arg(&self.python_script_path);
         cmd.arg(pdf_path);
         cmd.arg("--tool").arg(&self.preferred_tool);

@@ -1,6 +1,6 @@
 use eframe::egui;
 use std::path::PathBuf;
-use tracing::{info, debug};
+use tracing::{info, debug, warn};
 use crate::error::{ChonkerError, ChonkerResult};
 use crate::log_error;
 use crate::database::ChonkerDatabase;
@@ -298,12 +298,38 @@ impl ChonkerApp {
     }
 
     fn process_pdf(&self, file_path: &std::path::Path) -> Result<Vec<DocumentChunk>, Box<dyn std::error::Error>> {
-        // Extract text from PDF with error handling for large files
+        // Use advanced Python bridge for extraction with Docling/Magic-PDF
         
-        let text = match pdf_extract::extract_text(file_path) {
-            Ok(text) => text,
+        // First, try to use the Python bridge with async extraction
+        let path_buf = file_path.to_path_buf();
+        let mut extractor = self.extractor.clone();
+        extractor.set_preferred_tool("auto".to_string()); // Let it choose best tool
+        
+        let runtime = tokio::runtime::Runtime::new()?;
+        let extraction_result = runtime.block_on(async {
+            extractor.extract_pdf(&path_buf).await
+        });
+        
+        let text = match extraction_result {
+            Ok(result) => {
+                info!("Extraction successful with tool: {}", result.tool);
+                
+                // Convert extraction result to text
+                result.extractions.iter()
+                    .map(|page| page.text.clone())
+                    .collect::<Vec<_>>()
+                    .join("\n\n")
+            }
             Err(e) => {
-                return Err(format!("Failed to extract PDF text: {}. This document might be heavily obfuscated!", e).into());
+                warn!("Python extraction failed: {}, falling back to basic extraction", e);
+                
+                // Fallback to basic extraction if Python bridge fails
+                match pdf_extract::extract_text(file_path) {
+                    Ok(text) => text,
+                    Err(e2) => {
+                        return Err(format!("Both advanced and basic extraction failed. Advanced: {}. Basic: {}. This document might be heavily obfuscated!", e, e2).into());
+                    }
+                }
             }
         };
         
