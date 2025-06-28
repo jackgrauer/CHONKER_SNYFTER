@@ -8,6 +8,7 @@ use chrono::Utc;
 use crate::pdf_viewer::PdfViewer;
 use crate::markdown_editor::MarkdownEditor;
 use crate::extractor::Extractor;
+use crate::processing::{ChonkerProcessor, ProcessingResult};
 use crate::sync::SelectionSync;
 use crate::project::Project;
 
@@ -106,6 +107,7 @@ pub struct ChonkerApp {
     pub pdf_viewer: PdfViewer,
     pub markdown_editor: MarkdownEditor,
     pub extractor: Extractor,
+    pub processor: ChonkerProcessor,
     pub sync: SelectionSync,
     pub current_project: Option<Project>,
     
@@ -143,6 +145,7 @@ impl ChonkerApp {
             pdf_viewer: PdfViewer::new(),
             markdown_editor: MarkdownEditor::new(),
             extractor: Extractor::new(),
+            processor: ChonkerProcessor::new(),
             sync: SelectionSync::new(),
             current_project: None,
             

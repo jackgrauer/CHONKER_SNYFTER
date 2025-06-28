@@ -6,6 +6,7 @@ mod error;
 mod logging;
 mod extractor;
 mod processing;
+mod complexity;
 mod tui;
 mod markdown;
 mod export;

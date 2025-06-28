@@ -1,8 +1,8 @@
 use std::path::PathBuf;
 use anyhow::Result;
 use tracing::info;
-use crate::database::ChonkerDatabase;
-use crate::extractor::{Extractor, ExtractionResult};
+use crate::database::{ChonkerDatabase, ProcessingOptions};
+use crate::processing::{ChonkerProcessor, ProcessingResult};
 use crate::markdown::MarkdownProcessor;
 use crate::export::DataFrameExporter;
 
@@ -12,8 +12,8 @@ pub async fn extract_command(
     output: Option<PathBuf>,
     tool: String,
     store: bool,
-    page: Option<usize>,
-    mut database: ChonkerDatabase,
+    _page: Option<usize>,
+    database: ChonkerDatabase,
 ) -> Result<()> {
     info!("🔍 Extracting PDF: {:?}", pdf_path);
     
@@ -21,27 +21,28 @@ pub async fn extract_command(
         return Err(anyhow::anyhow!("PDF file not found: {:?}", pdf_path));
     }
     
-    // Initialize extractor
-    let mut extractor = Extractor::new();
-    extractor.set_preferred_tool(tool.clone());
+    // Initialize hybrid processor
+    let mut processor = ChonkerProcessor::new();
     
-    // Extract content (specific page or all pages)
-    let extraction_result = if let Some(page_num) = page {
-        info!("📄 Extracting page {} only", page_num);
-        extractor.extract_page(&pdf_path, page_num).await?
-    } else {
-        extractor.extract_pdf(&pdf_path).await?
+    // Configure processing options
+    let proc_options = ProcessingOptions {
+        tool: tool.clone(),
+        extract_tables: true,
+        extract_formulas: true,
     };
     
-    if !extraction_result.success {
-        return Err(anyhow::anyhow!("Extraction failed: {:?}", extraction_result.error));
-    }
+    // Process document with hybrid architecture
+    let processing_result = processor.process_document(&pdf_path, &proc_options).await.map_err(|e| {
+        anyhow::anyhow!("Processing failed: {:?}", e)
+    })?;
     
-    info!("✅ Extraction successful using tool: {}", extraction_result.tool);
-    info!("📄 Extracted {} pages", extraction_result.extractions.len());
+    info!("✅ Processing successful using: {}", processing_result.metadata.tool_used);
+    info!("📄 Generated {} chunks", processing_result.chunks.len());
+    info!("📊 Complexity score: {:.2}", processing_result.metadata.complexity_score);
+    info!("⚡ Processing path: {:?}", processing_result.processing_path);
     
-    // Convert to markdown
-    let markdown_content = convert_extraction_to_markdown(&extraction_result);
+    // Convert chunks to markdown
+    let markdown_content = convert_chunks_to_markdown(&processing_result);
     
     // Determine output path
     let output_path = output.unwrap_or_else(|| {
@@ -56,20 +57,29 @@ pub async fn extract_command(
     
     // Store in database if requested
     if store {
-        let doc_id = database.store_document(
-            pdf_path.to_string_lossy().to_string(),
-            markdown_content.clone(),
-            serde_json::to_value(&extraction_result)?,
+        let processing_opts = ProcessingOptions {
+            tool: tool.clone(),
+            extract_tables: true,
+            extract_formulas: true,
+        };
+        
+        let doc_id = database.save_document(
+            &pdf_path.file_name().unwrap().to_string_lossy(),
+            &pdf_path,
+            &processing_result.chunks,
+            &processing_opts,
+            processing_result.metadata.processing_time_ms,
         ).await?;
         info!("💾 Stored in database with ID: {}", doc_id);
     }
     
     // Print summary with properly spaced mascot
-    println!("  <\\___/>");
+    println!("  \\___/>");
     println!("  [o-·-o]");
     println!("  (\")~(\")  🎉 Extraction Complete!");
-    println!("          Tool used: {}", extraction_result.tool);
-    println!("          Pages processed: {}", extraction_result.extractions.len());
+    println!("          Tool used: {}", processing_result.metadata.tool_used);
+    println!("          Chunks generated: {}", processing_result.chunks.len());
+    println!("          Processing time: {}ms", processing_result.metadata.processing_time_ms);
     println!("          Output file: {:?}", output_path);
     if store {
         println!("          Stored in database: ✅");
@@ -189,44 +199,39 @@ pub async fn status_command(database: ChonkerDatabase) -> Result<()> {
     Ok(())
 }
 
-/// Convert extraction result to markdown format
-fn convert_extraction_to_markdown(result: &ExtractionResult) -> String {
+/// Convert processing result chunks to markdown format
+fn convert_chunks_to_markdown(result: &ProcessingResult) -> String {
     let mut markdown = String::new();
     
     // Add metadata header
-    markdown.push_str(&format!("# Document Extraction\n\n"));
-    markdown.push_str(&format!("**Tool:** {}\n", result.tool));
-    markdown.push_str(&format!("**Pages:** {}\n", result.metadata.total_pages));
-    markdown.push_str(&format!("**Processing Time:** {}ms\n\n", result.metadata.processing_time));
+    markdown.push_str(&format!("# Document Processing\n\n"));
+    markdown.push_str(&format!("**Tool:** {}\n", result.metadata.tool_used));
+    markdown.push_str(&format!("**Total Pages:** {}\n", result.metadata.total_pages));
+    markdown.push_str(&format!("**Processing Time:** {}ms\n", result.metadata.processing_time_ms));
+    markdown.push_str(&format!("**Complexity Score:** {:.2}\n", result.metadata.complexity_score));
+    markdown.push_str(&format!("**Processing Path:** {:?}\n\n", result.processing_path));
     
-    // Add page content
-    for page in &result.extractions {
-        markdown.push_str(&format!("## Page {}\n\n", page.page_number));
+    // Add chunk content
+    for chunk in &result.chunks {
+        markdown.push_str(&format!("## Chunk {} (Page {})\n\n", chunk.id, chunk.page_range));
+        
+        // Add element type information
+        if !chunk.element_types.is_empty() {
+            markdown.push_str(&format!("**Elements:** {}\n\n", chunk.element_types.join(", ")));
+        }
         
         // Add text content
-        if !page.text.trim().is_empty() {
-            markdown.push_str(&page.text);
+        if !chunk.content.trim().is_empty() {
+            markdown.push_str(&chunk.content);
             markdown.push_str("\n\n");
         }
         
-        // Add tables if any
-        if !page.tables.is_empty() {
-            markdown.push_str("### Tables\n\n");
-            for (i, table) in page.tables.iter().enumerate() {
-                markdown.push_str(&format!("**Table {}:**\n", i + 1));
-                markdown.push_str(&format!("```json\n{}\n```\n\n", serde_json::to_string_pretty(table).unwrap_or_default()));
-            }
+        // Add spatial bounds if available
+        if let Some(bounds) = &chunk.spatial_bounds {
+            markdown.push_str(&format!("**Spatial Bounds:** `{}`\n\n", bounds));
         }
         
-        // Add formulas if any
-        if !page.formulas.is_empty() {
-            markdown.push_str("### Formulas\n\n");
-            for (i, formula) in page.formulas.iter().enumerate() {
-                markdown.push_str(&format!("**Formula {}:**\n", i + 1));
-                markdown.push_str(&format!("```json\n{}\n```\n\n", serde_json::to_string_pretty(formula).unwrap_or_default()));
-            }
-        }
-        
+        markdown.push_str(&format!("**Character Count:** {}\n\n", chunk.char_count));
         markdown.push_str("---\n\n");
     }
     

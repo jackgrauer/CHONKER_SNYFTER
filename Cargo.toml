@@ -52,5 +52,18 @@ unicode-width = "0.1"
 md5 = "0.7"
 regex = "1.10"
 
+# Native PDF processing (fast path)
+pdfium-render = "0.8"
+lopdf = "0.32"
+blake3 = "1.5"
+
+# Caching and processing
+redis = { version = "0.24", optional = true }
+tokio-util = "0.7"
+rayon = "1.8"
+
+# PyO3 for Python bridge (optional)
+pyo3 = { version = "0.20", features = ["auto-initialize"], optional = true }
+
 [dev-dependencies]
 tempfile = "3.0"
