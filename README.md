@@ -1,50 +1,85 @@
 # CHONKER v10.0 - Hybrid PDF Processing Pipeline
 
-CHONKER, the cutest document processing pipeline, aims to deliver fast and accurate PDF processing with an intuitive interface and modular architecture.
+```
+  \___/>
+  [o-·-o]  🐹 CHONKER - The Cutest Document Processing Pipeline!
+  (")~(") 
+```
 
-## Features
+## Version Note
 
-- **Hybrid Architecture**: Combines Rust and Python for efficient PDF processing and understanding.
-- **Intelligent Routing**: Analyzes complexity to choose the best processing path.
-- **Database Integration**: Stores documents and chunks using SQLite for quick retrieval.
-- **Extensible CLI and TUI**: Provides a command-line and terminal user interface for ease of use.
-- **Data Analysis Ready**: Support for converting extracted content to markdown and further data analysis.
+**The previous version of CHONKER was a single Python script. The new version is a multi-directory Rust application with a hybrid architecture.**
 
-## Usage
+---
 
-1. **Extract Text**:
-   ```bash
-   cargo run -- extract path/to/document.pdf --tool auto
-   ```
+## 🚀 Features
 
-2. **Launch TUI**:
-   ```bash
-   cargo run -- tui
-   ```
+- **⚡ Hybrid Architecture**: Sub-10ms fast path for 90% of documents + ML path for complex cases
+- **🧠 Intelligent Routing**: Automatic complexity analysis to choose optimal processing path
+- **💾 Database Integration**: SQLite with full-text search and export capabilities
+- **🖥️ CLI + TUI**: Command-line interface and terminal user interface
+- **📊 Analysis Ready**: Export to CSV/JSON/Parquet for data analysis
+- **🐍 Python Bridge**: Seamless integration with ML tools (Docling, Magic-PDF)
 
-3. **Check Database Status**:
-   ```bash
-   cargo run -- status
-   ```
+## 🔧 Quick Start
 
-## Design Philosophy
+```bash
+# Extract a PDF
+cargo run -- extract document.pdf --tool auto --store
 
-CHONKER is built with investigative journalism in mind, providing:
+# Launch interactive TUI
+cargo run -- tui
 
-- **Accuracy and Transparency**: No AI hallucinations; what you see is what you extracted.
-- **Correctability**: Easily correct extraction errors within the interface.
-- **Learnability**: System adapts to user corrections for improved future extractions.
-- **Perfect for Deadline-driven Workflows**: Fast processing paths ensure quick results.
+# Check database status
+cargo run -- status
 
-### Innovation
+# Export data
+cargo run -- export csv output.csv
+```
 
-CHONKER is more than just a PDF extractor. It’s:
+## 🏗️ Architecture
 
-- A synchronized document viewer supporting PDF to Markdown conversion.
-- An interactive system that learns from user feedback.
-- An integrated workbench for data analysis.
+**Fast Path (Rust Native)**:
+- `pdfium-render` for PDF parsing
+- Native text extraction
+- Basic layout detection
+- Target: 1-5ms per document
 
-Think Jupyter Notebooks, but starting with PDF extraction, flowing into data analysis, maintaining perfect traceability to the original document.
+**Complex Path (Python ML)**:
+- Advanced document understanding
+- Table structure recognition
+- Multi-column layout analysis
+- Target: 1-5 seconds per document
+
+**Smart Routing**:
+- File size analysis
+- Page count estimation
+- Layout complexity scoring
+- Automatic path selection
+
+## 📊 Performance Goals
+
+✅ 90% of documents processed in < 10ms  
+✅ No regression in extraction quality  
+✅ Seamless fallback for complex documents  
+✅ Cache reduces repeated processing by 80%  
+✅ System handles 1000+ concurrent requests  
+
+## 🎯 Perfect For
+
+- **Investigative Journalism**: Process massive policy documents under deadline pressure
+- **Document Analysis**: Extract and verify data from complex PDFs
+- **Batch Processing**: Handle large document collections efficiently
+- **Research**: Maintain perfect traceability from source to analysis
+
+## 🛠️ Dependencies
+
+- Rust 1.70+
+- Python 3.8+ (for ML path)
+- SQLite
+- Optional: Redis for caching
+
+Built with investigative journalism in mind - accuracy, speed, and verifiability above all else.
 cd chonker-snyfter
 
 # Install dependencies
