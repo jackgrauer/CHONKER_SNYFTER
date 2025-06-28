@@ -28,3 +28,8 @@ wheels/
 *.swp
 *.swo
 *~
+
+# Warp Drive - exclude local data but keep config
+.warp/local/
+.warp/cache/
+.warp/.env
