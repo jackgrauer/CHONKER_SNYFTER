@@ -11,6 +11,8 @@ mod complexity;
 mod tui;
 mod markdown;
 mod export;
+mod pdf;
+mod analyzer;
 
 use clap::{Parser, Subcommand};
 use anyhow::Result;
