@@ -7,6 +7,10 @@ use tracing::{info, debug};
 use serde::{Serialize, Deserialize};
 use anyhow::Result;
 
+// Import search functionality
+mod search;
+pub use search::{FTSManager, SearchQuery, SearchResult, SearchOptions};
+
 /// MLX-optimized database configuration
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
@@ -518,6 +522,28 @@ impl ChonkerDatabase {
             .bind(doc_id)
             .execute(&self.pool)
             .await?;
+        Ok(())
+    }
+    
+    /// Get FTS manager for advanced search capabilities
+    pub fn get_fts_manager(&self) -> FTSManager {
+        FTSManager::new(self.pool.clone())
+    }
+    
+    /// Initialize FTS5 search indexes
+    pub async fn init_search(&self) -> ChonkerResult<()> {
+        let fts = self.get_fts_manager();
+        fts.init_schema().await.map_err(|e| ChonkerError::SystemResource {
+            resource: "fts_init".to_string(),
+            source: Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())),
+        })?;
+        
+        fts.rebuild_indexes().await.map_err(|e| ChonkerError::SystemResource {
+            resource: "fts_rebuild".to_string(),
+            source: Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())),
+        })?;
+        
+        info!("🔍 Search indexes initialized");
         Ok(())
     }
 }
