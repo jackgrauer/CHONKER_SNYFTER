@@ -1,53 +1,167 @@
-mod app;
-mod ui;
-mod processing;
+#![allow(dead_code)]
+
+mod cli;
 mod database;
+mod error;
+mod logging;
+mod extractor;
+mod processing;
+mod tui;
+mod markdown;
+mod export;
 
-use crossterm::{event::{self, DisableMouseCapture, EnableMouseCapture, Event}, execute, terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen}};
-use ratatui::{backend::CrosstermBackend, Terminal};
-use std::{error::Error, io};
-use app::App;
+use clap::{Parser, Subcommand};
+use anyhow::Result;
+use logging::{LoggingConfig, log_system_info};
+use tracing::info;
+use database::{ChonkerDatabase, DatabaseConfig};
+use std::path::PathBuf;
 
-fn main() -> Result<(), Box<dyn Error>> {
-    // Setup terminal
-    enable_raw_mode()?;
-    let mut stdout = io::stdout();
-    execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
-    let backend = CrosstermBackend::new(stdout);
-    let mut terminal = Terminal::new(backend)?;
+#[derive(Parser)]
+#[command(name = "chonker")]
+#[command(about = "CHONKER - CLI-First Document Processing Pipeline")]
+struct Cli {
+    #[command(subcommand)]
+    command: Commands,
+    
+    /// Database path
+    #[arg(short, long, default_value = "chonker.db")]
+    database: PathBuf,
+    
+    /// Enable verbose logging
+    #[arg(short, long)]
+    verbose: bool,
+}
 
-    // Create app state
-    let mut app = App::new();
-    let res = run_app(&mut terminal, &mut app);
+#[derive(Subcommand)]
+enum Commands {
+    /// Extract text from PDF to markdown
+    Extract {
+        /// PDF file path
+        pdf: PathBuf,
+        
+        /// Output markdown file (optional, defaults to pdf_name.md)
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+        
+        /// Extraction tool preference
+        #[arg(short, long, default_value = "auto")]
+        tool: String,
+        
+        /// Store in database
+        #[arg(long)]
+        store: bool,
+        
+        /// Extract specific page only (1-indexed)
+        #[arg(short = 'p', long)]
+        page: Option<usize>,
+    },
+    
+    /// Process and correct markdown
+    Process {
+        /// Markdown file path
+        markdown: PathBuf,
+        
+        /// Output file (optional, defaults to processed_markdown.md)
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+        
+        /// Apply corrections/transformations
+        #[arg(long)]
+        correct: bool,
+    },
+    
+    /// Export data to DataFrame formats
+    Export {
+        /// Export format
+        #[arg(short, long, default_value = "csv")]
+        format: String, // csv, json, parquet
+        
+        /// Output file path
+        #[arg(short, long)]
+        output: PathBuf,
+        
+        /// Filter by document ID
+        #[arg(long)]
+        doc_id: Option<String>,
+    },
+    
+    /// Launch interactive TUI
+    Tui,
+    
+    /// Show database status
+    Status,
+}
 
-    // Restore terminal
-    disable_raw_mode()?;
-    execute!(
-        terminal.backend_mut(),
-        LeaveAlternateScreen,
-        DisableMouseCapture
-    )?;
-    terminal.show_cursor()?;
+async fn initialize_database(db_path: &PathBuf) -> Result<ChonkerDatabase> {
+    let config = DatabaseConfig::default();
+    let db = ChonkerDatabase::new(db_path.to_str().unwrap(), config).await?;
+    Ok(db)
+}
 
-    if let Err(err) = res {
-        println!("{:?}", err)
+#[tokio::main]
+async fn main() -> Result<()> {
+    // Handle help FIRST, before ANY initialization
+    let args: Vec<String> = std::env::args().collect();
+    if args.len() == 2 && (args[1] == "-h" || args[1] == "--help") {
+        println!("CHONKER - CLI-First Document Processing Pipeline");
+        println!();
+        println!("Usage: chonker [OPTIONS] <COMMAND>");
+        println!();
+        println!("Commands:");
+        println!("  extract  Extract text from PDF to markdown");
+        println!("  process  Process and correct markdown");
+        println!("  export   Export data to DataFrame formats");
+        println!("  tui      Launch interactive TUI");
+        println!("  status   Show database status");
+        println!("  help     Print this message");
+        println!();
+        println!("Options:");
+        println!("  -d, --database <DATABASE>  Database path [default: chonker.db]");
+        println!("  -v, --verbose              Enable verbose logging");
+        println!("  -h, --help                 Print help");
+        return Ok(());
     }
-
+    
+    let cli = Cli::parse();
+    
+    // Initialize logging ONLY after handling help
+    let logging_config = LoggingConfig {
+        level: if cli.verbose { "debug" } else { "info" }.to_string(),
+        ..LoggingConfig::default()
+    };
+    logging::init_logging(&logging_config)?;
+    
+    log_system_info();
+    info!("🐹 CHONKER CLI starting up");
+    
+    // Initialize database
+    let database = initialize_database(&cli.database).await?;
+    info!("Database initialized: {:?}", cli.database);
+    
+    match cli.command {
+        Commands::Extract { pdf, output, tool, store, page } => {
+            cli::extract_command(pdf, output, tool, store, page, database).await?
+        },
+        
+        Commands::Process { markdown, output, correct } => {
+            cli::process_command(markdown, output, correct).await?
+        },
+        
+        Commands::Export { format, output, doc_id } => {
+            cli::export_command(format, output, doc_id, database).await?
+        },
+        
+        Commands::Tui => {
+            tui::run_tui(database).await?
+        },
+        
+        Commands::Status => {
+            cli::status_command(database).await?
+        },
+    }
+    
+    info!("🐹 CHONKER CLI completed successfully");
     Ok(())
 }
 
-fn run_app<B: ratatui::backend::Backend>(
-    terminal: &mut Terminal<B>,
-    app: &mut App,
-) -> io::Result<()> {
-    loop {
-        terminal.draw(|f| ui::draw(f, app))?;
-
-        if let Event::Key(key) = event::read()? {
-            app.handle_input(key);
-            if app.should_quit {
-                return Ok(());
-            }
-        }
-    }
-}

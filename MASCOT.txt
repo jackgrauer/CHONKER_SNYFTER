@@ -1,0 +1,51 @@
+  <\___/>
+  [o-·-o]  ← THE OFFICIAL CHONKER MASCOT!
+  (")~(")
+
+════════════════════════════════════════════════════════════════════
+                        MEET CHONKER THE HAMSTER!
+════════════════════════════════════════════════════════════════════
+
+Our adorable mascot represents everything CHONKER stands for:
+
+🐹 **CHUNKY**: Like our mascot, CHONKER handles big, chunky documents
+😊 **FRIENDLY**: Easy-to-use CLI that doesn't bite
+⚡ **FAST**: Quick as a hamster running on a wheel
+🧠 **SMART**: Those wise eyes see through PDF complexity
+💝 **CUTE**: Because document processing doesn't have to be boring!
+
+════════════════════════════════════════════════════════════════════
+                         CHONKER FEATURES
+════════════════════════════════════════════════════════════════════
+
+  <\___/>   PDF → Markdown extraction
+  [o-·-o]   OCR corrections & processing  
+  (")~(")   SQLite storage & search
+            DataFrame export (CSV/JSON/Parquet)
+            Interactive TUI interface
+            Batch processing workflows
+            Quality analysis & reporting
+
+════════════════════════════════════════════════════════════════════
+                      QUICK START WITH CHONKER
+════════════════════════════════════════════════════════════════════
+
+# See our cute help
+./target/debug/chonker --help
+
+# Extract a PDF (with mascot celebration!)
+./target/debug/chonker extract document.pdf --store
+
+# Launch interactive TUI (mascot in the header!)
+./target/debug/chonker tui
+
+# Development workflow (mascot everywhere!)
+./scripts/dev_workflow.sh demo
+
+════════════════════════════════════════════════════════════════════
+
+Made with 💝 by humans and one very special hamster!
+
+  <\___/>
+  [o-·-o]  Happy processing!
+  (")~(")

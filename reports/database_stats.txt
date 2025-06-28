@@ -1,0 +1,14 @@
+📊 CHONKER Database Status
+========================
+Documents: 25
+Total chunks: 616
+Database size: 10.20 MB
+Last updated: 2025-06-28T00:58:24.205736+00:00
+
+Recent Documents:
+-----------------
+• /Users/jack/Documents/1.pdf (2025-06-28T00:58:24.205736+00:00)
+• /Users/jack/Documents/1.pdf (2025-06-28T00:56:15.057751+00:00)
+• 1.pdf (2025-06-27T19:46:48.277933+00:00)
+• 1.pdf (2025-06-27T19:38:30.838607+00:00)
+• 1.pdf (2025-06-27T19:32:47.196964+00:00)

@@ -1,4 +1,4 @@
-use crate::app::{DocumentChunk, ProcessingOptions};
+use crate::database::{DocumentChunk, ProcessingOptions};
 use std::path::Path;
 
 pub struct ChonkerProcessor {

@@ -205,6 +205,18 @@ impl ChonkerApp {
                     self.error_message = Some(e.user_message());
                     self.selected_file = None;
                     self.file_input.clear();
+                } else {
+                    // Load PDF into the PDF viewer
+                    if let Err(e) = self.pdf_viewer.load_pdf(&file) {
+                        self.error_message = Some(format!("Failed to load PDF: {}", e));
+                        self.selected_file = None;
+                        self.file_input.clear();
+                    } else {
+                        self.status_message = format!("✅ PDF loaded: {} ({} pages)", 
+                            self.file_input, 
+                            self.pdf_viewer.get_page_count()
+                        );
+                    }
                 }
             }
             None => {
@@ -735,50 +747,15 @@ impl eframe::App for ChonkerApp {
             });
         });
         
-        // LEFT PANEL FIRST (this was the key!)
+        // LEFT PANEL - PDF Viewer with actual PDF rendering
         egui::SidePanel::left("pdf_panel")
             .resizable(true)
             .default_width(ctx.screen_rect().width() * 0.5) // Start at 50%
             .min_width(200.0)
             .max_width(ctx.screen_rect().width() * 0.8) // Max 80%
             .show(ctx, |ui| {
-                ui.heading("Original PDF");
-                ui.separator();
-                
-                // Test content
-                ui.colored_label(egui::Color32::BLUE, "LEFT PANEL WORKS!");
-                ui.label("PDF content will go here");
-                
-                if let Some(ref file) = self.selected_file {
-                    ui.label(format!("File: {}", 
-                        file.file_name().unwrap_or_default().to_string_lossy()
-                    ));
-                }
-                
-                if ui.button("Open PDF").clicked() {
-                    self.open_file_dialog();
-                }
-                
-                if self.selected_file.is_some() && ui.button("Process").clicked() {
-                    self.start_processing();
-                }
-                
-                if !self.chunks.is_empty() {
-                    ui.separator();
-                    ui.label(format!("Chunks: {}", self.chunks.len()));
-                    
-                    // Show some extracted content
-                    if let Some(first_chunk) = self.chunks.first() {
-                        ui.group(|ui| {
-                            ui.label("First chunk preview:");
-                            let preview = &first_chunk.content[..first_chunk.content.len().min(200)];
-                            ui.label(preview);
-                            if first_chunk.content.len() > 200 {
-                                ui.label("...");
-                            }
-                        });
-                    }
-                }
+                // Render the PDF viewer component
+                self.pdf_viewer.render(ui);
             });
         
         // RIGHT PANEL SECOND (CentralPanel gets remaining space)
