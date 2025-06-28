@@ -56,7 +56,7 @@ impl NativeExtractor {
         let start_time = std::time::Instant::now();
         
         let document = self.pdfium
-            .load_pdf_from_file(pdf_path, None)
+            .load_pdf_from_file(pdf_path.as_ref(), None)
             .map_err(|e| anyhow!("Failed to load PDF: {}", e))?;
 
         let total_pages = document.pages().len();
@@ -88,7 +88,7 @@ impl NativeExtractor {
             }
 
             let page_extraction = NativePageExtraction {
-                page_number: page_index + 1,
+                page_number: page_index as usize + 1,
                 text,
                 word_count,
                 character_count,
@@ -107,7 +107,7 @@ impl NativeExtractor {
             tool: "native-pdfium".to_string(),
             extractions,
             metadata: NativeExtractionMetadata {
-                total_pages,
+                total_pages: total_pages as usize,
                 total_words,
                 total_characters,
                 processing_time_ms,
@@ -124,17 +124,17 @@ impl NativeExtractor {
         let start_time = std::time::Instant::now();
         
         let document = self.pdfium
-            .load_pdf_from_file(pdf_path, None)
+            .load_pdf_from_file(pdf_path.as_ref(), None)
             .map_err(|e| anyhow!("Failed to load PDF: {}", e))?;
 
         let total_pages = document.pages().len();
         
-        if page_num == 0 || page_num > total_pages {
+        if page_num == 0 || page_num > total_pages as usize {
             return Err(anyhow!("Invalid page number: {}. Document has {} pages.", page_num, total_pages));
         }
 
         let page_index = page_num - 1; // Convert to 0-based index
-        let page = document.pages().get(page_index)
+        let page = document.pages().get(page_index as u16)
             .map_err(|e| anyhow!("Failed to get page {}: {}", page_num, e))?;
 
         let text = page.text()
@@ -162,7 +162,7 @@ impl NativeExtractor {
             tool: "native-pdfium".to_string(),
             extractions: vec![page_extraction],
             metadata: NativeExtractionMetadata {
-                total_pages,
+                total_pages: total_pages as usize,
                 total_words: word_count,
                 total_characters: character_count,
                 processing_time_ms,
@@ -179,7 +179,7 @@ impl NativeExtractor {
         let start_time = std::time::Instant::now();
         
         let document = self.pdfium
-            .load_pdf_from_bytes(pdf_bytes, None)
+            .load_pdf_from_byte_slice(pdf_bytes, None)
             .map_err(|e| anyhow!("Failed to load PDF from bytes: {}", e))?;
 
         let total_pages = document.pages().len();
@@ -208,7 +208,7 @@ impl NativeExtractor {
             }
 
             let page_extraction = NativePageExtraction {
-                page_number: page_index + 1,
+                page_number: page_index as usize + 1,
                 text,
                 word_count,
                 character_count,
@@ -227,7 +227,7 @@ impl NativeExtractor {
             tool: "native-pdfium".to_string(),
             extractions,
             metadata: NativeExtractionMetadata {
-                total_pages,
+                total_pages: total_pages as usize,
                 total_words,
                 total_characters,
                 processing_time_ms,
@@ -243,17 +243,13 @@ impl NativeExtractor {
     fn page_has_images(&self, page: &PdfPage) -> bool {
         // Simple heuristic: check if page has objects that might be images
         // This is a simplified approach - full image detection would be more complex
-        match page.objects() {
-            Ok(objects) => {
-                for object in objects.iter() {
-                    if matches!(object.object_type(), PdfPageObjectType::Image) {
-                        return true;
-                    }
-                }
-                false
+        let objects = page.objects();
+        for object in objects.iter() {
+            if matches!(object.object_type(), PdfPageObjectType::Image) {
+                return true;
             }
-            Err(_) => false, // If we can't check objects, assume no images
         }
+        false
     }
 
     /// Get text extraction quality score
@@ -293,7 +289,8 @@ impl NativeExtractor {
         };
 
         // Combine scores
-        (word_length_score * 0.6 + content_density_score * 0.4).min(1.0)
+        let combined_score: f64 = word_length_score * 0.6 + content_density_score * 0.4;
+        combined_score.min(1.0)
     }
 
     /// Convert to compatible format with existing extractor
