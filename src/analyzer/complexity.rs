@@ -10,13 +10,20 @@ pub struct ComplexityAnalyzer {
 
 #[derive(Debug, Clone)]
 pub struct ComplexityScore {
-    pub score: f64,           // 0.0 - 10.0 scale
-    pub page_count: u16,
-    pub has_tables: bool,
-    pub has_images: bool,
-    pub has_forms: bool,
-    pub text_density: f64,
+    pub score: f32,           // 0.0 - 10.0 scale
+    pub factors: ComplexityFactors,
+    pub reasoning: String,
     pub should_use_fast_path: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct ComplexityFactors {
+    pub page_count: usize,
+    pub has_images: bool,
+    pub has_tables: bool,
+    pub has_forms: bool,
+    pub file_size_mb: f32,
+    pub has_multiple_columns: bool,
 }
 
 impl ComplexityAnalyzer {
@@ -101,13 +108,29 @@ impl ComplexityAnalyzer {
         
         let should_use_fast_path = score < self.complexity_threshold;
 
-        Ok(ComplexityScore {
-            score,
-            page_count,
-            has_tables,
+        // Get file size
+        let file_size_mb = std::fs::metadata(path.as_ref())
+            .map(|metadata| metadata.len() as f32 / 1_048_576.0)
+            .unwrap_or(0.0);
+        
+        let factors = ComplexityFactors {
+            page_count: page_count as usize,
             has_images,
+            has_tables,
             has_forms,
-            text_density,
+            file_size_mb,
+            has_multiple_columns: false, // TODO: Implement column detection
+        };
+        
+        let reasoning = format!(
+            "Page count: {}, File size: {:.1}MB, Images: {}, Tables: {}",
+            factors.page_count, factors.file_size_mb, factors.has_images, factors.has_tables
+        );
+        
+        Ok(ComplexityScore {
+            score: score as f32,
+            factors,
+            reasoning,
             should_use_fast_path,
         })
     }
@@ -123,6 +146,48 @@ impl ComplexityAnalyzer {
         tab_count > 10 || pipe_count > 5 || lines_with_multiple_spaces > 3
     }
 
+    /// Simple file-based complexity analysis (doesn't require PDFium)
+    pub fn analyze_simple<P: AsRef<Path>>(&self, path: P) -> Result<ComplexityScore> {
+        let path = path.as_ref();
+        let metadata = std::fs::metadata(path)
+            .map_err(|e| anyhow!("Failed to read file metadata: {}", e))?;
+        
+        let file_size_mb = metadata.len() as f32 / 1_048_576.0;
+        
+        // Simple heuristics based on file size only
+        let score = if file_size_mb < 2.0 {
+            2.0  // < 2MB = likely simple
+        } else if file_size_mb < 10.0 {
+            5.0  // 2-10MB = medium complexity
+        } else {
+            8.0  // > 10MB = likely complex
+        };
+        
+        let should_use_fast_path = score <= self.complexity_threshold as f32;
+        
+        let factors = ComplexityFactors {
+            page_count: 0, // Unknown without PDF analysis
+            has_images: false, // Unknown
+            has_tables: false, // Unknown  
+            has_forms: false, // Unknown
+            file_size_mb,
+            has_multiple_columns: false, // Unknown
+        };
+        
+        let reasoning = format!(
+            "File size: {:.1}MB - {} complexity (simple heuristic)",
+            file_size_mb,
+            if score <= 3.0 { "Low" } else if score <= 6.0 { "Medium" } else { "High" }
+        );
+        
+        Ok(ComplexityScore {
+            score,
+            factors,
+            reasoning,
+            should_use_fast_path,
+        })
+    }
+    
     pub fn set_threshold(&mut self, threshold: f64) {
         self.complexity_threshold = threshold;
     }
