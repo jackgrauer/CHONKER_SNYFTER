@@ -2,6 +2,7 @@ use crate::database::{DocumentChunk, ProcessingOptions};
 use crate::error::{ChonkerError, ChonkerResult};
 use crate::complexity::{ComplexityScorer, ExtractionPath};
 use crate::native_extractor::NativeExtractor;
+// TODO: Integrate new FastPathProcessor and ComplexityAnalyzer
 use std::path::Path;
 use std::collections::HashMap;
 use std::time::Instant;
