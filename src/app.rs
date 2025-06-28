@@ -321,15 +321,7 @@ impl ChonkerApp {
                     .join("\n\n")
             }
             Err(e) => {
-                warn!("Python extraction failed: {}, falling back to basic extraction", e);
-                
-                // Fallback to basic extraction if Python bridge fails
-                match pdf_extract::extract_text(file_path) {
-                    Ok(text) => text,
-                    Err(e2) => {
-                        return Err(format!("Both advanced and basic extraction failed. Advanced: {}. Basic: {}. This document might be heavily obfuscated!", e, e2).into());
-                    }
-                }
+                return Err(format!("Advanced extraction failed: {}. Please check if Python dependencies (Docling/Magic-PDF) are installed correctly.", e).into());
             }
         };
         
@@ -729,7 +721,7 @@ impl eframe::App for ChonkerApp {
                         ui.close_menu();
                     }
                     if ui.button("Save Project...").clicked() {
-                        // TODO: Implement save project
+                        self.status_message = "Project saving not yet implemented".to_string();
                         ui.close_menu();
                     }
                     ui.separator();
@@ -751,22 +743,26 @@ impl eframe::App for ChonkerApp {
                 
                 ui.menu_button("View", |ui| {
                     if ui.button("Reset Zoom").clicked() {
-                        // TODO: Implement reset zoom
+                        self.pdf_scroll_offset = egui::Vec2::ZERO;
+                        self.markdown_scroll_offset = egui::Vec2::ZERO;
+                        self.status_message = "View reset".to_string();
                         ui.close_menu();
                     }
                     if ui.button("Refresh").clicked() {
-                        // TODO: Implement refresh
+                        if let Some(ref file) = self.selected_file {
+                            self.start_processing();
+                        }
                         ui.close_menu();
                     }
                 });
                 
                 ui.menu_button("Help", |ui| {
                     if ui.button("About").clicked() {
-                        // TODO: Show about dialog
+                        self.status_message = "CHONKER v10.0 - Advanced PDF Processing with Docling & Magic-PDF".to_string();
                         ui.close_menu();
                     }
                     if ui.button("Keyboard Shortcuts").clicked() {
-                        // TODO: Show shortcuts dialog
+                        self.status_message = "Ctrl+O: Open, Ctrl+P: Process, Ctrl+R: Reset, Ctrl+Q: Quit".to_string();
                         ui.close_menu();
                     }
                 });
