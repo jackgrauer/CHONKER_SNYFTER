@@ -1,148 +1,288 @@
+# CHONKER v10.0 - Hybrid PDF Processing Pipeline
+
+CHONKER, the cutest document processing pipeline, aims to deliver fast and accurate PDF processing with an intuitive interface and modular architecture.
+
+## Features
+
+- **Hybrid Architecture**: Combines Rust and Python for efficient PDF processing and understanding.
+- **Intelligent Routing**: Analyzes complexity to choose the best processing path.
+- **Database Integration**: Stores documents and chunks using SQLite for quick retrieval.
+- **Extensible CLI and TUI**: Provides a command-line and terminal user interface for ease of use.
+- **Data Analysis Ready**: Support for converting extracted content to markdown and further data analysis.
+
+## Usage
+
+1. **Extract Text**:
+   ```bash
+   cargo run -- extract path/to/document.pdf --tool auto
+   ```
+
+2. **Launch TUI**:
+   ```bash
+   cargo run -- tui
+   ```
+
+3. **Check Database Status**:
+   ```bash
+   cargo run -- status
+   ```
+
+## Design Philosophy
+
+CHONKER is built with investigative journalism in mind, providing:
+
+- **Accuracy and Transparency**: No AI hallucinations; what you see is what you extracted.
+- **Correctability**: Easily correct extraction errors within the interface.
+- **Learnability**: System adapts to user corrections for improved future extractions.
+- **Perfect for Deadline-driven Workflows**: Fast processing paths ensure quick results.
+
+### Innovation
+
+CHONKER is more than just a PDF extractor. It’s:
+
+- A synchronized document viewer supporting PDF to Markdown conversion.
+- An interactive system that learns from user feedback.
+- An integrated workbench for data analysis.
+
+Think Jupyter Notebooks, but starting with PDF extraction, flowing into data analysis, maintaining perfect traceability to the original document.
+cd chonker-snyfter
+
+# Install dependencies
+pip install -r requirements.txt
+
+# Set your API key for SNYFTER
+export ANTHROPIC_API_KEY=sk-ant-your-key-here
 ```
-  <\___/>
-  [o-·-o]  CHONKER v10.0 - The Cutest Document Processing Pipeline!
-  (")~(") 
+
+### Basic Usage
+
+1. **Process a document with CHONKER:**
+   ```bash
+   python chonker.py
+   # Then: load document.pdf
+   ```
+
+2. **Extract data with SNYFTER:**
+   ```bash
+   python snyfter.py
+   # Then: load → classify → extract → export
+   ```
+
+## 📋 Features
+
+### 🐹 CHONKER v6.0
+- **Live Monitoring** - Real-time progress with anxiety-reducing heartbeat display
+- **Smart Document Processing** - Docling integration with graceful fallbacks
+- **Intelligent Chunking** - Respects word boundaries, optimized for AI processing
+- **Entity Extraction** - 8 robust patterns (emails, phones, chemicals, etc.)
+- **Keep-Awake System** - Prevents computer sleep during long processing
+- **Cross-Platform** - Works on macOS, Windows, and Linux
+- **Database Integration** - Optional DuckDB storage and search
+
+### 🐭 SNYFTER v9.1
+- **Adaptive Schema Discovery** - AI learns document structure as it processes
+- **Two-Pass AI Processing** - Classification → Extraction pipeline
+- **Multiple Export Formats** - CSV, Excel, JSON with auto-generated loading scripts
+- **Step-by-Step Interface** - Build extraction pipeline incrementally
+- **Custom Configuration** - Tailored extraction rules and focus areas
+- **Data Type Detection** - Environmental, financial, tabular data recognition
+
+## 🔧 Detailed Usage
+
+### CHONKER Commands
+
+| Command | Description |
+|---------|-------------|
+| `load` | Show available documents or load specific file |
+| `load <filename>` | Process document with live monitoring |
+| `list` | Show created chunks with previews |
+| `show <n>` | Open specific chunk in editor |
+| `search <term>` | Search entities across chunks |
+| `info` | Display document processing summary |
+| `export` | Export chunks for SNYFTER integration |
+| `help` | Show all commands |
+
+### SNYFTER Pipeline
+
+1. **Load Chunks** (`load`)
+   - Automatically finds CHONKER output
+   - Supports loading specific chunks or ranges
+   - Preview functionality to inspect content
+
+2. **Classify Content** (`classify`)
+   - AI-powered content type discovery
+   - Adaptive schema that learns document patterns
+   - Confidence scoring and reasoning
+
+3. **Extract Data** (`extract`)
+   - Structured data extraction based on classifications
+   - Environmental, financial, and tabular data support
+   - Automatic pattern recognition
+
+4. **Configure Rules** (`config`) - Optional
+   - Custom extraction instructions
+   - Priority entity selection
+   - Output format preferences
+
+5. **Export Results** (`export`)
+   - Python-ready datasets (CSV/Excel/JSON)
+   - Auto-generated loading scripts
+   - Summary reports
+
+## 📁 Project Structure
+
+```
+project/
+├── chonker.py              # Main CHONKER application
+├── snyfter.py              # Main SNYFTER application
+├── requirements.txt        # Python dependencies
+├── README.md              # This file
+├── saved_chonker_chunks/  # CHONKER output directory
+│   ├── chunk_1.txt
+│   ├── chunk_2.txt
+│   └── ...
+└── snyfter_output/        # SNYFTER export directory
+    └── export_YYYYMMDD_HHMMSS/
+        ├── environmental_data.csv
+        ├── load_datasets.py
+        └── extraction_summary.txt
 ```
 
-**Ultra-fast CLI-First system for adversarial PDF processing with spatial intelligence**
+## 🔑 API Key Setup
 
-## Current Status ✅
+SNYFTER requires an Anthropic API key for AI classification and extraction:
 
-- **Working PDF processor** - Real text extraction from PDFs
-- **Native file picker** - macOS file dialog integration
-- **Terminal UI** - Clean ratatui interface with navigation
-- **Basic chunking** - Splits PDFs into manageable chunks
-- **Modular architecture** - Separate app/ui/processing/database modules
-- **SQLite ready** - Database support implemented (not connected yet)
+1. Get your API key: https://console.anthropic.com/
+2. Set environment variable:
+   ```bash
+   # Linux/macOS
+   export ANTHROPIC_API_KEY=sk-ant-your-key-here
+   
+   # Windows
+   set ANTHROPIC_API_KEY=sk-ant-your-key-here
+   ```
+3. Test with: `python snyfter.py` then `apikey`
 
-## How to Run
+## 🚨 Troubleshooting
+
+### Common Issues
+
+**CHONKER:**
+- **Docling slow/hanging** → Press Ctrl+C to use fallback processing
+- **No chunks found** → Check file permissions and supported formats
+- **Memory issues** → Process smaller files or increase system RAM
+
+**SNYFTER:**
+- **API key errors** → Run `apikey` command to test configuration
+- **No chunks found** → Ensure CHONKER has been run first
+- **Classification fails** → Check internet connection and API key validity
+
+### File Format Support
+
+**CHONKER Supported Formats:**
+- PDF (Docling + PyPDF2 fallback)
+- DOCX (Docling)
+- TXT, MD (native)
+
+**Output Formats:**
+- CHONKER: Text chunks in `saved_chonker_chunks/`
+- SNYFTER: CSV, Excel, JSON with loading scripts
+
+## 🔧 Advanced Configuration
+
+### Environment Variables
 
 ```bash
-cargo run
+# Custom chunk output directory
+export CHONKER_OUTPUT_DIR=/path/to/chunks
+
+# API configuration
+export ANTHROPIC_API_KEY=sk-ant-your-key
 ```
 
-**Controls:**
-- `Tab` - Navigate between panes
-- `Enter` - Open file picker (File Selection) or Process (Action)
-- `Space` - Toggle OCR options
-- `Up/Down` - Navigate chunks in preview
-- `q` or `Esc` - Quit
+### Custom Extraction Patterns
 
-## Next Steps 🚀
+CHONKER includes these entity patterns by default:
+- Email addresses
+- Phone numbers
+- Dates
+- Sample IDs
+- Chemical names
+- Concentrations
+- Numbers
 
-### Phase 1: Core Features
-- [ ] Connect SQLite database for persistence
-- [ ] Add PDF page visualization in viewer pane
-- [ ] Implement OCR for scanned PDFs
-- [ ] Enhanced chunking with spatial intelligence
+Add custom patterns by modifying the `SimpleEntityExtractor` class.
 
-### Phase 2: MLX Integration
-- [ ] Apple MLX acceleration for OCR
-- [ ] Spatial layout analysis
-- [ ] Formula detection with ML
-- [ ] Table structure recognition
+## 🤝 Integration Workflow
 
-### Phase 3: Advanced Features
-- [ ] Export to markdown/text
-- [ ] Search across processed documents
-- [ ] Batch processing
-- [ ] SNYFTER companion app for retrieval
+1. **Document Processing**
+   ```bash
+   python chonker.py
+   > load environmental_report.pdf
+   ```
 
-## Architecture
+2. **Data Extraction**
+   ```bash
+   python snyfter.py
+   > load
+   > classify
+   > extract
+   > export csv
+   ```
 
+3. **Use Extracted Data**
+   ```python
+   # Auto-generated by SNYFTER
+   exec(open('snyfter_output/export_*/load_datasets.py').read())
+   
+   # Your data is now available
+   environmental_data.head()
+   ```
+
+## 📊 Example Output
+
+**CHONKER Processing:**
+- Input: `environmental_report.pdf` (2.3 MB)
+- Output: 15 chunks, 127 entities found
+- Processing time: 23.4s with live monitoring
+
+**SNYFTER Extraction:**
+- Discovered data types: environmental_lab_results, monitoring_well_coordinates
+- Extracted datasets: environmental_data (156 rows × 6 columns)
+- Export: CSV + loading script + summary
+
+## 🐛 Development
+
+### Running Tests
+```bash
+# Test CHONKER processing
+python chonker.py
+> load test_document.pdf
+
+# Test SNYFTER pipeline
+python snyfter.py
+> apikey  # Verify API setup
+> load
+> status  # Check pipeline status
 ```
-src/
-├── main.rs        # Terminal setup & event loop
-├── app.rs         # Core application state & logic
-├── ui.rs          # TUI layout & rendering
-├── processing.rs  # PDF processing & chunking
-└── database.rs    # SQLite storage (ready)
-```
 
-## Dependencies
+### Contributing
+1. Fork the repository
+2. Create feature branch
+3. Test with sample documents
+4. Submit pull request
 
-- `ratatui` - Terminal UI framework
-- `pdf-extract` - PDF text extraction
-- `rfd` - Native file dialogs
-- `rusqlite` - SQLite database
-- `crossterm` - Terminal control
+## 📄 License
 
-## Design Philosophy & Vision 🎯
+[Specify your license here]
 
-### The Problem: Journalism Under Pressure
+## 🆘 Support
 
-Journalists receive massive policy documents - think 300-page government reports filled with tables, statistics, and arguments buried in dense text. Under deadline pressure, they need to:
-
-- **Extract all the data accurately**
-- **Understand the arguments being made** 
-- **Test and verify the claims with the data**
-
-Current tools fail because they either just extract text (missing the data) or they use AI that might hallucinate (unacceptable for journalism).
-
-### The Solution: A Three-Stage Workflow
-
-#### Stage 1: Interactive Extraction
-Imagine a split-screen interface:
-
-- **Left pane:** The original PDF document
-- **Right pane:** The extracted content in markdown
-
-**Key features:**
-- Click on a table in the PDF, it highlights in the markdown
-- Click on text in markdown, it highlights in the PDF  
-- When extraction is wrong (and it often is), click and correct it
-- The system learns from corrections for better future extractions
-
-*This is what MinerU tries to do but fails at - they show you errors but don't let you fix them.*
-
-#### Stage 2: The Sliding Transition
-Once the journalist is satisfied with extraction accuracy, they "slide" the interface:
-
-- The PDF view slides off to the left
-- The extracted database moves to the left pane
-- A new analysis pane appears on the right
-
-This creates a seamless workflow from extraction to analysis.
-
-#### Stage 3: Data Analysis Mode
-Now the interface shows:
-
-- **Left pane:** All extracted data as queryable datasets (using Polars)
-- **Right pane:** Live code editor for data analysis
-
-The journalist can:
-- Query the data directly
-- Test claims made in the document
-- Create visualizations
-- Export findings
-
-Crucially, if they spot something wrong in the data, they can "slide back" to extraction mode to fix it.
-
-### Why This Matters
-
-- **Accuracy:** No AI hallucinations - journalists see exactly what was extracted
-- **Correctability:** Unlike existing tools, errors can be fixed on the spot
-- **Learnability:** The system improves from corrections
-- **Verifiability:** Direct path from PDF source to data analysis
-- **Speed:** Optimized for deadline-driven journalism
-
-### The Technical Innovation
-This isn't just another PDF extractor. It's:
-
-- A synchronized document viewer (PDF ↔ Markdown)
-- An interactive correction system that learns
-- A data analysis workbench built into the same tool
-- A sliding interface that maintains context between stages
-
-Think of it as building **Jupyter Notebooks specifically for investigative data journalism**, where the "notebook" starts with PDF extraction and flows naturally into data analysis, all while maintaining perfect traceability back to the source document.
-
-The name **CHONKER** reflects handling these massive, chunky policy documents, while **"snyfter"** (the analysis component) helps journalists sniff out the real story in the data.
+- **Issues**: Create GitHub issue with error logs
+- **API Problems**: Check Anthropic console and billing
+- **Performance**: Monitor system resources during processing
 
 ---
 
-## Current Implementation Status ✅
-
-This is a working foundation! The basic PDF processing pipeline is complete.
-Ready to add MLX acceleration and advanced spatial features.
-
-**For journalists fighting adversarial PDFs** 📰⚔️
+**🎯 Built for anxiety-free document processing with live monitoring and intelligent data extraction.**
+>>>>>>> bc336c5a2d5c61d9d6676f7e7652451fb76fbbbc
