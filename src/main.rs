@@ -5,6 +5,7 @@ mod database;
 mod error;
 mod logging;
 mod extractor;
+mod native_extractor;
 mod processing;
 mod complexity;
 mod tui;

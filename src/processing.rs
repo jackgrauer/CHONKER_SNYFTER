@@ -1,6 +1,7 @@
 use crate::database::{DocumentChunk, ProcessingOptions};
 use crate::error::{ChonkerError, ChonkerResult};
 use crate::complexity::{ComplexityScorer, ExtractionPath};
+use crate::native_extractor::NativeExtractor;
 use std::path::Path;
 use std::collections::HashMap;
 use std::time::Instant;
@@ -64,7 +65,7 @@ pub struct ChonkerProcessor {
 
 /// Rust native extractor for fast path
 pub struct RustExtractor {
-    // Will hold pdfium components
+    native_extractor: NativeExtractor,
 }
 
 /// Python bridge for complex processing
@@ -80,8 +81,21 @@ impl Default for ChonkerProcessor {
 
 impl ChonkerProcessor {
     pub fn new() -> Self {
+        // Try to initialize native extractor, but don't fail if PDFium is unavailable
+        let rust_extractor = match RustExtractor::new() {
+            Ok(extractor) => {
+                info!("✅ Native PDF extractor initialized");
+                Some(extractor)
+            }
+            Err(e) => {
+                warn!("⚠️  Native PDF extractor unavailable: {}", e);
+                warn!("📋 Will use Python fallback for all documents");
+                None
+            }
+        };
+        
         Self {
-            rust_extractor: Some(RustExtractor::new()),
+            rust_extractor,
             python_bridge: Some(PythonBridge::new()),
             complexity_scorer: ComplexityScorer::new(),
             processing_cache: HashMap::new(),
@@ -121,9 +135,15 @@ impl ChonkerProcessor {
         // Route to appropriate processing path based on analysis
         let mut result = match complexity_analysis.recommended_path {
             ExtractionPath::Native => {
-                // Fast path - Rust native
-                info!("🚀 Using fast path (Rust native)");
-                self.process_fast_path(file_path, options).await?
+                if self.rust_extractor.is_some() {
+                    // Fast path - Rust native
+                    info!("🚀 Using fast path (Rust native)");
+                    self.process_fast_path(file_path, options).await?
+                } else {
+                    // Fallback to complex path if native extractor unavailable
+                    info!("🧠 Falling back to complex path (native unavailable)");
+                    self.process_complex_path(file_path, options).await?
+                }
             },
             ExtractionPath::Python => {
                 // Complex path decision
@@ -325,26 +345,41 @@ impl ChonkerProcessor {
 }
 
 impl RustExtractor {
-    pub fn new() -> Self {
-        Self {}
+    pub fn new() -> Result<Self, anyhow::Error> {
+        let native_extractor = NativeExtractor::new()?;
+        Ok(Self {
+            native_extractor,
+        })
     }
     
     /// Extract text using Rust native tools (pdfium-render)
     pub async fn extract_text(&self, file_path: &Path) -> ChonkerResult<Vec<DocumentChunk>> {
         debug!("🔍 Rust native extraction: {:?}", file_path);
         
-        // TODO: Implement pdfium-render integration
-        // For now, return mock data
-        let chunks = vec![
-            DocumentChunk {
-                id: 1,
-                content: format!("🐹 CHONKER native processed: {:?}", file_path.file_name()),
-                page_range: "1".to_string(),
-                element_types: vec!["paragraph".to_string()],
-                spatial_bounds: Some("{\"x\": 0, \"y\": 0, \"width\": 100, \"height\": 20}".to_string()),
-                char_count: 50,
-            },
-        ];
+        // Use the actual native extractor
+        let result = self.native_extractor.extract_pdf(file_path)
+            .map_err(|e| ChonkerError::SystemResource {
+                resource: "native_extractor".to_string(),
+                source: Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())),
+            })?;
+        
+        // Convert NativeExtractor results to DocumentChunk format
+        let mut chunks = Vec::new();
+        for (idx, page_extraction) in result.extractions.iter().enumerate() {
+            if !page_extraction.text.trim().is_empty() {
+                chunks.push(DocumentChunk {
+                    id: (idx + 1) as i64,
+                    content: page_extraction.text.clone(),
+                    page_range: page_extraction.page_number.to_string(),
+                    element_types: vec!["text".to_string()],
+                    spatial_bounds: None, // Native extractor doesn't provide detailed bounds
+                    char_count: page_extraction.character_count as i64,
+                });
+            }
+        }
+        
+        info!("✅ Native extraction completed: {} pages, {} chunks", 
+              result.metadata.total_pages, chunks.len());
         
         Ok(chunks)
     }
