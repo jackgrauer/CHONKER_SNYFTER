@@ -13,6 +13,7 @@ mod markdown;
 mod export;
 mod pdf;
 mod analyzer;
+mod config;
 
 use clap::{Parser, Subcommand};
 use anyhow::Result;
