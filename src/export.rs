@@ -4,6 +4,9 @@ use std::path::Path;
 use tracing::info;
 use crate::database::ChonkerDatabase;
 
+mod parquet_exporter;
+pub use parquet_exporter::{ParquetExporter, ParquetExportOptions, CompressionType};
+
 /// DataFrame exporter for various output formats
 pub struct DataFrameExporter {
     database: ChonkerDatabase,

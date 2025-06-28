@@ -25,6 +25,8 @@ tokio = { version = "1", features = ["full"] }
 
 # Data processing and export
 polars = { version = "0.35", features = ["lazy", "json", "parquet", "csv"] }
+arrow = { version = "53.0", features = ["csv", "json"] }
+parquet = { version = "53.0", features = ["arrow", "async"] }
 
 # Markdown processing
 pulldown-cmark = "0.10"
