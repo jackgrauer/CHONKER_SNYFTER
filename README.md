@@ -3,7 +3,7 @@
 ![Development Status](https://img.shields.io/badge/status-beta-blue)
 ![Rust](https://img.shields.io/badge/rust-1.70%2B-orange)
 ![Python](https://img.shields.io/badge/python-3.8%2B-blue)
-![Phase](https://img.shields.io/badge/phase-2%2F5%20complete-green)
+![Phase](https://img.shields.io/badge/phase-3%2F5%20in%20progress-yellow)
 
 ```
   \___/>
@@ -43,9 +43,12 @@
 - ✅ **Python Compatibility**: Verified with pandas, polars, pyarrow ecosystems
 
 ### 🚧 Phase 3 In Progress: Enhanced TUI
-- 🔄 **Interactive Search**: FTS5 search interface within TUI
+- ✅ **TUI Mockup Complete**: Comprehensive 3-view design (Files/Processing/Data)
+- ✅ **Processing Simulation**: Interactive document processing workflow
+- ✅ **Auto-Verification**: AI-powered confidence scoring and review system
+- ✅ **Data Basket**: Verified chunk collection and management
+- 🔄 **Live Integration**: Connect mockup to real processing pipeline
 - 🔄 **Export Controls**: GUI-based export configuration
-- 🔄 **Progress Bars**: Real-time processing status
 - 🔄 **Configuration Editor**: Settings management in TUI
 
 ### 📅 Phase 4-5 Planned
@@ -164,6 +167,22 @@ python python/chonker.py
 python python/snyfter.py
 ```
 
+### TUI Mockup Demo ✅
+```bash
+# Try the complete TUI design mockup (standalone)
+cargo run --bin tui_mockup
+
+# Controls:
+# - Ctrl+Q: Exit
+# - 1,2,3: Switch between Files/Processing/Data views
+# - Arrow keys: Navigate
+# - Enter: Process/view documents
+# - Space: Advance processing simulation
+# - e: Toggle edit mode (in Data view)
+# - v: Toggle verification overlay
+# - ?: Show help
+```
+
 ### Testing & Validation ✅
 ```bash
 # Run comprehensive test suite
@@ -200,11 +219,13 @@ cargo run -- extract simple.pdf --tool rust --store
 - **Error Handling**: Graceful fallbacks, comprehensive error recovery
 - **Testing Framework**: Unit, integration, and load testing
 
-### ✅ TUI Navigation
-- **4 Tab Interface**: Documents, Processing, Export, Settings
-- **Document Browser**: View, select, delete documents
-- **Keyboard Navigation**: Tab/Shift+Tab between views, arrow keys for selection
-- **Status Updates**: Real-time feedback and help messages
+### ✅ TUI Features (As of Latest Commit)
+- **Complete TUI Mockup**: 3-view interface (Files/Processing/Data) with realistic workflow
+- **Interactive Processing**: Full simulation of document processing pipeline
+- **Auto-Verification System**: AI-powered confidence scoring and flagged content review
+- **Data Basket Concept**: Collection and management of verified data chunks
+- **Advanced Navigation**: Context-sensitive help, keyboard shortcuts, overlay panels
+- **Edit Mode**: Markdown editing with explain functionality for OCR corrections
 
 ### ⚠️ Current Limitations
 - **Fast Rust Path**: Requires PDFium library installation (falls back to Python)
