@@ -325,18 +325,18 @@ impl ChonkerProcessor {
     }
 
     pub fn extract_text_with_ocr(&self, _page_data: &[u8]) -> Result<String, Box<dyn std::error::Error>> {
-        // TODO: Implement OCR with MLX acceleration
-        Ok("OCR extracted text".to_string())
+        // OCR not yet implemented - return empty string instead of fake data
+        Ok(String::new())
     }
 
     pub fn detect_formulas(&self, _text: &str) -> Vec<String> {
-        // TODO: Implement formula detection
-        vec!["E=mc²".to_string()]
+        // Formula detection not yet implemented - return empty vector instead of fake data
+        vec![]
     }
 
     pub fn detect_tables(&self, _page_data: &[u8]) -> Vec<String> {
-        // TODO: Implement table detection
-        vec!["Table structure detected".to_string()]
+        // Table detection not yet implemented - return empty vector instead of fake data
+        vec![]
     }
 
     pub fn apply_spatial_chunking(&self, _elements: &[String]) -> Vec<DocumentChunk> {
@@ -387,14 +387,14 @@ impl RustExtractor {
     
     /// Extract tables using heuristics
     pub fn extract_tables(&self, _page_data: &[u8]) -> ChonkerResult<Vec<String>> {
-        // TODO: Implement table detection heuristics
-        Ok(vec!["Table detected".to_string()])
+        // Table detection heuristics not yet implemented - return empty vector instead of fake data
+        Ok(vec![])
     }
     
     /// Basic layout detection
     pub fn detect_layout(&self, _page_data: &[u8]) -> ChonkerResult<Vec<String>> {
-        // TODO: Implement layout detection
-        Ok(vec!["Single column".to_string()])
+        // Layout detection not yet implemented - return empty vector instead of fake data
+        Ok(vec![])
     }
 }
 
@@ -413,28 +413,72 @@ impl PythonBridge {
     ) -> ChonkerResult<Vec<DocumentChunk>> {
         debug!("🧠 Python ML extraction: {:?}", file_path);
         
-        // TODO: Implement actual Python bridge using PyO3
-        // For now, return mock data that simulates ML extraction
-        let chunks = vec![
-            DocumentChunk {
-                id: 1,
-                content: format!("🧠 ML enhanced extraction: {:?}", file_path.file_name()),
-                page_range: "1".to_string(),
-                element_types: vec!["heading".to_string(), "paragraph".to_string(), "table".to_string()],
-                spatial_bounds: Some("{\"x\": 0, \"y\": 0, \"width\": 200, \"height\": 300}".to_string()),
-                char_count: 150,
-            },
-            DocumentChunk {
-                id: 2,
-                content: "Advanced table structure detected with ML".to_string(),
-                page_range: "1".to_string(),
-                element_types: vec!["table".to_string()],
-                spatial_bounds: Some("{\"x\": 0, \"y\": 320, \"width\": 200, \"height\": 100}".to_string()),
-                char_count: 45,
-            },
-        ];
+        // Use the actual Python extraction script
+        let mut extractor = crate::extractor::Extractor::new();
+        
+        let extraction_result = extractor.extract_pdf(&file_path.to_path_buf()).await
+            .map_err(|e| ChonkerError::PdfProcessing {
+                message: format!("Python extraction failed: {}", e),
+                source: None,
+            })?;
+        
+        if !extraction_result.success {
+            return Err(ChonkerError::PdfProcessing {
+                message: extraction_result.error.unwrap_or_else(|| "Unknown error".to_string()),
+                source: None,
+            });
+        }
+        
+        // Convert Python extraction results to DocumentChunk format
+        let mut chunks = Vec::new();
+        for (idx, page_extraction) in extraction_result.extractions.iter().enumerate() {
+            // Only create chunks if there's actual content
+            if !page_extraction.text.trim().is_empty() {
+                chunks.push(DocumentChunk {
+                    id: (idx + 1) as i64,
+                    content: page_extraction.text.clone(),
+                    page_range: page_extraction.page_number.to_string(),
+                    element_types: self.detect_element_types(&page_extraction.text),
+                    spatial_bounds: if !page_extraction.layout_boxes.is_empty() {
+                        Some(serde_json::to_string(&page_extraction.layout_boxes).unwrap_or_default())
+                    } else {
+                        None
+                    },
+                    char_count: page_extraction.text.chars().count() as i64,
+                });
+            }
+        }
+        
+        // If no text content was found, don't create fake chunks
+        if chunks.is_empty() {
+            info!("📄 No extractable text content found in PDF");
+        } else {
+            info!("✅ Python extraction completed: {} chunks from {} pages", 
+                  chunks.len(), extraction_result.metadata.total_pages);
+        }
         
         Ok(chunks)
+    }
+    
+    /// Detect element types from text content
+    fn detect_element_types(&self, text: &str) -> Vec<String> {
+        let mut types = Vec::new();
+        
+        if text.lines().any(|line| line.trim().starts_with('#')) {
+            types.push("heading".to_string());
+        }
+        if text.contains('|') && text.lines().any(|line| line.matches('|').count() > 1) {
+            types.push("table".to_string());
+        }
+        if !text.trim().is_empty() {
+            types.push("text".to_string());
+        }
+        
+        if types.is_empty() {
+            types.push("unknown".to_string());
+        }
+        
+        types
     }
 }
 
