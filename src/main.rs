@@ -6,6 +6,7 @@ mod error;
 mod logging;
 mod extractor;
 mod native_extractor;
+mod hybrid_extractor;
 mod processing;
 mod complexity;
 mod tui;

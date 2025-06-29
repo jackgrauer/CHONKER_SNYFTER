@@ -9,13 +9,13 @@ pub struct ComplexityScorer {
     pub text_ratio_threshold: f64,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum ExtractionPath {
     Native,    // Fast Rust path for simple documents
     Python,    // Complex ML path for advanced documents
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ComplexityAnalysis {
     pub score: f64,               // 0.0 = simple, 1.0 = very complex
     pub recommended_path: ExtractionPath,

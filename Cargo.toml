@@ -9,6 +9,14 @@ authors = ["Jack <jack@chonker.ai>"]
 name = "chonker"
 path = "src/main.rs"
 
+[[bin]]
+name = "tui_mockup"
+path = "tui_mockup.rs"
+
+[[bin]]
+name = "minimal_tui"
+path = "minimal_tui.rs"
+
 [features]
 default = []
 debug = []

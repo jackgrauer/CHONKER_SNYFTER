@@ -119,9 +119,13 @@ impl ExtractionCache {
     }
 
     fn clear_expired(&mut self) {
-        let now = std::time::Instant::now();
-        self.native_cache.retain(|_, (_, timestamp)| !self.is_expired(*timestamp));
-        self.python_cache.retain(|_, (_, timestamp)| !self.is_expired(*timestamp));
+        let ttl_seconds = self.ttl_seconds;
+        self.native_cache.retain(|_, (_, timestamp)| {
+            timestamp.elapsed().as_secs() <= ttl_seconds
+        });
+        self.python_cache.retain(|_, (_, timestamp)| {
+            timestamp.elapsed().as_secs() <= ttl_seconds
+        });
     }
 
     fn stats(&self) -> (usize, usize) {

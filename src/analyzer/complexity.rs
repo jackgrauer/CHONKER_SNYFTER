@@ -8,7 +8,7 @@ pub struct ComplexityAnalyzer {
     pub complexity_threshold: f64,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ComplexityScore {
     pub score: f32,           // 0.0 - 10.0 scale
     pub factors: ComplexityFactors,
@@ -16,7 +16,7 @@ pub struct ComplexityScore {
     pub should_use_fast_path: bool,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ComplexityFactors {
     pub page_count: usize,
     pub has_images: bool,
