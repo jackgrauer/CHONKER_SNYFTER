@@ -23,6 +23,7 @@
 - **⚙️ Docling v2 Enhanced**: Advanced OCR, table detection, and formula recognition
 - **📊 Structure Preservation**: Maintains complex table layouts, formulas, and metadata
 - **🎯 Pattern Recognition**: Detects repeating column structures (Concentration|Qualifier|RL|MDL)
+- **🐹 Interactive PDF Viewer**: Fast Rust-based GUI for side-by-side PDF and markdown preview
 
 ## 📊 Phase 2 Complete: Production-Ready Core System
 
@@ -139,6 +140,54 @@ CHONKER_SNYFTER uses a hybrid Rust-Python architecture:
 - **Export Performance**: ~500ms for both CSV and Parquet
 - **Memory Efficiency**: 9.2MB peak footprint, 8,937 page reclaims
 - **Compression**: Parquet files 73% smaller than equivalent CSV
+
+## 🐹 Interactive PDF Viewer
+
+**NEW in v11.0**: Fast Rust-based GUI for side-by-side PDF and markdown comparison!
+
+### Features
+- **🖼️ True PDF Rendering**: Displays actual PDF pages as images (like Adobe)
+- **📝 Live Markdown Preview**: Side-by-side proposed markdown conversion
+- **⚡ Lightning Fast**: Built in Rust with egui for immediate-mode rendering
+- **🎨 Beautiful UI**: Clean CHONKER branding with hamster emoji
+- **📏 Full-Screen Layout**: Both panes fill the complete screen height
+- **🔄 Independent Scrolling**: Navigate PDF and markdown independently
+- **🎯 Quality Control**: Perfect for validating table extraction before applying changes
+
+### Quick Start
+```bash
+# Build the PDF viewer
+cargo build --bin pdf_viewer --release
+
+# Launch interactive preview (requires input.pdf and proposed_markdown.md)
+./preview_and_confirm.sh
+
+# Or run the viewer directly
+./target/release/pdf_viewer
+```
+
+### Requirements
+- **poppler-utils**: For PDF to image conversion
+```bash
+brew install poppler  # macOS
+# or
+sudo apt-get install poppler-utils  # Ubuntu/Debian
+```
+
+### How It Works
+1. **PDF Conversion**: Uses `pdftoppm` to convert PDF pages to high-quality PNG images
+2. **Image Rendering**: Displays images in left pane with proper scaling
+3. **Markdown Display**: Shows proposed conversion in right pane
+4. **Interactive Review**: Scroll through both to validate extraction quality
+5. **Confirmation**: Terminal prompt to apply or reject changes
+
+### Perfect For
+- **Table Validation**: Ensure complex tables are extracted correctly
+- **Formula Verification**: Check that mathematical formulas are preserved
+- **Layout Review**: Confirm document structure is maintained
+- **Quality Control**: Visual verification before committing changes
+
+---
 
 ## 💻 Usage Examples
 
