@@ -9,8 +9,7 @@ mod native_extractor;
 mod hybrid_extractor;
 mod processing;
 mod complexity;
-mod tui;
-mod markdown;
+mod tui_simple;
 mod export;
 mod pdf;
 mod analyzer;
@@ -63,19 +62,6 @@ enum Commands {
         page: Option<usize>,
     },
     
-    /// Process and correct markdown
-    Process {
-        /// Markdown file path
-        markdown: PathBuf,
-        
-        /// Output file (optional, defaults to processed_markdown.md)
-        #[arg(short, long)]
-        output: Option<PathBuf>,
-        
-        /// Apply corrections/transformations
-        #[arg(long)]
-        correct: bool,
-    },
     
     /// Export data to DataFrame formats
     Export {
@@ -115,8 +101,7 @@ async fn main() -> Result<()> {
         println!("Usage: chonker [OPTIONS] <COMMAND>");
         println!();
         println!("Commands:");
-        println!("  extract  Extract text from PDF to markdown");
-        println!("  process  Process and correct markdown");
+        println!("  extract  Extract text from PDF to markdown with consensus validation");
         println!("  export   Export data to DataFrame formats");
         println!("  tui      Launch interactive TUI");
         println!("  status   Show database status");
@@ -150,16 +135,12 @@ async fn main() -> Result<()> {
             cli::extract_command(pdf, output, tool, store, page, database).await?
         },
         
-        Commands::Process { markdown, output, correct } => {
-            cli::process_command(markdown, output, correct).await?
-        },
-        
         Commands::Export { format, output, doc_id } => {
             cli::export_command(format, output, doc_id, database).await?
         },
         
         Commands::Tui => {
-            tui::run_tui(database).await?
+            tui_simple::run_tui(database).await?
         },
         
         Commands::Status => {

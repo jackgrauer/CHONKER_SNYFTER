@@ -1,9 +1,9 @@
-# CHONKER_SNYFTER v10.0 - Hybrid PDF Processing Pipeline
+# CHONKER_SNYFTER v11.0 - Environmental Lab Document Processing Pipeline
 
-![Development Status](https://img.shields.io/badge/status-beta-blue)
+![Development Status](https://img.shields.io/badge/status-production-green)
 ![Rust](https://img.shields.io/badge/rust-1.70%2B-orange)
 ![Python](https://img.shields.io/badge/python-3.8%2B-blue)
-![Phase](https://img.shields.io/badge/phase-3%2F5%20in%20progress-yellow)
+![Document Aware](https://img.shields.io/badge/document_aware-environmental_labs-brightgreen)
 
 ```
   \___/>
@@ -13,16 +13,16 @@
 
 ## Version Note
 
-**CHONKER_SNYFTER v10.0 is a hybrid Rust-Python application with intelligent document routing and a modern terminal interface.**
+**CHONKER_SNYFTER v11.0 is a document-aware PDF extraction pipeline specifically optimized for environmental laboratory reports with advanced qualifier detection and quality control.**
 
 ## 🚀 Features
 
-- **⚡ Hybrid Architecture**: Sub-10ms fast path for 90% of documents + ML path for complex cases
-- **🧠 Intelligent Routing**: Automatic complexity analysis to choose optimal processing path
-- **💾 Database Integration**: SQLite with full-text search and export capabilities
-- **🖥️ CLI + TUI**: Command-line interface and terminal user interface
-- **📊 Analysis Ready**: Export to CSV/JSON/Parquet for data analysis
-- **🐍 Python Bridge**: Seamless integration with ML tools (Docling, Magic-PDF)
+- **🧪 Environmental Lab Aware**: Specialized for environmental testing reports with qualifier conventions
+- **🔍 Qualifier Detection**: Automatic detection of U/J qualifiers and misplaced values 
+- **📋 Quality Control**: Visual QC reports with Inlyne markdown rendering and grid tables
+- **⚙️ Docling v2 Enhanced**: Advanced OCR, table detection, and formula recognition
+- **📊 Structure Preservation**: Maintains complex table layouts, formulas, and metadata
+- **🎯 Pattern Recognition**: Detects repeating column structures (Concentration|Qualifier|RL|MDL)
 
 ## 📊 Phase 2 Complete: Production-Ready Core System
 
@@ -111,16 +111,16 @@ CHONKER_SNYFTER uses a hybrid Rust-Python architecture:
    - TUI for interactive processing
    - Fast path for simple PDFs (when complete)
 
-2. **Python ML Pipeline** (python/)
-   - Docling integration for complex documents
-   - AI-powered extraction with Anthropic
-   - Advanced table and layout recognition
-   - Fallback processing for unsupported formats
+2. **Enhanced Docling v2 Pipeline** (python/)
+   - Document-aware preprocessing for environmental lab conventions
+   - Advanced table detection with qualifier separation
+   - OCR with multi-language support and formula recognition
+   - Pattern recognition for repeating column structures
 
-3. **Routing Logic**
-   - Simple PDFs → Rust fast path (in development)
-   - Complex documents → Python ML pipeline
-   - Automatic fallback on processing errors
+3. **Single Extraction Path**
+   - All documents → Enhanced Docling v2 with environmental lab awareness
+   - Comprehensive quality control with visual verification
+   - Automatic qualifier detection and correction suggestions
 
 ## ⚡ Performance Metrics (Phase 2 Testing)
 

@@ -3,7 +3,6 @@ use anyhow::Result;
 use tracing::{info, warn, debug};
 use crate::database::{ChonkerDatabase, ProcessingOptions};
 use crate::processing::{ChonkerProcessor, ProcessingResult};
-use crate::markdown::MarkdownProcessor;
 use crate::export::DataFrameExporter;
 use crate::config::{ChonkerConfig, ToolPreference};
 use crate::analyzer::ComplexityAnalyzer;
@@ -103,51 +102,6 @@ pub async fn extract_command(
     Ok(())
 }
 
-/// Process markdown command
-pub async fn process_command(
-    markdown_path: PathBuf,
-    output: Option<PathBuf>,
-    correct: bool,
-) -> Result<()> {
-    info!("📝 Processing markdown: {:?}", markdown_path);
-    
-    if !markdown_path.exists() {
-        return Err(anyhow::anyhow!("Markdown file not found: {:?}", markdown_path));
-    }
-    
-    // Read markdown content
-    let content = std::fs::read_to_string(&markdown_path)?;
-    
-    // Initialize markdown processor
-    let processor = MarkdownProcessor::new();
-    
-    // Process content
-    let processed_content = if correct {
-        processor.apply_corrections(&content)?
-    } else {
-        processor.normalize(&content)?
-    };
-    
-    // Determine output path
-    let output_path = output.unwrap_or_else(|| {
-        let mut path = markdown_path.clone();
-        let stem = path.file_stem().unwrap().to_string_lossy();
-        path.set_file_name(format!("{}_processed.md", stem));
-        path
-    });
-    
-    // Write processed file
-    std::fs::write(&output_path, &processed_content)?;
-    info!("📝 Processed markdown saved to: {:?}", output_path);
-    
-    // Print summary
-    println!("🎉 Processing Complete!");
-    println!("   Input file: {:?}", markdown_path);
-    println!("   Output file: {:?}", output_path);
-    println!("   Corrections applied: {}", if correct { "✅" } else { "❌" });
-    
-    Ok(())
-}
 
 /// Export data to DataFrame formats
 pub async fn export_command(

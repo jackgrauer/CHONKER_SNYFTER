@@ -17,6 +17,18 @@ path = "tui_mockup.rs"
 name = "minimal_tui"
 path = "minimal_tui.rs"
 
+[[bin]]
+name = "table_cleaner"
+path = "src/bin/table_cleaner.rs"
+
+[[bin]]
+name = "clean_tables"
+path = "src/bin/clean_tables.rs"
+
+[[bin]]
+name = "extract_tables"
+path = "src/bin/extract_tables.rs"
+
 [features]
 default = []
 debug = []

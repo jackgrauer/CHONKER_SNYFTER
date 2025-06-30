@@ -71,7 +71,12 @@ impl Extractor {
     }
     
     pub fn set_preferred_tool(&mut self, tool: String) {
-        self.preferred_tool = tool;
+        // Always use consensus for best results
+        self.preferred_tool = if tool == "auto" || tool == "consensus" {
+            "consensus".to_string()
+        } else {
+            tool
+        };
     }
     
     pub async fn extract_pdf(&mut self, pdf_path: &PathBuf) -> Result<ExtractionResult> {
@@ -104,7 +109,7 @@ impl Extractor {
     }
     
     async fn run_python_extraction(&self, pdf_path: &PathBuf, page_num: Option<usize>) -> Result<ExtractionResult> {
-        let mut cmd = Command::new("/Library/Frameworks/Python.framework/Versions/3.12/bin/python3");
+        let mut cmd = Command::new("/Users/jack/CHONKER_SNYFTER/venv/bin/python3");
         cmd.arg(&self.python_script_path);
         cmd.arg(pdf_path);
         cmd.arg("--tool").arg(&self.preferred_tool);
