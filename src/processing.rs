@@ -400,8 +400,31 @@ impl RustExtractor {
 
 impl PythonBridge {
     pub fn new() -> Self {
+        // Use the unified environmental lab extraction bridge
+        let script_path = if let Ok(current_dir) = std::env::current_dir() {
+            let extraction_bridge = current_dir.join("python/extraction_bridge.py");
+            if extraction_bridge.exists() {
+                info!("🧪 Using Docling v2 environmental lab extraction bridge");
+                extraction_bridge
+            } else if let Ok(exe_path) = std::env::current_exe() {
+                let exe_dir = exe_path.parent().unwrap_or_else(|| std::path::Path::new("."));
+                let script_from_exe = exe_dir.join("../../../python/extraction_bridge.py");
+                if script_from_exe.exists() {
+                    info!("🧪 Using extraction bridge from exe path");
+                    script_from_exe
+                } else {
+                    // Fallback to relative path
+                    std::path::PathBuf::from("python/extraction_bridge.py")
+                }
+            } else {
+                std::path::PathBuf::from("python/extraction_bridge.py")
+            }
+        } else {
+            std::path::PathBuf::from("python/extraction_bridge.py")
+        };
+        
         Self {
-            script_path: std::path::PathBuf::from("python/extraction_bridge.py"),
+            script_path,
         }
     }
     

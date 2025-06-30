@@ -2,25 +2,13 @@
 
 **Tool:** python_ml
 **Total Pages:** 1
-**Processing Time:** 74027ms
+**Processing Time:** 82694ms
 **Complexity Score:** 0.10
 **Processing Path:** ComplexPath
 
 ## Chunk 1 (Page 1)
 
 **Elements:** heading, table, text
-
-# Enhanced Environmental Lab Document Analysis
-
-**Qualifier Conventions Detected:**
-- **U**: the compound was undetected at the listed laboratory method detection limit
-
-**Processing Summary:**
-- Tables processed: 23
-- Qualifier issues found: 97
-- Column patterns detected: 0
-
----
 
 Former 51st Street Terminal 1630-1646 South 51st Street Philadelphia, Pennsylvania Facility ID: 51-10420
 
@@ -724,7 +712,7 @@ This Detection Summary does not include radiochemical test results.
 
 15
 
-**Character Count:** 113153
+**Character Count:** 112871
 
 ---
 
