@@ -14,6 +14,7 @@ mod export;
 mod pdf;
 mod analyzer;
 mod config;
+mod smart_column_extractor;
 
 use clap::{Parser, Subcommand};
 use anyhow::Result;
