@@ -8,7 +8,7 @@ use anyhow::{anyhow, Result};
 use std::collections::HashMap;
 
 /// Essential column types for environmental lab data
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum ColumnType {
     Analyte,        // Substance name (Ethylbenzene, Benzene, etc.)
     Concentration,  // Value with embedded qualifier ("0.046 U")
@@ -374,7 +374,7 @@ fn process_essential_data_in_row_chunks(
     
     // Process in chunks of 20 rows
     let chunk_size = 20;
-    let mut all_fixed_rows = vec![header];
+    let mut all_fixed_rows = vec![header.to_string()];
     
     for chunk in data_rows.chunks(chunk_size) {
         let chunk_data = [&[header], chunk].concat().join("\n");
@@ -382,20 +382,20 @@ fn process_essential_data_in_row_chunks(
         if chunk_data.len() < 8000 {
             match qwen_processor(&chunk_data) {
                 Ok(fixed_chunk) => {
-                    // Extract just the data rows (skip header)
-                    let fixed_lines: Vec<&str> = fixed_chunk.lines().collect();
+                    // Extract just the data rows (skip header) and convert to owned strings
+                    let fixed_lines: Vec<String> = fixed_chunk.lines().map(|s| s.to_string()).collect();
                     if fixed_lines.len() > 1 {
-                        all_fixed_rows.extend(&fixed_lines[1..]);
+                        all_fixed_rows.extend_from_slice(&fixed_lines[1..]);
                     }
                 }
                 Err(e) => {
                     eprintln!("⚠️  Chunk processing failed: {}, keeping original", e);
-                    all_fixed_rows.extend(chunk);
+                    all_fixed_rows.extend(chunk.iter().map(|s| s.to_string()));
                 }
             }
         } else {
             eprintln!("⚠️  Chunk still too large, keeping original");
-            all_fixed_rows.extend(chunk);
+            all_fixed_rows.extend(chunk.iter().map(|s| s.to_string()));
         }
     }
     

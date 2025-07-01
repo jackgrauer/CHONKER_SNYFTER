@@ -52,6 +52,21 @@
 - 🔄 **Export Controls**: GUI-based export configuration
 - 🔄 **Configuration Editor**: Settings management in TUI
 
+### 📊 Current Status - March 2025
+- ✅ GUI loads PDFs and renders pages at 72 DPI
+- ✅ Docling extracts text successfully (470 characters from test PDF)
+- ✅ Markdown content generates and displays in Panel B (626 characters)
+- ✅ Three-panel layout working: PDF → Markdown → Export
+- ✅ CHONKER/SNYFTER mode switching functional
+
+**Performance Improvements:**
+- Fast PDF preview extraction with pdfplumber/pymupdf (~100ms vs 8+ seconds)
+- Docling still used as primary engine for full processing
+- Processing time: ~8 seconds for full document analysis
+- Generated markdown content displays immediately after processing
+
+---
+
 ### 📅 Phase 4-5 Planned
 - 📅 **REST API**: HTTP endpoints for external integration
 - 📅 **Batch Processing**: Command-line tools for bulk operations

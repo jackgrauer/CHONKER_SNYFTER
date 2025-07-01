@@ -33,6 +33,10 @@ path = "src/bin/extract_tables.rs"
 name = "pdf_viewer"
 path = "src/bin/pdf_viewer.rs"
 
+[[bin]]
+name = "chonker_gui"
+path = "src/bin/chonker_gui.rs"
+
 [features]
 default = []
 debug = []
@@ -93,6 +97,10 @@ image = "0.25"
 redis = { version = "0.24", optional = true }
 tokio-util = "0.7"
 rayon = "1.8"
+
+# GUI dependencies
+rfd = "0.14"
+arboard = "3.3"
 
 # PyO3 for Python bridge (optional)
 pyo3 = { version = "0.20", features = ["auto-initialize"], optional = true }
