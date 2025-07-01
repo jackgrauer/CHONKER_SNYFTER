@@ -89,7 +89,7 @@ fn apply_retro_theme(ctx: &egui::Context) {
 
 use eframe::egui;
 use std::path::PathBuf;
-use tracing::{info, debug, warn};
+use tracing::{info, debug};
 use crate::error::{ChonkerError, ChonkerResult};
 use crate::log_error;
 use crate::database::ChonkerDatabase;
@@ -97,126 +97,10 @@ use chrono::Utc;
 use crate::pdf_viewer::PdfViewer;
 use crate::markdown_editor::MarkdownEditor;
 use crate::extractor::Extractor;
-use crate::processing::{ChonkerProcessor, ProcessingResult};
+use crate::processing::ChonkerProcessor;
 use crate::sync::SelectionSync;
 use crate::project::Project;
 
-// Simple processor for thread execution
-#[derive(Clone)]
-struct ProcessorForThread {
-    extractor: Extractor,
-}
-
-impl ProcessorForThread {
-    fn process_pdf_threaded(&self, file_path: &std::path::Path, progress_sender: &std::sync::mpsc::Sender<f32>) -> Result<Vec<DocumentChunk>, Box<dyn std::error::Error + Send + Sync>> {
-        // Performance timing
-        let total_start = std::time::Instant::now();
-        println!("🔍 Starting threaded PDF processing for: {:?}", file_path);
-        
-        let _ = progress_sender.send(0.1);
-        
-        // PRIMARY PATH: Always use Docling for full processing (this is our core engine)
-        println!("🧠 Running Docling processing (this is our main engine)...");
-        
-        let path_buf = file_path.to_path_buf();
-        let mut extractor = self.extractor.clone();
-        extractor.set_preferred_tool("auto".to_string());
-        
-        let _ = progress_sender.send(0.3);
-        
-        let extraction_start = std::time::Instant::now();
-        let runtime = tokio::runtime::Runtime::new()?;
-        let extraction_result = runtime.block_on(async {
-            extractor.extract_pdf(&path_buf).await
-        });
-        
-        let _ = progress_sender.send(0.7);
-        
-        println!("🔍 Advanced PDF extraction took: {:?}", extraction_start.elapsed());
-        
-        let text = match extraction_result {
-            Ok(result) => {
-                println!("Extraction successful with tool: {}", result.tool);
-                
-                // Convert extraction result to text
-                result.extractions.iter()
-                    .map(|page| page.text.clone())
-                    .collect::<Vec<_>>()
-                    .join("\n\n")
-            }
-            Err(e) => {
-                return Err(format!("Advanced extraction failed: {}. Please check if Python dependencies (Docling/Magic-PDF) are installed correctly.", e).into());
-            }
-        };
-        
-        let _ = progress_sender.send(0.9);
-        
-        if text.is_empty() {
-            return Err("No text found in PDF - document might be image-based or encrypted. Try enabling OCR!".into());
-        }
-
-        // Simple chunking for threaded processing
-        let chunk_size = 800;
-        let sentences: Vec<&str> = text.split(".")
-            .filter(|s| !s.trim().is_empty() && s.len() > 10)
-            .collect();
-        
-        let mut chunks = Vec::new();
-        let mut current_chunk = String::new();
-        let mut chunk_id = 1;
-        
-        for (i, sentence) in sentences.iter().enumerate() {
-            let sentence_with_period = format!("{}.\n", sentence.trim());
-            
-            if current_chunk.len() + sentence_with_period.len() > chunk_size && !current_chunk.is_empty() {
-                chunks.push(DocumentChunk {
-                    id: chunk_id,
-                    content: current_chunk.trim().to_string(),
-                    page_range: format!("sentences_{}-{}", i.saturating_sub(10), i),
-                    element_types: vec!["text".to_string()],
-                    spatial_bounds: Some(format!("chunk_bounds_{}", chunk_id)),
-                    char_count: current_chunk.trim().len(),
-                });
-                current_chunk.clear();
-                chunk_id += 1;
-            }
-            current_chunk.push_str(&sentence_with_period);
-        }
-
-        // Add final chunk if there's content
-        if !current_chunk.trim().is_empty() {
-            chunks.push(DocumentChunk {
-                id: chunk_id,
-                content: current_chunk.trim().to_string(),
-                page_range: format!("final_chunk_{}", chunk_id),
-                element_types: vec!["text".to_string()],
-                spatial_bounds: Some(format!("chunk_bounds_{}", chunk_id)),
-                char_count: current_chunk.trim().len(),
-            });
-        }
-
-        // Fallback for edge cases
-        if chunks.is_empty() {
-            let text_len = text.len();
-            chunks.push(DocumentChunk {
-                id: 1,
-                content: text,
-                page_range: "full_document".to_string(),
-                element_types: vec!["text".to_string(), "fallback".to_string()],
-                spatial_bounds: Some("full_document_bounds".to_string()),
-                char_count: text_len,
-            });
-        }
-
-        println!("🔍 Total threaded PDF processing took: {:?}", total_start.elapsed());
-        println!("🔍 Generated {} chunks with {} total characters", 
-            chunks.len(), 
-            chunks.iter().map(|c| c.char_count).sum::<usize>()
-        );
-        
-        Ok(chunks)
-    }
-}
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ProcessingOptions {
@@ -318,9 +202,6 @@ pub struct ChonkerApp {
     // App state for loading screen
     pub state: AppState,
     
-    // Processing thread handle
-    pub processing_thread: Option<std::thread::JoinHandle<Result<Vec<DocumentChunk>, String>>>,
-    pub processing_receiver: Option<std::sync::mpsc::Receiver<f32>>,
     
     // Core components
     pub pdf_viewer: PdfViewer,
@@ -370,9 +251,6 @@ impl ChonkerApp {
             // Initialize app state as ready, not loading
             state: AppState::Ready,
             
-            // Initialize processing thread state
-            processing_thread: None,
-            processing_receiver: None,
             
             // Initialize core components
             pdf_viewer: PdfViewer::new(),
@@ -744,66 +622,6 @@ impl ChonkerApp {
         Err("Fast PDF extraction failed - no working libraries found".into())
     }
     
-    /// Simple text chunking without advanced processing
-    fn chunk_text_simple(&self, text: &str) -> Vec<DocumentChunk> {
-        let chunk_size = 1000; // Smaller chunks for better UI performance
-        let mut chunks = Vec::new();
-        let mut chunk_id = 1;
-        
-        // Split by paragraphs first
-        let paragraphs: Vec<&str> = text.split("\n\n")
-            .filter(|p| !p.trim().is_empty())
-            .collect();
-        
-        let mut current_chunk = String::new();
-        let mut paragraph_count = 0;
-        
-        for paragraph in paragraphs {
-            paragraph_count += 1;
-            
-            if current_chunk.len() + paragraph.len() > chunk_size && !current_chunk.is_empty() {
-                chunks.push(DocumentChunk {
-                    id: chunk_id,
-                    content: current_chunk.trim().to_string(),
-                    page_range: format!("paragraphs_{}-{}", paragraph_count - 10, paragraph_count),
-                    element_types: vec!["text".to_string()],
-                    spatial_bounds: Some(format!("fast_chunk_{}", chunk_id)),
-                    char_count: current_chunk.trim().len(),
-                });
-                current_chunk.clear();
-                chunk_id += 1;
-            }
-            
-            current_chunk.push_str(paragraph);
-            current_chunk.push_str("\n\n");
-        }
-        
-        // Add final chunk
-        if !current_chunk.trim().is_empty() {
-            chunks.push(DocumentChunk {
-                id: chunk_id,
-                content: current_chunk.trim().to_string(),
-                page_range: format!("final_paragraphs_{}", paragraph_count),
-                element_types: vec!["text".to_string()],
-                spatial_bounds: Some(format!("fast_chunk_{}", chunk_id)),
-                char_count: current_chunk.trim().len(),
-            });
-        }
-        
-        // Fallback for edge cases
-        if chunks.is_empty() && !text.trim().is_empty() {
-            chunks.push(DocumentChunk {
-                id: 1,
-                content: text.to_string(),
-                page_range: "full_document".to_string(),
-                element_types: vec!["text".to_string(), "fast_extraction".to_string()],
-                spatial_bounds: Some("full_document_bounds".to_string()),
-                char_count: text.len(),
-            });
-        }
-        
-        chunks
-    }
 
     pub fn get_current_chunk(&self) -> Option<&DocumentChunk> {
         self.chunks.get(self.selected_chunk)
@@ -1095,48 +913,6 @@ impl eframe::App for ChonkerApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         apply_retro_theme(ctx);
         
-        // Check for thread progress updates (always)
-        if let Some(ref receiver) = self.processing_receiver {
-            if let Ok(new_progress) = receiver.try_recv() {
-                self.processing_progress = (new_progress * 100.0) as f64;
-            }
-        }
-        
-        // Check if processing thread is done
-        if let Some(handle) = self.processing_thread.take() {
-            if handle.is_finished() {
-                match handle.join() {
-                    Ok(Ok(chunks)) => {
-                        self.chunks = chunks;
-                        self.processing_progress = 100.0;
-                        self.is_processing = false;
-                        self.status_message = format!("✅ Processing complete! {} chunks created", self.chunks.len());
-                        self.state = AppState::Ready;
-                        
-                        // Generate markdown content immediately
-                        self.generate_markdown_from_chunks();
-                        
-                        // Call existing pipeline
-                        self.call_existing_pipeline();
-                    }
-                    Ok(Err(error_msg)) => {
-                        self.is_processing = false;
-                        self.error_message = Some(format!("❌ Processing failed: {}", error_msg));
-                        self.status_message = "❌ Processing failed".to_string();
-                        self.state = AppState::Ready;
-                    }
-                    Err(_) => {
-                        self.is_processing = false;
-                        self.error_message = Some("❌ Processing thread panicked".to_string());
-                        self.status_message = "❌ Processing failed".to_string();
-                        self.state = AppState::Ready;
-                    }
-                }
-            } else {
-                // Put the handle back if not finished
-                self.processing_thread = Some(handle);
-            }
-        }
         
         // Handle Tab key for switching modes
         ctx.input(|i| {
@@ -1928,37 +1704,6 @@ impl ChonkerApp {
         }
     }
     
-    fn update_loading_progress(&mut self) {
-        if let AppState::Loading { progress, message } = &mut self.state {
-            // Only auto-advance if we're in simulation mode, not during real processing
-            if self.processing_progress == 0.0 {
-                match *progress {
-                    p if p < 0.2 => {
-                        *message = "Initializing PDF renderer...".to_string();
-                        *progress += 0.01;
-                    }
-                    p if p < 0.5 => {
-                        *message = "Loading Docling engine...".to_string();
-                        *progress += 0.01;
-                    }
-                    p if p < 0.8 => {
-                        *message = "Processing document structure...".to_string();
-                        *progress += 0.01;
-                    }
-                    p if p < 1.0 => {
-                        *message = "Building coordinate overlays...".to_string();
-                        *progress += 0.01;
-                    }
-                    _ => {
-                        self.state = AppState::Ready;
-                    }
-                }
-            } else {
-                // Use real processing progress
-                *progress = (self.processing_progress / 100.0) as f32;
-            }
-        }
-    }
     
     /// Generate markdown content from processed chunks
     fn generate_markdown_from_chunks(&mut self) {
