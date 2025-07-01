@@ -50,9 +50,7 @@ impl Default for MarkdownEditor {
 
 impl MarkdownEditor {
     pub fn new() -> Self {
-        let mut editor = Self::default();
-        editor.content = "# Markdown Editor\n\nThis is where your extracted and processed markdown content will appear.\n\n## Features:\n- **Bold** and *italic* text\n- Lists and formatting\n- Code blocks\n- Tables\n\n### Getting Started:\n1. Open a PDF file\n2. Click Process or Extract\n3. Edit the results here\n\n---\n\n*Your extracted content will replace this placeholder.*".to_string();
-        editor
+        Self::default()
     }
     
     pub fn set_content(&mut self, content: String) {
@@ -61,75 +59,8 @@ impl MarkdownEditor {
     }
     
     pub fn render(&mut self, ui: &mut egui::Ui) {
-        ui.vertical(|ui| {
-            // Enhanced Toolbar
-            ui.horizontal_wrapped(|ui| {
-                // Edit/Preview toggle
-                if ui.button(if self.preview_mode { "📝 Edit" } else { "👁 Preview" }).clicked() {
-                    self.preview_mode = !self.preview_mode;
-                }
-                
-                ui.separator();
-                
-                // Formatting buttons (only in edit mode)
-                if !self.preview_mode {
-                    if ui.button("**B**").on_hover_text("Bold").clicked() {
-                        self.insert_formatting("**", "**");
-                    }
-                    
-                    if ui.button("*I*").on_hover_text("Italic").clicked() {
-                        self.insert_formatting("*", "*");
-                    }
-                    
-                    if ui.button("`Code`").on_hover_text("Inline Code").clicked() {
-                        self.insert_formatting("`", "`");
-                    }
-                    
-                    ui.separator();
-                    
-                    if ui.button("• List").on_hover_text("Bullet List").clicked() {
-                        self.insert_list_item();
-                    }
-                    
-                    if ui.button("1. Numbered").on_hover_text("Numbered List").clicked() {
-                        self.insert_numbered_list();
-                    }
-                    
-                    if ui.button("# Header").on_hover_text("Header").clicked() {
-                        self.insert_header();
-                    }
-                    
-                    if ui.button("```Code```").on_hover_text("Code Block").clicked() {
-                        self.insert_code_block();
-                    }
-                    
-                    ui.separator();
-                }
-                
-                // Undo/Redo
-                if ui.button("↶").on_hover_text("Undo").clicked() && self.can_undo() {
-                    self.undo();
-                }
-                
-                if ui.button("↷").on_hover_text("Redo").clicked() && self.can_redo() {
-                    self.redo();
-                }
-                
-                ui.separator();
-                
-                // Options
-                ui.checkbox(&mut self.syntax_highlighting, "Syntax");
-            });
-            
-            ui.separator();
-            
-            // Content area
-            if self.preview_mode {
-                self.render_preview(ui);
-            } else {
-                self.render_editor(ui);
-            }
-        });
+        // Simple editor without buttons - just the content
+        self.render_editor(ui);
     }
     
     fn render_editor(&mut self, ui: &mut egui::Ui) {

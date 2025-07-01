@@ -1,72 +1,42 @@
 use egui::*;
 use std::path::{Path, PathBuf};
+use std::process::Command;
+use image;
 use std::collections::HashMap;
-use std::sync::Arc;
-use pdfium_render::prelude::*;
-use image::GenericImageView;
+use crate::coordinate_mapping::CoordinateMapper;
 
+/// PDF Viewer component that uses pdftoppm for rendering at 72 DPI
+/// This ensures perfect coordinate alignment with Docling's extraction
 pub struct PdfViewer {
-    // Core PDF state
-    pdfium: Option<Pdfium>,
-    current_pdf: Option<PdfDocument<'static>>,
     current_file: Option<PathBuf>,
     current_page: usize,
     page_count: usize,
-    zoom: f32,
+    is_loaded: bool,
+    page_cache: HashMap<usize, TextureHandle>,
     
-    // Caching for performance
-    page_cache: HashMap<usize, egui::TextureHandle>,
-    cache_size_limit: usize,
-    
-    // Selection state
-    selection_start: Option<Pos2>,
-    selection_end: Option<Pos2>,
-    selection_active: bool,
-    
-    // UI state
-    auto_hide_menu: bool,
-    menu_animation: f32,
-    scroll_offset: Vec2,
+    // Coordinate mapping system
+    pub coordinate_mapper: CoordinateMapper,
+    pub debug_overlay: bool,
+    zoom_level: f32,
 }
 
 impl PdfViewer {
     pub fn new() -> Self {
-        // Initialize pdfium - this is the critical step
-        let pdfium = match Pdfium::bind_to_library(Pdfium::pdfium_platform_library_name_at_path("./"))
-            .or_else(|_| Pdfium::bind_to_system_library())
-        {
-            Ok(bindings) => Some(Pdfium::new(bindings)),
-            Err(e) => {
-                eprintln!("Failed to initialize Pdfium: {}", e);
-                None
-            }
-        };
-        
         Self {
-            pdfium,
-            current_pdf: None,
             current_file: None,
             current_page: 0,
             page_count: 0,
-            zoom: 1.0,
+            is_loaded: false,
             page_cache: HashMap::new(),
-            cache_size_limit: 10, // Cache up to 10 pages
-            selection_start: None,
-            selection_end: None,
-            selection_active: false,
-            auto_hide_menu: true,
-            menu_animation: 0.0,
-            scroll_offset: Vec2::ZERO,
+            coordinate_mapper: CoordinateMapper::new(),
+            debug_overlay: false,
+            zoom_level: 1.0,
         }
     }
     
     pub fn render(&mut self, ui: &mut Ui) {
-        if self.current_pdf.is_some() {
-            // Clone the necessary data to avoid borrowing issues
-            let has_pdf = true;
-            if has_pdf {
-                self.render_pdf_viewer_internal(ui);
-            }
+        if self.is_loaded {
+            self.render_pdf_content(ui);
         } else {
             self.render_empty_state(ui);
         }
@@ -77,264 +47,236 @@ impl PdfViewer {
             ui.available_size(),
             Layout::centered_and_justified(Direction::TopDown),
             |ui| {
-                ui.heading("PDF Viewer");
+                ui.heading("📄 PDF Viewer");
                 ui.add_space(20.0);
                 ui.label("No PDF loaded");
-                ui.label("Use File → Open PDF to load a document");
+                ui.label("Use Ctrl+O to load a document");
+                ui.add_space(10.0);
+                ui.label("🚀 Now using pdftoppm at 72 DPI for perfect coordinate alignment!");
             },
         );
     }
     
-    fn render_pdf_viewer_internal(&mut self, ui: &mut Ui) {
-        // Auto-hide menu animation
-        self.update_menu_animation(ui);
-        
-        // Render menu if visible
-        if self.menu_animation > 0.01 {
-            self.render_pdf_menu(ui);
-        }
-        
-        // Main PDF display area
-        ScrollArea::both()
-            .auto_shrink([false, false])
-            .show(ui, |ui| {
-                // Get or render the current page
-                if !self.page_cache.contains_key(&self.current_page) {
-                    self.render_current_page_to_cache(ui.ctx());
-                }
-                
-                if let Some(texture) = self.page_cache.get(&self.current_page) {
-                    let response = ui.add(Image::from_texture(texture).fit_to_original_size(1.0));
-                    let rect = response.rect;
-                    
-                    // Handle text selection
-                    self.handle_selection_input(ui, rect, &response);
-                    
-                    // Draw selection overlay
-                    self.draw_selection_overlay(ui, rect);
-                }
-            });
-    }
-    
-    fn render_pdf_viewer(&mut self, ui: &mut Ui, pdf: &PdfDocument) {
-        // Auto-hide menu animation
-        self.update_menu_animation(ui);
-        
-        // Render menu if visible
-        if self.menu_animation > 0.01 {
-            self.render_pdf_menu(ui);
-        }
-        
-        // Main PDF display area
-        ScrollArea::both()
-            .auto_shrink([false, false])
-            .show(ui, |ui| {
-                self.render_pdf_page(ui, pdf);
-            });
-    }
-    
-    fn update_menu_animation(&mut self, ui: &mut Ui) {
-        if self.auto_hide_menu {
-            let mouse_y = ui.input(|i| {
-                i.pointer.hover_pos().map(|p| p.y).unwrap_or(f32::MAX)
-            });
-            
-            let target = if mouse_y < 50.0 { 1.0 } else { 0.0 };
-            let dt = ui.input(|i| i.unstable_dt);
-            self.menu_animation += (target - self.menu_animation) * dt * 5.0;
-            
-            if self.menu_animation != target {
-                ui.ctx().request_repaint();
-            }
-        } else {
-            self.menu_animation = 1.0;
-        }
-    }
-    
-    fn render_pdf_menu(&mut self, ui: &mut Ui) {
-        ui.horizontal(|ui| {
-            ui.set_opacity(self.menu_animation);
-            
-            // Page navigation
-            if ui.button("◀").clicked() && self.current_page > 0 {
-                self.current_page -= 1;
-                self.render_current_page();
-            }
-            
-            ui.label(format!("Page {} of {}", self.current_page + 1, self.page_count));
-            
-            if ui.button("▶").clicked() && self.current_page < self.page_count - 1 {
-                self.current_page += 1;
-                self.render_current_page();
-            }
-            
+    fn render_pdf_content(&mut self, ui: &mut Ui) {
+        ui.vertical(|ui| {
+            ui.heading("📄 PDF Content");
             ui.separator();
             
-            // Zoom controls
-            if ui.button("-").clicked() {
-                self.zoom = (self.zoom - 0.1).max(0.5);
-                self.render_current_page();
-            }
-            
-            ui.label(format!("{}%", (self.zoom * 100.0) as i32));
-            
-            if ui.button("+").clicked() {
-                self.zoom = (self.zoom + 0.1).min(3.0);
-                self.render_current_page();
-            }
-            
-            if ui.button("Fit").clicked() {
-                if let Some(ref pdf) = self.current_pdf {
-                if let Ok(page) = pdf.pages().get(self.current_page.try_into().unwrap_or(0)) {
-                        let page_width = page.width().value;
-                        let available_width = ui.available_width();
-                        self.zoom = available_width / page_width;
-                        self.render_current_page();
+            if let Some(ref file) = self.current_file {
+                ui.label(format!("File: {}", file.file_name().unwrap_or_default().to_string_lossy()));
+                ui.label(format!("Pages: {}", self.page_count));
+                ui.label(format!("Current page: {}/{}", self.current_page + 1, self.page_count));
+                
+                ui.separator();
+                
+                // Controls row
+                ui.horizontal(|ui| {
+                    // Page navigation
+                    if ui.button("⬅ Previous").clicked() && self.current_page > 0 {
+                        self.current_page -= 1;
                     }
+                    
+                    ui.label(format!("{} / {}", self.current_page + 1, self.page_count));
+                    
+                    if ui.button("➡ Next").clicked() && self.current_page < self.page_count.saturating_sub(1) {
+                        self.current_page += 1;
+                    }
+                    
+                    ui.separator();
+                    
+                    // Zoom controls
+                    ui.label("Zoom:");
+                    if ui.button("-").clicked() {
+                        self.zoom_level = (self.zoom_level - 0.1).max(0.1);
+                    }
+                    ui.label(format!("{:.0}%", self.zoom_level * 100.0));
+                    if ui.button("+").clicked() {
+                        self.zoom_level = (self.zoom_level + 0.1).min(5.0);
+                    }
+                    
+                    ui.separator();
+                    
+                    // Debug overlay toggle
+                    ui.checkbox(&mut self.debug_overlay, "Debug overlay");
+                });
+                
+                ui.separator();
+                
+                // Render actual PDF page (only if not already cached)
+                let needs_rendering = !self.page_cache.contains_key(&self.current_page);
+                if needs_rendering {
+                    // Show rendering message
+                    ui.label("🖼️ Rendering PDF page...");
+                    
+                    // Try to render the current page
+                    match self.render_page_to_cache(ui.ctx(), self.current_page) {
+                        Ok(()) => {
+                            ui.ctx().request_repaint(); // Request one more repaint to show the rendered page
+                        },
+                        Err(e) => {
+                            ui.label(format!("⚠️ Failed to render page: {}", e));
+                        }
+                    }
+                }
+                
+                // Display the cached page with coordinate mapping
+                if let Some(texture) = self.page_cache.get(&self.current_page) {
+                    // Calculate size to fit in available space with zoom
+                    let available_width = ui.available_width();
+                    let available_height = ui.available_height() - 50.0; // Leave space for controls
+                    
+                    let texture_size = texture.size_vec2();
+                    let base_scale = (available_width / texture_size.x).min(available_height / texture_size.y).min(1.0);
+                    let final_scale = base_scale * self.zoom_level;
+                    let display_size = texture_size * final_scale;
+                    
+                    ScrollArea::both()
+                        .max_height(available_height)
+                        .show(ui, |ui| {
+                            // Display PDF as clickable image
+                            let response = ui.add(
+                                Image::from_texture(texture)
+                                    .fit_to_exact_size(display_size)
+                                    .sense(Sense::click())
+                            );
+                            
+                            // Handle PDF clicks for coordinate mapping
+                            if response.clicked() {
+                                if let Some(click_pos) = response.interact_pointer_pos() {
+                                    let relative_vec = click_pos - response.rect.min;
+                                    let relative_pos = egui::pos2(relative_vec.x, relative_vec.y);
+                                    let scale_factor = egui::vec2(final_scale, final_scale);
+                                    
+                                    if let Some(region_index) = self.coordinate_mapper.handle_pdf_click(relative_pos, scale_factor) {
+                                        tracing::info!("Clicked PDF region: {}", region_index);
+                                        // TODO: Send signal to markdown editor to highlight corresponding text
+                                    }
+                                }
+                            }
+                            
+                            // Render debug overlay if enabled
+                            if self.debug_overlay {
+                                let scale_factor = egui::vec2(final_scale, final_scale);
+                                self.coordinate_mapper.render_debug_overlay(ui, response.rect, scale_factor);
+                            }
+                        });
+                } else {
+                    ui.allocate_ui_with_layout(
+                        [ui.available_width(), 400.0].into(),
+                        Layout::centered_and_justified(Direction::TopDown),
+                        |ui| {
+                            ui.label("📄 Rendering PDF page...");
+                            ui.label("(Using pdftoppm at 72 DPI)");
+                        },
+                    );
                 }
             }
         });
     }
     
-    fn render_pdf_page(&mut self, ui: &mut Ui, _pdf: &PdfDocument) {
-        // Get or render the current page
-        if !self.page_cache.contains_key(&self.current_page) {
-            self.render_current_page_to_cache(ui.ctx());
-        }
-        
-        if let Some(texture) = self.page_cache.get(&self.current_page) {
-            let response = ui.add(Image::from_texture(texture).fit_to_original_size(1.0));
-            let rect = response.rect;
-            
-            // Handle text selection
-            self.handle_selection_input(ui, rect, &response);
-            
-            // Draw selection overlay
-            self.draw_selection_overlay(ui, rect);
-        }
-    }
-    
-    fn render_current_page(&mut self) {
-        // Clear cache entry for current page to force re-render
-        self.page_cache.remove(&self.current_page);
-    }
-    
-    fn render_current_page_to_cache(&mut self, ctx: &Context) {
-        if let (Some(ref pdfium), Some(ref pdf)) = (&self.pdfium, &self.current_pdf) {
-            if let Ok(page) = pdf.pages().get(self.current_page.try_into().unwrap_or(0)) {
-                // Calculate render size
-                let page_width = page.width().value;
-                let page_height = page.height().value;
-                let render_width = (page_width * self.zoom * 2.0) as i32; // 2x for high DPI
-                let render_height = (page_height * self.zoom * 2.0) as i32;
-                
-                // Render page to bitmap
-                let config = PdfRenderConfig::new()
-                    .set_target_width(render_width)
-                    .set_target_height(render_height)
-                    .rotate_if_landscape(PdfPageRenderRotation::None, false);
-                
-                if let Ok(bitmap) = page.render_with_config(&config) {
-                    // Convert to egui texture
-                    let image = bitmap.as_image();
-                    let size = [image.width() as usize, image.height() as usize];
-                    let pixels: Vec<egui::Color32> = image
-                        .pixels()
-                        .map(|p| egui::Color32::from_rgba_unmultiplied(p[0], p[1], p[2], p[3]))
-                        .collect();
-                    
-                    let color_image = egui::ColorImage {
-                        size,
-                        pixels,
-                    };
-                    
-                    let texture = ctx.load_texture(
-                        format!("pdf_page_{}", self.current_page),
-                        color_image,
-                        TextureOptions::default(),
-                    );
-                    
-                    // Cache management - remove old pages if cache is full
-                    if self.page_cache.len() >= self.cache_size_limit {
-                        // Remove a page that's not the current or adjacent pages
-                        let pages_to_keep: Vec<usize> = (self.current_page.saturating_sub(2)
-                            ..=(self.current_page + 2).min(self.page_count - 1))
-                            .collect();
-                        
-                        self.page_cache.retain(|&k, _| pages_to_keep.contains(&k));
-                    }
-                    
-                    self.page_cache.insert(self.current_page, texture);
-                }
-            }
-        }
-    }
-    
-    fn handle_selection_input(&mut self, ui: &mut Ui, rect: Rect, response: &Response) {
-        if response.clicked() {
-            if let Some(hover_pos) = ui.input(|i| i.pointer.hover_pos()) {
-                self.selection_start = Some(hover_pos - rect.min.to_vec2());
-                self.selection_active = true;
-                self.selection_end = None;
-            }
-        }
-        
-        if self.selection_active {
-            if let Some(hover_pos) = ui.input(|i| i.pointer.hover_pos()) {
-                self.selection_end = Some(hover_pos - rect.min.to_vec2());
-            }
-            
-            if ui.input(|i| i.pointer.primary_released()) {
-                self.selection_active = false;
-                self.extract_selection();
-            }
-        }
-    }
-    
-    fn draw_selection_overlay(&self, ui: &mut Ui, rect: Rect) {
-        if let (Some(start), Some(end)) = (self.selection_start, self.selection_end) {
-            let selection_rect = Rect::from_two_pos(
-                rect.min + start.to_vec2(),
-                rect.min + end.to_vec2(),
-            );
-            
-            ui.painter().rect_filled(
-                selection_rect,
-                0.0,
-                Color32::from_rgba_premultiplied(0, 100, 255, 50),
-            );
-        }
-    }
-    
-    fn extract_selection(&self) {
-        // TODO: Implement text extraction from selection bounds
-        // This would involve:
-        // 1. Converting selection coordinates to PDF coordinates
-        // 2. Using pdfium to extract text from the selected region
-        // 3. Triggering a callback with the extracted text
-        println!("Selection extraction not yet implemented");
-    }
-    
     pub fn load_pdf(&mut self, path: &Path) -> Result<(), Box<dyn std::error::Error>> {
-        if let Some(ref pdfium) = self.pdfium {
-            match pdfium.load_pdf_from_file(path, None) {
-                Ok(pdf) => {
-                    self.page_count = pdf.pages().len() as usize;
-                    self.current_page = 0;
-                    self.current_file = Some(path.to_path_buf());
-                    self.current_pdf = Some(pdf);
-                    self.page_cache.clear();
-                    Ok(())
-                }
-                Err(e) => Err(format!("Failed to load PDF: {}", e).into())
-            }
-        } else {
-            Err("Pdfium not initialized".into())
+        // First check if the PDF exists
+        if !path.exists() {
+            return Err("PDF file does not exist".into());
         }
+        
+        println!("📄 Loading PDF: {}", path.display());
+        
+        // Use pdfinfo (part of poppler) to get page count
+        let output = Command::new("pdfinfo")
+            .arg(path)
+            .output()?;
+            
+        if !output.status.success() {
+            return Err(format!("Failed to read PDF info: {}", String::from_utf8_lossy(&output.stderr)).into());
+        }
+        
+        // Parse page count from pdfinfo output
+        let info_text = String::from_utf8_lossy(&output.stdout);
+        let page_count = info_text
+            .lines()
+            .find(|line| line.starts_with("Pages:"))
+            .and_then(|line| line.split_whitespace().nth(1))
+            .and_then(|count| count.parse::<usize>().ok())
+            .unwrap_or(1); // Default to 1 page if parsing fails
+            
+        println!("📄 PDF loaded: {} pages", page_count);
+        
+        self.page_count = page_count;
+        self.current_file = Some(path.to_path_buf());
+        self.current_page = 0;
+        self.is_loaded = true;
+        self.page_cache.clear(); // Clear any old cached pages
+        Ok(())
     }
-    
-    pub fn is_loaded(&self) -> bool {
-        self.current_pdf.is_some()
+
+    fn render_page_to_cache(&mut self, ctx: &Context, page_num: usize) -> Result<(), Box<dyn std::error::Error>> {
+        let pdf_path = self.current_file.as_ref().ok_or("No PDF loaded")?;
+        let temp_dir = std::env::temp_dir();
+        let temp_prefix = temp_dir.join(format!("chonker_page_{}", page_num + 1));
+        
+        println!("🖼️ Rendering PDF page {} at 72 DPI...", page_num + 1);
+        println!("📁 Temp prefix: {}", temp_prefix.display());
+        
+        // Use pdftoppm to render the specific page at 72 DPI (matches Docling)
+        let page_1_based = page_num + 1; // Convert to 1-based indexing for pdftoppm
+        let output = Command::new("pdftoppm")
+            .args(["-png", "-r", "72"]) // 72 DPI for coordinate alignment with Docling
+            .args(["-f", &page_1_based.to_string(), "-l", &page_1_based.to_string()])
+            .arg(pdf_path)
+            .arg(&temp_prefix)
+            .output()?;
+            
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            println!("❌ pdftoppm stderr: {}", stderr);
+            return Err(format!("pdftoppm failed: {}", stderr).into());
+        }
+        
+        // pdftoppm creates files like "prefix-1.png" (no zero padding for single digits)
+        let png_path = format!("{}-{}.png", temp_prefix.to_string_lossy(), page_1_based);
+        println!("🔍 Looking for PNG at: {}", png_path);
+        
+        // Check what files were actually created
+        if let Ok(entries) = std::fs::read_dir(&temp_dir) {
+            println!("📂 Files in temp dir:");
+            for entry in entries {
+                if let Ok(entry) = entry {
+                    let name = entry.file_name().to_string_lossy().to_string();
+                    if name.starts_with("chonker_page") {
+                        println!("  - {}", name);
+                    }
+                }
+            }
+        }
+        
+        if !std::path::Path::new(&png_path).exists() {
+            return Err(format!("Generated PNG not found: {}\nExpected: {}", png_path, png_path).into());
+        }
+        
+        // Load the PNG into memory
+        let img_bytes = std::fs::read(&png_path)?;
+        let dynamic_img = image::load_from_memory(&img_bytes)?;
+        let rgba_img = dynamic_img.to_rgba8();
+        let size = [rgba_img.width() as usize, rgba_img.height() as usize];
+        
+        // Create egui color image
+        let color_image = ColorImage::from_rgba_unmultiplied(size, &rgba_img);
+        
+        // Load as texture
+        let texture_name = format!("pdf_page_{}", page_num);
+        let texture = ctx.load_texture(texture_name, color_image, TextureOptions::default());
+        
+        // Cache the texture
+        self.page_cache.insert(page_num, texture);
+        
+        // Clean up temporary file
+        if let Err(e) = std::fs::remove_file(&png_path) {
+            eprintln!("⚠️ Failed to clean up temp file {}: {}", png_path, e);
+        }
+        
+        println!("✅ PDF page {} rendered: {}x{}", page_num + 1, size[0], size[1]);
+        Ok(())
     }
     
     pub fn get_page_count(&self) -> usize {
@@ -343,5 +285,29 @@ impl PdfViewer {
     
     pub fn get_current_page(&self) -> usize {
         self.current_page
+    }
+    
+    /// Load coordinate mapping data from Docling extraction
+    pub fn load_coordinate_mapping(&mut self, docling_json_path: &Path) -> Result<(), Box<dyn std::error::Error>> {
+        self.coordinate_mapper.load_docling_output(docling_json_path)?;
+        
+        // If we have a loaded page, update the text regions
+        if let Some(texture) = self.page_cache.get(&self.current_page) {
+            let image_size = texture.size_vec2();
+            self.coordinate_mapper.generate_text_regions(image_size);
+            tracing::info!("Loaded coordinate mapping with {} regions", self.coordinate_mapper.text_regions.len());
+        }
+        
+        Ok(())
+    }
+    
+    /// Get the currently selected text from coordinate mapping
+    pub fn get_selected_text(&self) -> Option<&str> {
+        self.coordinate_mapper.get_selected_text()
+    }
+    
+    /// Handle text selection from markdown editor to highlight PDF region
+    pub fn highlight_text_region(&mut self, text_index: usize) -> Option<usize> {
+        self.coordinate_mapper.handle_text_selection(text_index)
     }
 }

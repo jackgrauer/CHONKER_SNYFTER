@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 
 /// Extractor component that bridges to Python extraction tools
 /// Manages Magic-PDF, Docling, and fallback extraction
+#[derive(Clone)]
 pub struct Extractor {
     pub python_script_path: PathBuf,
     pub preferred_tool: String,
