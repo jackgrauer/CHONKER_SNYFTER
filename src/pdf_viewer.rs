@@ -1,6 +1,8 @@
-use egui::*;
+#[cfg(feature = "gui")]
+use eframe::egui::{self, *};
 use std::path::{Path, PathBuf};
 use std::process::Command;
+#[cfg(feature = "gui")]
 use image;
 use std::collections::HashMap;
 use crate::coordinate_mapping::CoordinateMapper;
@@ -18,6 +20,8 @@ pub struct PdfViewer {
     pub coordinate_mapper: CoordinateMapper,
     pub debug_overlay: bool,
     zoom_level: f32,
+    // Rendering state tracking to prevent infinite loops
+    rendering_state: HashMap<usize, bool>,
 }
 
 impl PdfViewer {
@@ -31,6 +35,7 @@ impl PdfViewer {
             coordinate_mapper: CoordinateMapper::new(),
             debug_overlay: false,
             zoom_level: 1.0,
+            rendering_state: HashMap::new(),
         }
     }
     
@@ -102,21 +107,33 @@ impl PdfViewer {
                 
                 ui.separator();
                 
-                // Render actual PDF page (only if not already cached)
-                let needs_rendering = !self.page_cache.contains_key(&self.current_page);
+                // Render actual PDF page (only if not already cached and not currently rendering)
+                let needs_rendering = !self.page_cache.contains_key(&self.current_page) 
+                    && !self.rendering_state.get(&self.current_page).unwrap_or(&false);
+                
                 if needs_rendering {
+                    // Mark this page as currently being rendered to prevent loops
+                    self.rendering_state.insert(self.current_page, true);
+                    
                     // Show rendering message
                     ui.label("🖼️ Rendering PDF page...");
                     
                     // Try to render the current page
                     match self.render_page_to_cache(ui.ctx(), self.current_page) {
                         Ok(()) => {
-                            ui.ctx().request_repaint(); // Request one more repaint to show the rendered page
+                            // Mark rendering as complete
+                            self.rendering_state.insert(self.current_page, false);
+                            // No need to request repaint - the UI will update naturally
                         },
                         Err(e) => {
+                            // Mark rendering as failed (not in progress)
+                            self.rendering_state.insert(self.current_page, false);
                             ui.label(format!("⚠️ Failed to render page: {}", e));
                         }
                     }
+                } else if *self.rendering_state.get(&self.current_page).unwrap_or(&false) {
+                    // Currently rendering - show status without triggering another render
+                    ui.label("🖼️ Rendering in progress...");
                 }
                 
                 // Display the cached page with coordinate mapping
@@ -207,6 +224,7 @@ impl PdfViewer {
         self.current_page = 0;
         self.is_loaded = true;
         self.page_cache.clear(); // Clear any old cached pages
+        self.rendering_state.clear(); // Clear rendering state
         Ok(())
     }
 

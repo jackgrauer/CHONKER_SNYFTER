@@ -1,12 +1,19 @@
 use anyhow::{Result, anyhow};
+#[cfg(feature = "advanced_pdf")]
 use pdfium_render::prelude::*;
 use std::path::Path;
 use serde::{Deserialize, Serialize};
 
 /// Native Rust PDF extractor for fast path processing
 /// Uses pdfium-render for high-quality text extraction
+#[cfg(feature = "advanced_pdf")]
 pub struct NativeExtractor {
     pdfium: Pdfium,
+}
+
+#[cfg(not(feature = "advanced_pdf"))]
+pub struct NativeExtractor {
+    _placeholder: (),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -40,6 +47,7 @@ pub struct NativeExtractionMetadata {
     pub extraction_method: String,
 }
 
+#[cfg(feature = "advanced_pdf")]
 impl NativeExtractor {
     pub fn new() -> Result<Self> {
         let pdfium = Pdfium::new(
@@ -240,6 +248,7 @@ impl NativeExtractor {
     }
 
     /// Simple image detection on page
+    #[cfg(feature = "advanced_pdf")]
     fn page_has_images(&self, page: &PdfPage) -> bool {
         // Simple heuristic: check if page has objects that might be images
         // This is a simplified approach - full image detection would be more complex
@@ -324,6 +333,42 @@ impl NativeExtractor {
 impl Default for NativeExtractor {
     fn default() -> Self {
         Self::new().expect("Failed to initialize native PDF extractor")
+    }
+}
+
+#[cfg(not(feature = "advanced_pdf"))]
+impl NativeExtractor {
+    pub fn new() -> Result<Self> {
+        Err(anyhow!("Advanced PDF features not available"))
+    }
+    
+    pub fn extract_pdf<P: AsRef<Path>>(&self, _pdf_path: P) -> Result<NativeExtractionResult> {
+        Err(anyhow!("Advanced PDF features not available"))
+    }
+    
+    pub fn extract_page<P: AsRef<Path>>(&self, _pdf_path: P, _page_num: usize) -> Result<NativeExtractionResult> {
+        Err(anyhow!("Advanced PDF features not available"))
+    }
+    
+    pub fn extract_from_bytes(&self, _pdf_bytes: &[u8]) -> Result<NativeExtractionResult> {
+        Err(anyhow!("Advanced PDF features not available"))
+    }
+    
+    pub fn assess_extraction_quality(&self, _result: &NativeExtractionResult) -> f64 {
+        0.0
+    }
+    
+    pub fn to_legacy_format(&self, _result: &NativeExtractionResult) -> crate::extractor::ExtractionResult {
+        crate::extractor::ExtractionResult {
+            success: false,
+            tool: "unavailable".to_string(),
+            extractions: vec![],
+            metadata: crate::extractor::ExtractionMetadata {
+                total_pages: 0,
+                processing_time: 0,
+            },
+            error: Some("Advanced PDF features not available".to_string()),
+        }
     }
 }
 

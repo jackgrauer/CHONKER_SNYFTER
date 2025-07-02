@@ -116,7 +116,7 @@ impl SmartColumnExtractor {
         let headers: Vec<String> = header_row
             .split('|')
             .enumerate()
-            .filter_map(|(i, h)| {
+            .filter_map(|(_i, h)| {
                 let trimmed = h.trim();
                 if !trimmed.is_empty() {
                     Some(trimmed.to_lowercase())

@@ -9,6 +9,7 @@ use tracing_subscriber::{
     Registry,
     Layer,
 };
+#[cfg(feature = "advanced_logging")]
 use tracing_appender::{rolling, non_blocking};
 
 use crate::error::{ChonkerError, ChonkerResult};
@@ -59,35 +60,60 @@ pub fn init_logging(config: &LoggingConfig) -> ChonkerResult<()> {
     let registry = Registry::default().with(env_filter);
 
     if config.enable_file_logging {
-        // Set up file logging with rotation
-        let file_appender = rolling::daily(&config.log_dir, "chonker.log");
-        let (file_writer, _guard) = non_blocking(file_appender);
+        #[cfg(feature = "advanced_logging")]
+        {
+            // Set up file logging with rotation
+            let file_appender = rolling::daily(&config.log_dir, "chonker.log");
+            let (file_writer, _guard) = non_blocking(file_appender);
 
-        let file_layer = if config.enable_json_format {
-            fmt::layer()
-                .json()
-                .with_writer(file_writer)
-                .boxed()
-        } else {
-            fmt::layer()
+            let file_layer = fmt::layer()
                 .with_writer(file_writer)
                 .with_ansi(false)
-                .boxed()
-        };
+                .boxed();
 
-        // Console layer (completely disabled for TUI to prevent interference)
-        // All logs go to file only when TUI is running
-        let console_layer = fmt::layer()
-            .with_writer(std::io::sink) // Send to nowhere
-            .with_target(false)
-            .without_time()
-            .compact()
-            .boxed();
+            // Console layer (completely disabled for TUI to prevent interference)
+            let console_layer = fmt::layer()
+                .with_writer(std::io::sink) // Send to nowhere
+                .with_target(false)
+                .without_time()
+                .compact()
+                .boxed();
 
-        registry
-            .with(file_layer)
-            .with(console_layer)
-            .init();
+            registry
+                .with(file_layer)
+                .with(console_layer)
+                .init();
+        }
+        #[cfg(not(feature = "advanced_logging"))]
+        {
+            // Simple file logging without rotation
+            let file = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(config.log_dir.join("chonker.log"))
+                .map_err(|e| ChonkerError::file_io(
+                    config.log_dir.join("chonker.log").to_string_lossy().to_string(),
+                    e
+                ))?;
+            
+            let file_layer = fmt::layer()
+                .with_writer(file)
+                .with_ansi(false)
+                .boxed();
+
+            // Console layer (completely disabled for TUI to prevent interference)
+            let console_layer = fmt::layer()
+                .with_writer(std::io::sink) // Send to nowhere
+                .with_target(false)
+                .without_time()
+                .compact()
+                .boxed();
+
+            registry
+                .with(file_layer)
+                .with(console_layer)
+                .init();
+        }
     } else {
         // Console-only logging
         let console_layer = fmt::layer()

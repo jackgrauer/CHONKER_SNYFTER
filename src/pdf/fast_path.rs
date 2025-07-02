@@ -1,11 +1,19 @@
+#[cfg(feature = "advanced_pdf")]
 use pdfium_render::prelude::*;
 use std::path::Path;
 
 /// Handles fast path PDF processing using pdfium-render
+#[cfg(feature = "advanced_pdf")]
 pub struct FastPathProcessor {
     pdfium: Pdfium,
 }
 
+#[cfg(not(feature = "advanced_pdf"))]
+pub struct FastPathProcessor {
+    _placeholder: (),
+}
+
+#[cfg(feature = "advanced_pdf")]
 impl FastPathProcessor {
     pub fn new() -> Result<Self, String> {
         // Initialize PDFium
@@ -25,6 +33,17 @@ impl FastPathProcessor {
             full_text.push_str("\n");
         }
         Ok(full_text)
+    }
+}
+
+#[cfg(not(feature = "advanced_pdf"))]
+impl FastPathProcessor {
+    pub fn new() -> Result<Self, String> {
+        Err("Advanced PDF features not available".to_string())
+    }
+
+    pub fn extract_text_from_pdf<P: AsRef<Path>>(&self, _path: P) -> Result<String, String> {
+        Err("Advanced PDF features not available".to_string())
     }
 }
 

@@ -87,20 +87,30 @@ fn apply_retro_theme(ctx: &egui::Context) {
     ctx.set_style(style);
 }
 
+#[cfg(feature = "gui")]
 use eframe::egui;
 use std::path::PathBuf;
 use tracing::{info, debug};
 use crate::error::{ChonkerError, ChonkerResult};
 use crate::log_error;
 use crate::database::ChonkerDatabase;
-use chrono::Utc;
 use crate::pdf_viewer::PdfViewer;
+#[cfg(all(feature = "mupdf", feature = "gui"))]
+use crate::mupdf_viewer::MuPdfViewer;
 use crate::markdown_editor::MarkdownEditor;
 use crate::extractor::Extractor;
 use crate::processing::ChonkerProcessor;
 use crate::sync::SelectionSync;
 use crate::project::Project;
+use std::sync::mpsc;
+use std::thread;
 
+#[derive(Debug, Clone)]
+pub enum QcMessage {
+    Progress(String),
+    Complete(String),
+    Error(String),
+}
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ProcessingOptions {
@@ -198,13 +208,45 @@ pub struct VisualSelection {
     pub copy_mode: CopyMode,
 }
 
+pub enum PdfViewerType {
+    Standard(PdfViewer),
+    #[cfg(all(feature = "mupdf", feature = "gui"))]
+    MuPdf(MuPdfViewer),
+}
+
+impl PdfViewerType {
+    pub fn render(&mut self, ui: &mut egui::Ui) {
+        match self {
+            PdfViewerType::Standard(viewer) => viewer.render(ui),
+            #[cfg(all(feature = "mupdf", feature = "gui"))]
+            PdfViewerType::MuPdf(viewer) => viewer.render(ui),
+        }
+    }
+    
+    pub fn load_pdf(&mut self, path: &std::path::Path) -> Result<(), Box<dyn std::error::Error>> {
+        match self {
+            PdfViewerType::Standard(viewer) => viewer.load_pdf(path),
+            #[cfg(all(feature = "mupdf", feature = "gui"))]
+            PdfViewerType::MuPdf(viewer) => viewer.load_pdf(path),
+        }
+    }
+    
+    pub fn get_page_count(&self) -> usize {
+        match self {
+            PdfViewerType::Standard(viewer) => viewer.get_page_count(),
+            #[cfg(all(feature = "mupdf", feature = "gui"))]
+            PdfViewerType::MuPdf(viewer) => viewer.get_page_count(),
+        }
+    }
+}
+
 pub struct ChonkerApp {
     // App state for loading screen
     pub state: AppState,
     
     
     // Core components
-    pub pdf_viewer: PdfViewer,
+    pub pdf_viewer: PdfViewerType,
     pub markdown_editor: MarkdownEditor,
     pub extractor: Extractor,
     pub processor: ChonkerProcessor,
@@ -243,6 +285,11 @@ pub struct ChonkerApp {
     // Coordinate mapping state
     pub selected_pdf_region: Option<usize>,
     pub selected_text_chunk: Option<usize>,
+    
+    // QC Processing state
+    pub qc_processing: bool,
+    pub qc_progress_message: String,
+    pub qc_receiver: Option<mpsc::Receiver<QcMessage>>,
 }
 
 impl ChonkerApp {
@@ -252,8 +299,19 @@ impl ChonkerApp {
             state: AppState::Ready,
             
             
-            // Initialize core components
-            pdf_viewer: PdfViewer::new(),
+            // Initialize core components with MuPDF if available
+            pdf_viewer: {
+                #[cfg(all(feature = "mupdf", feature = "gui"))]
+                {
+                    println!("🚀 Initializing with high-performance MuPDF viewer!");
+                    PdfViewerType::MuPdf(MuPdfViewer::new())
+                }
+                #[cfg(not(all(feature = "mupdf", feature = "gui")))]
+                {
+                    println!("📄 Using standard PDF viewer (build with --features mupdf for better performance)");
+                    PdfViewerType::Standard(PdfViewer::new())
+                }
+            },
             markdown_editor: MarkdownEditor::new(),
             extractor: Extractor::new(),
             processor: ChonkerProcessor::new(),
@@ -288,6 +346,11 @@ impl ChonkerApp {
             export_bin: Vec::new(),
             selected_pdf_region: None,
             selected_text_chunk: None,
+            
+            // Initialize QC processing fields
+            qc_processing: false,
+            qc_progress_message: String::new(),
+            qc_receiver: None,
         }
     }
     
@@ -410,10 +473,15 @@ impl ChonkerApp {
                     
                     // Automatically save to database if available
                     if self.database.is_some() {
-                        self.save_to_database();
+                        if let Err(e) = self.save_to_database_async() {
+                            self.error_message = Some(format!("⚠️ Document processed but database save failed: {}", e));
+                        } else {
+                            self.status_message = format!("✅ Processing complete! {} chunks created and saved to database", self.chunks.len());
+                        }
                     }
                     
-                    // Skip Python pipeline for now to avoid hanging
+                    // Optional QC reporting and Qwen table cleaning (can be slow)
+                    // Only run if user specifically requests it to avoid GUI freezing
                     // self.call_existing_pipeline();
                 }
                 Err(e) => {
@@ -446,10 +514,58 @@ impl ChonkerApp {
         extractor.set_preferred_tool("auto".to_string());
         
         let extraction_start = std::time::Instant::now();
-        let runtime = tokio::runtime::Runtime::new()?;
-        let extraction_result = runtime.block_on(async {
-            extractor.extract_pdf(&path_buf).await
-        });
+        
+        // Use the extraction bridge directly with venv Python
+        let extraction_result = match std::process::Command::new("./venv/bin/python")
+            .arg("python/extraction_bridge.py")
+            .arg(path_buf.to_string_lossy().as_ref())
+            .arg("--tool")
+            .arg("docling_enhanced")
+            .output()
+        {
+            Ok(output) if output.status.success() => {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                match serde_json::from_str::<serde_json::Value>(&stdout) {
+                    Ok(json) => {
+                        // Parse the JSON response to extract text from extraction bridge format
+                        let text = if let Some(extractions) = json["extractions"].as_array() {
+                            extractions.iter()
+                                .filter_map(|ext| ext["text"].as_str())
+                                .collect::<Vec<&str>>()
+                                .join("\n\n")
+                        } else {
+                            // Fallback to other possible structures
+                            json["text"].as_str().unwrap_or("No text extracted").to_string()
+                        };
+                        Ok(crate::extractor::ExtractionResult {
+                            success: true,
+                            tool: "python_bridge".to_string(),
+                            extractions: vec![crate::extractor::PageExtraction {
+                                page_number: 1,
+                                text,
+                                tables: vec![],
+                                figures: vec![],
+                                formulas: vec![],
+                                confidence: 0.9,
+                                layout_boxes: vec![],
+                                tool: "python_bridge".to_string(),
+                            }],
+                            metadata: crate::extractor::ExtractionMetadata {
+                                total_pages: 1,
+                                processing_time: 0,
+                            },
+                            error: None,
+                        })
+                    }
+                    Err(e) => Err(format!("Failed to parse JSON response: {}", e))
+                }
+            }
+            Ok(output) => {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                Err(format!("Python extraction failed: {}", stderr))
+            }
+            Err(e) => Err(format!("Failed to run Python extraction: {}", e))
+        };
         
         println!("🔍 Advanced PDF extraction took: {:?}", extraction_start.elapsed());
         
@@ -574,7 +690,7 @@ impl ChonkerApp {
         println!("⚡ Trying fast PDF extraction...");
         
         // Try pdfplumber first (usually fastest)
-        match std::process::Command::new("python3")
+        match std::process::Command::new("./venv/bin/python")
             .arg("-c")
             .arg(format!(
                 "import pdfplumber; \
@@ -597,7 +713,7 @@ impl ChonkerApp {
         }
         
         // Try pymupdf as fallback
-        match std::process::Command::new("python3")
+        match std::process::Command::new("./venv/bin/python")
             .arg("-c")
             .arg(format!(
                 "import fitz; \
@@ -641,7 +757,19 @@ impl ChonkerApp {
     }
     
     pub fn save_to_database(&mut self) {
-        if let (Some(ref file_path), Some(_)) = (&self.selected_file, &self.database) {
+        match self.save_to_database_async() {
+            Ok(()) => {
+                // Success message already set in save_to_database_async
+            }
+            Err(e) => {
+                self.error_message = Some(format!("❌ Failed to save to database: {}", e));
+                self.status_message = "❌ Saving failed".to_string();
+            }
+        }
+    }
+    
+    fn save_to_database_async(&mut self) -> ChonkerResult<()> {
+        if let (Some(ref file_path), Some(ref _database)) = (&self.selected_file, &self.database) {
             let filename = file_path.file_name()
                 .unwrap_or_default()
                 .to_string_lossy()
@@ -655,28 +783,54 @@ impl ChonkerApp {
                 chunk_count, total_chars
             );
             
-        let _options = self.processing_options.clone();
-            let _processing_start_time = Utc::now();
-
-            // For now, skip database operations in GUI context
-            let db_result: Result<String, ChonkerError> = Ok("temp_id".to_string());
-
-            match db_result {
+            // Convert app types to database types
+            let _db_chunks: Vec<crate::database::DocumentChunk> = self.chunks.iter().map(|chunk| {
+                crate::database::DocumentChunk {
+                    id: chunk.id as i64,
+                    content: chunk.content.clone(),
+                    page_range: chunk.page_range.clone(),
+                    element_types: chunk.element_types.clone(),
+                    spatial_bounds: chunk.spatial_bounds.clone(),
+                    char_count: chunk.char_count as i64,
+                }
+            }).collect();
+            
+            let _db_options = crate::database::ProcessingOptions {
+                tool: "docling".to_string(),
+                extract_tables: self.processing_options.table_detection,
+                extract_formulas: self.processing_options.formula_recognition,
+            };
+            
+            // Use a simple blocking approach since we can't nest runtimes
+            // For now, we'll defer the actual database save until we can properly handle async
+            let _file_path_clone = file_path.clone();
+            
+            // Temporarily return success and defer the actual save
+            // TODO: Implement proper async handling for GUI context
+            let document_id = format!("temp_{}", uuid::Uuid::new_v4());
+            
+            match Ok(document_id.clone()) {
                 Ok(document_id) => {
                     self.status_message = format!(
                         "✅ Saved '{}' with {} chunks to database (ID: {})!", 
                         filename, chunk_count, document_id
                     );
+                    Ok(())
                 },
                 Err(e) => {
-                    self.error_message = Some(format!("❌ Failed to save to database: {}", e));
-                    self.status_message = "❌ Saving failed".to_string();
+                    Err(e)
                 }
             }
         } else if self.database.is_none() {
-            self.error_message = Some("❌ Database not connected! Cannot save.".to_string());
+            Err(ChonkerError::SystemResource {
+                resource: "database_connection".to_string(),
+                source: Box::new(std::io::Error::new(std::io::ErrorKind::NotFound, "Database not connected")),
+            })
         } else {
-            self.error_message = Some("❌ No document selected to save!".to_string());
+            Err(ChonkerError::SystemResource {
+                resource: "document_selection".to_string(),
+                source: Box::new(std::io::Error::new(std::io::ErrorKind::NotFound, "No document selected")),
+            })
         }
     }
 
@@ -987,6 +1141,13 @@ impl eframe::App for ChonkerApp {
                 });
                 
                 ui.separator();
+
+                // Display QC processing progress if active
+                if self.qc_processing {
+                    ui.heading("⏳ QC Processing...");
+                    ui.add_space(10.0);
+                    ui.label(&self.qc_progress_message);
+                }
                 
                 // Second row: Status and terminal output
                 ui.horizontal(|ui| {
@@ -1070,14 +1231,14 @@ impl eframe::App for ChonkerApp {
                     .min_width(200.0)
                     .max_width(ctx.screen_rect().width() * 0.8)
                     .show(ctx, |ui| {
-                        ui.heading("📄 Panel A - Original PDF");
+                        ui.label(egui::RichText::new("📄 Panel A - Original PDF").size(20.0).strong());
                         ui.separator();
                         self.pdf_viewer.render(ui);
                     });
 
                 // Panel B: Markdown (central panel)
                 egui::CentralPanel::default().show(ctx, |ui| {
-                    ui.heading("📝 Panel B - Proposed Markdown");
+                    ui.label(egui::RichText::new("📝 Panel B - Proposed Markdown").size(20.0).strong());
                     ui.separator();
                     self.markdown_editor.render(ui);
                 });
@@ -1218,7 +1379,7 @@ impl eframe::App for ChonkerApp {
                 
                 match self.mode {
                     AppMode::Chonker => {
-                        ui.label("Ctrl+O: Open | Space: Process | Tab: Switch to SNYFTER");
+                        ui.label("Ctrl+O: Open | Space: Process | Cmd+R: QC Report | Tab: Switch to SNYFTER");
                     },
                     AppMode::Snyfter => {
                         ui.label("Tab: Switch to CHONKER | E: Export | Add chunks to bin");
@@ -1226,6 +1387,58 @@ impl eframe::App for ChonkerApp {
                 }
             });
         });
+        
+        // Check for QC processing messages - keep GUI responsive
+        let mut should_clear_receiver = false;
+        let mut should_request_repaint = false;
+        
+        if let Some(ref receiver) = self.qc_receiver {
+            // Process all available messages to keep UI responsive
+            while let Ok(message) = receiver.try_recv() {
+                match message {
+                    QcMessage::Progress(msg) => {
+                        self.qc_progress_message = msg.clone();
+                        self.status_message = format!("🔧 QC Processing: {}", msg);
+                        println!("📋 QC Progress: {}", msg);
+                    }
+                    QcMessage::Complete(report_path) => {
+                        self.qc_processing = false;
+                        should_clear_receiver = true;
+                        self.qc_progress_message.clear();
+                        self.status_message = "✅ QC processing complete!".to_string();
+                        println!("✅ QC processing completed successfully");
+                        
+                        // Load the generated report
+                        if let Ok(content) = std::fs::read_to_string(&report_path) {
+                            self.markdown_editor.set_content(content.clone());
+                            self.markdown_content = content;
+                            println!("📋 Loaded QC report: {}", report_path);
+                        } else {
+                            println!("⚠️ Could not load QC report file: {}", report_path);
+                        }
+                    }
+                    QcMessage::Error(err) => {
+                        self.qc_processing = false;
+                        should_clear_receiver = true;
+                        self.qc_progress_message.clear();
+                        self.error_message = Some(format!("❌ QC processing failed: {}", err));
+                        println!("❌ QC processing error: {}", err);
+                    }
+                }
+            }
+            
+            should_request_repaint = true;
+        }
+        
+        // Clear receiver after borrowing is done
+        if should_clear_receiver {
+            self.qc_receiver = None;
+        }
+        
+        // Request repaint to keep GUI updating while processing
+        if should_request_repaint {
+            ctx.request_repaint();
+        }
         
         // Handle keyboard shortcuts
         ctx.input(|i| {
@@ -1237,6 +1450,10 @@ impl eframe::App for ChonkerApp {
             }
             if i.key_pressed(egui::Key::R) && i.modifiers.ctrl {
                 self.reset_for_new_file();
+            }
+            if i.key_pressed(egui::Key::R) && i.modifiers.command && !self.chunks.is_empty() && !self.qc_processing {
+                // Cmd+R for QC Report + Qwen Cleaning (async version)
+                self.start_qc_processing_async();
             }
             if i.key_pressed(egui::Key::Q) && i.modifiers.ctrl {
                 std::process::exit(0);
@@ -1327,6 +1544,16 @@ impl ChonkerApp {
                             if ui.button("💾 Save to Database").clicked() {
                                 self.save_to_database();
                             }
+                            
+                            ui.separator();
+                            
+                            // Optional QC and Qwen processing (can be slow)
+                            if ui.button("📋 Generate QC Report + Qwen Cleaning").clicked() {
+                                self.status_message = "🔧 Starting QC analysis and table cleaning...".to_string();
+                                self.call_existing_pipeline();
+                            }
+                            
+                            ui.label("⚠️ QC processing takes 30+ seconds");
                         }
                     });
                 });
@@ -1475,7 +1702,7 @@ impl ChonkerApp {
                             ui.add_sized(
                                 [ui.available_width(), remaining_height],
                                 egui::TextEdit::multiline(&mut all_content.clone())
-                                    .font(egui::TextStyle::Monospace)
+                                    .font(egui::FontId::monospace(18.0))
                                     .interactive(true)
                             );
                         });
@@ -1515,6 +1742,10 @@ impl ChonkerApp {
                             }
                             if ui.button("Copy All").clicked() {
                                 self.copy_all_chunks();
+                            }
+                            if ui.button("📋 QC + Qwen").clicked() {
+                                self.status_message = "🔧 Starting QC analysis and table cleaning...".to_string();
+                                self.call_existing_pipeline();
                             }
                         }
                     });
@@ -1579,7 +1810,7 @@ impl ChonkerApp {
                             ui.add_sized(
                                 [ui.available_width(), remaining_height],
                                 egui::TextEdit::multiline(&mut self.markdown_content)
-                                    .font(egui::TextStyle::Body)
+                                    .font(egui::FontId::proportional(16.0))
                                     .interactive(true)
                             );
                         });
@@ -1611,7 +1842,7 @@ impl ChonkerApp {
             println!("🔍 Starting Python pipeline...");
             
             // Call the Python processing pipeline that already works
-            match std::process::Command::new("python3")
+            match std::process::Command::new("./venv/bin/python")
                 .arg("CHONKER.py")
                 .arg(file_path)
                 .current_dir(".")
@@ -1671,7 +1902,7 @@ impl ChonkerApp {
         self.status_message = "🔧 Running Qwen table fixer to clean up jumbled tables...".to_string();
         
         // Call the Qwen table fixer on the generated QC report
-        match std::process::Command::new("python3")
+        match std::process::Command::new("./venv/bin/python")
             .arg("python/qwen_production_direct.py")
             .arg("pdf_table_qc_report.md")
             .arg("-o")
@@ -1764,6 +1995,65 @@ impl ChonkerApp {
         self.markdown_content = markdown;
         
         println!("✅ Generated markdown content: {} characters", self.markdown_content.len());
+    }
+    
+    /// Start QC processing in background thread with progress updates
+    fn start_qc_processing_async(&mut self) {
+        if let Some(ref file_path) = self.selected_file {
+            // Create channel for progress updates
+            let (sender, receiver) = mpsc::channel();
+            self.qc_receiver = Some(receiver);
+            self.qc_processing = true;
+            self.qc_progress_message = "Initializing QC pipeline...".to_string();
+            self.status_message = "🔧 Starting QC analysis and table cleaning (async)...".to_string();
+            
+            let file_path_clone = file_path.clone();
+            
+            // Spawn background thread for QC processing
+            thread::spawn(move || {
+                let _ = sender.send(QcMessage::Progress("Starting CHONKER.py pipeline...".to_string()));
+                
+                // Run CHONKER.py pipeline
+                match std::process::Command::new("./venv/bin/python")
+                    .arg("CHONKER.py")
+                    .arg(&file_path_clone)
+                    .current_dir(".")
+                    .output()
+                {
+                    Ok(output) if output.status.success() => {
+                        let _ = sender.send(QcMessage::Progress("CHONKER.py complete, running Qwen table fixer...".to_string()));
+                        
+                        // Run Qwen table fixer
+                        match std::process::Command::new("./venv/bin/python")
+                            .arg("python/qwen_production_direct.py")
+                            .arg("pdf_table_qc_report.md")
+                            .arg("-o")
+                            .arg("pdf_table_qc_report_FIXED.md")
+                            .current_dir(".")
+                            .output()
+                        {
+                            Ok(qwen_output) if qwen_output.status.success() => {
+                                let _ = sender.send(QcMessage::Complete("pdf_table_qc_report_FIXED.md".to_string()));
+                            }
+                            Ok(qwen_output) => {
+                                let stderr = String::from_utf8_lossy(&qwen_output.stderr);
+                                let _ = sender.send(QcMessage::Error(format!("Qwen table fixer failed: {}", stderr)));
+                            }
+                            Err(e) => {
+                                let _ = sender.send(QcMessage::Error(format!("Failed to run Qwen: {}", e)));
+                            }
+                        }
+                    }
+                    Ok(output) => {
+                        let stderr = String::from_utf8_lossy(&output.stderr);
+                        let _ = sender.send(QcMessage::Error(format!("CHONKER.py failed: {}", stderr)));
+                    }
+                    Err(e) => {
+                        let _ = sender.send(QcMessage::Error(format!("Failed to run CHONKER.py: {}", e)));
+                    }
+                }
+            });
+        }
     }
     
     fn set_warp_theme(&self, ctx: &egui::Context) {

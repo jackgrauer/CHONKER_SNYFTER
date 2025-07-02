@@ -571,7 +571,7 @@ pub struct ChunkSearchResult {
     pub relevance_score: f64,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct DatabaseStats {
     pub document_count: usize,
     pub chunk_count: usize,

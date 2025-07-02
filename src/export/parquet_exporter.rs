@@ -1,10 +1,16 @@
+#[cfg(feature = "data_export")]
 use arrow::array::{
     Array, ArrayRef, StringArray, Int64Array, Float64Array, TimestampMillisecondArray, BooleanArray
 };
+#[cfg(feature = "data_export")]
 use arrow::datatypes::{DataType, Field, Schema, TimeUnit};
+#[cfg(feature = "data_export")]
 use arrow::record_batch::RecordBatch;
+#[cfg(feature = "data_export")]
 use parquet::arrow::{ArrowWriter, arrow_reader::ParquetRecordBatchReaderBuilder};
+#[cfg(feature = "data_export")]
 use parquet::file::properties::WriterProperties;
+#[cfg(feature = "data_export")]
 use parquet::basic::Compression;
 use sqlx::{SqlitePool, Row};
 use anyhow::{Result, anyhow};
@@ -322,7 +328,7 @@ impl ParquetExporter {
     
     /// Create Arrow RecordBatch from export data
     fn create_record_batch(&self, data: &[DocumentExportData]) -> Result<RecordBatch> {
-        let len = data.len();
+        let _len = data.len();
         
         // Create arrays for each column
         let document_ids: ArrayRef = Arc::new(StringArray::from(
