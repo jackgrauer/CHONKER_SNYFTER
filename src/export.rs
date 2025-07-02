@@ -1,10 +1,17 @@
 use anyhow::Result;
+#[cfg(feature = "data_export")]
 use polars::prelude::*;
+#[cfg(feature = "data_export")]
+use polars::io::json::JsonWriter;
+#[cfg(feature = "data_export")]
+use polars::io::parquet::ParquetWriter;
 use std::path::Path;
 use tracing::info;
 use crate::database::ChonkerDatabase;
 
+#[cfg(feature = "data_export")]
 mod parquet_exporter;
+#[cfg(feature = "data_export")]
 pub use parquet_exporter::{ParquetExporter, ParquetExportOptions, CompressionType};
 
 /// DataFrame exporter for various output formats
@@ -21,14 +28,19 @@ impl DataFrameExporter {
     pub async fn export_to_csv(&self, output_path: &Path, doc_id_filter: Option<&str>) -> Result<()> {
         info!("Exporting to CSV: {:?}", output_path);
         
+        #[cfg(feature = "data_export")]
         let df = self.create_dataframe(doc_id_filter).await?;
+        #[cfg(not(feature = "data_export"))]
+        return Err(anyhow::anyhow!("Data export feature not enabled"));
         
-        let mut file = std::fs::File::create(output_path)?;
-        CsvWriter::new(&mut file)
-            .include_header(true)
-            .finish(&mut df.clone())?;
-        
-        info!("CSV export completed: {} rows", df.height());
+        #[cfg(feature = "data_export")]
+        {
+            let mut file = std::fs::File::create(output_path)?;
+            CsvWriter::new(&mut file)
+                .include_header(true)
+                .finish(&mut df.clone())?;
+            info!("CSV export completed: {} rows", df.height());
+        }
         Ok(())
     }
     
@@ -36,12 +48,17 @@ impl DataFrameExporter {
     pub async fn export_to_json(&self, output_path: &Path, doc_id_filter: Option<&str>) -> Result<()> {
         info!("Exporting to JSON: {:?}", output_path);
         
+        #[cfg(feature = "data_export")]
         let df = self.create_dataframe(doc_id_filter).await?;
+        #[cfg(not(feature = "data_export"))]
+        return Err(anyhow::anyhow!("Data export feature not enabled"));
         
-        let mut file = std::fs::File::create(output_path)?;
-        JsonWriter::new(&mut file).finish(&mut df.clone())?;
-        
-        info!("JSON export completed: {} rows", df.height());
+        #[cfg(feature = "data_export")]
+        {
+            let mut file = std::fs::File::create(output_path)?;
+            JsonWriter::new(&mut file).finish(&mut df.clone())?;
+            info!("JSON export completed: {} rows", df.height());
+        }
         Ok(())
     }
     
@@ -49,16 +66,22 @@ impl DataFrameExporter {
     pub async fn export_to_parquet(&self, output_path: &Path, doc_id_filter: Option<&str>) -> Result<()> {
         info!("Exporting to Parquet: {:?}", output_path);
         
+        #[cfg(feature = "data_export")]
         let df = self.create_dataframe(doc_id_filter).await?;
+        #[cfg(not(feature = "data_export"))]
+        return Err(anyhow::anyhow!("Data export feature not enabled"));
         
-        let file = std::fs::File::create(output_path)?;
-        ParquetWriter::new(file).finish(&mut df.clone())?;
-        
-        info!("Parquet export completed: {} rows", df.height());
+        #[cfg(feature = "data_export")]
+        {
+            let file = std::fs::File::create(output_path)?;
+            ParquetWriter::new(file).finish(&mut df.clone())?;
+            info!("Parquet export completed: {} rows", df.height());
+        }
         Ok(())
     }
     
     /// Create DataFrame from database documents
+    #[cfg(feature = "data_export")]
     async fn create_dataframe(&self, doc_id_filter: Option<&str>) -> Result<DataFrame> {
         // Extract data for DataFrame columns
         let mut doc_ids: Vec<String> = Vec::new();
@@ -109,10 +132,14 @@ impl DataFrameExporter {
         }
         
         if doc_ids.is_empty() {
+            #[cfg(feature = "data_export")]
             return Ok(DataFrame::empty());
+            #[cfg(not(feature = "data_export"))]
+            return Err(anyhow::anyhow!("No data found"));
         }
         
         // Create DataFrame
+        #[cfg(feature = "data_export")]
         let df = df! {
             "document_id" => doc_ids,
             "filename" => filenames,
@@ -124,10 +151,16 @@ impl DataFrameExporter {
             "created_at" => created_ats,
         }?;
         
+        #[cfg(not(feature = "data_export"))]
+        {
+            return Err(anyhow::anyhow!("Data export feature not enabled"));
+        }
+        
         Ok(df)
     }
     
     /// Get export statistics
+    #[cfg(feature = "data_export")]
     pub async fn get_export_stats(&self, doc_id_filter: Option<&str>) -> Result<ExportStats> {
         let df = self.create_dataframe(doc_id_filter).await?;
         
@@ -148,7 +181,13 @@ impl DataFrameExporter {
         })
     }
     
+    #[cfg(not(feature = "data_export"))]
+    pub async fn get_export_stats(&self, _doc_id_filter: Option<&str>) -> Result<ExportStats> {
+        Err(anyhow::anyhow!("Data export feature not enabled"))
+    }
+    
     /// Export with custom query/filtering
+    #[cfg(feature = "data_export")]
     pub async fn export_filtered_csv(
         &self,
         output_path: &Path,
@@ -171,7 +210,17 @@ impl DataFrameExporter {
         Ok(())
     }
     
+    #[cfg(not(feature = "data_export"))]
+    pub async fn export_filtered_csv(
+        &self,
+        _output_path: &Path,
+        _filter_query: &str,
+    ) -> Result<()> {
+        Err(anyhow::anyhow!("Data export feature not enabled"))
+    }
+    
     /// Create summary DataFrame with aggregated statistics
+    #[cfg(feature = "data_export")]
     pub async fn export_summary_csv(&self, output_path: &Path) -> Result<()> {
         info!("Exporting summary data to CSV: {:?}", output_path);
         
@@ -195,6 +244,11 @@ impl DataFrameExporter {
         
         info!("Summary CSV export completed: {} rows", summary_df.height());
         Ok(())
+    }
+    
+    #[cfg(not(feature = "data_export"))]
+    pub async fn export_summary_csv(&self, _output_path: &Path) -> Result<()> {
+        Err(anyhow::anyhow!("Data export feature not enabled"))
     }
 }
 

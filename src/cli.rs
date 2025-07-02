@@ -5,6 +5,7 @@ use crate::database::{ChonkerDatabase, ProcessingOptions};
 use crate::processing::{ChonkerProcessor, ProcessingResult};
 use crate::export::DataFrameExporter;
 use crate::config::{ChonkerConfig, ToolPreference};
+#[cfg(feature = "advanced_pdf")]
 use crate::analyzer::ComplexityAnalyzer;
 
 /// Extract PDF to markdown command with intelligent routing
@@ -208,6 +209,7 @@ fn convert_chunks_to_markdown(result: &ProcessingResult) -> String {
 }
 
 /// Analyze document complexity using available methods
+#[cfg(feature = "advanced_pdf")]
 async fn analyze_document_complexity(
     pdf_path: &PathBuf, 
     _config: &ChonkerConfig
@@ -250,7 +252,35 @@ async fn analyze_document_complexity(
     }
 }
 
+/// Analyze document complexity fallback for non-advanced_pdf builds
+#[cfg(not(feature = "advanced_pdf"))]
+async fn analyze_document_complexity(
+    pdf_path: &PathBuf, 
+    _config: &ChonkerConfig
+) -> Result<BasicComplexityScore> {
+    let metadata = std::fs::metadata(pdf_path)?;
+    let file_size_mb = metadata.len() as f32 / 1_048_576.0;
+    
+    let score = if file_size_mb < 2.0 { 2.0 } else if file_size_mb < 10.0 { 5.0 } else { 8.0 };
+    
+    Ok(BasicComplexityScore {
+        score,
+        reasoning: format!("File size: {:.1}MB - Basic analysis (advanced features not available)", file_size_mb),
+        should_use_fast_path: score <= 3.0,
+    })
+}
+
+/// Basic complexity score for non-advanced_pdf builds
+#[cfg(not(feature = "advanced_pdf"))]
+#[derive(Clone, Debug)]
+pub struct BasicComplexityScore {
+    pub score: f32,
+    pub reasoning: String,
+    pub should_use_fast_path: bool,
+}
+
 /// Determine which processing tool to use based on preference and complexity
+#[cfg(feature = "advanced_pdf")]
 fn determine_processing_tool(
     preference: &ToolPreference, 
     complexity: &crate::analyzer::ComplexityScore, 
@@ -278,7 +308,36 @@ fn determine_processing_tool(
     }
 }
 
+#[cfg(not(feature = "advanced_pdf"))]
+fn determine_processing_tool(
+    preference: &ToolPreference, 
+    complexity: &BasicComplexityScore, 
+    config: &ChonkerConfig
+) -> ToolPreference {
+    match preference {
+        ToolPreference::Auto => {
+            // Check file extension first
+            let should_force_python = config.routing.force_python_for_types
+                .iter()
+                .any(|ext| complexity.reasoning.to_lowercase().contains(ext));
+                
+            if should_force_python {
+                debug!("🐍 Forcing Python due to file type");
+                ToolPreference::Python
+            } else if complexity.score <= config.routing.complexity_threshold {
+                debug!("🦀 Selecting Rust fast path (score: {:.1})", complexity.score);
+                ToolPreference::Rust
+            } else {
+                debug!("🐍 Selecting Python complex path (score: {:.1})", complexity.score);
+                ToolPreference::Python
+            }
+        },
+        other => other.clone(),
+    }
+}
+
 /// Process document with fallback mechanism
+#[cfg(feature = "advanced_pdf")]
 async fn process_with_fallback(
     pdf_path: &PathBuf,
     tool: &ToolPreference,
@@ -339,7 +398,70 @@ async fn process_with_fallback(
     }
 }
 
+/// Process document with fallback mechanism (non-advanced_pdf version)
+#[cfg(not(feature = "advanced_pdf"))]
+async fn process_with_fallback(
+    pdf_path: &PathBuf,
+    tool: &ToolPreference,
+    _complexity_score: &BasicComplexityScore,
+    config: &ChonkerConfig,
+) -> Result<ProcessingResult> {
+    let mut processor = ChonkerProcessor::new();
+    
+    let processing_options = ProcessingOptions {
+        tool: format!("{:?}", tool).to_lowercase(),
+        extract_tables: true,
+        extract_formulas: true,
+    };
+    
+    match tool {
+        ToolPreference::Rust => {
+            // Try Rust path first
+            match processor.process_document(pdf_path, &processing_options).await {
+                Ok(result) => {
+                    info!("🦀 Rust fast path successful");
+                    Ok(result)
+                },
+                Err(e) => {
+                    if config.routing.enable_fallback {
+                        warn!("🦀 Rust path failed: {}", e);
+                        warn!("🐍 Falling back to Python path...");
+                        
+                        let python_options = ProcessingOptions {
+                            tool: "python".to_string(),
+                            extract_tables: true,
+                            extract_formulas: true,
+                        };
+                        
+                        processor.process_document(pdf_path, &python_options).await
+                            .map_err(|e| anyhow::anyhow!("Both Rust and Python paths failed: {:?}", e))
+                    } else {
+                        Err(anyhow::anyhow!("Rust processing failed: {}", e))
+                    }
+                }
+            }
+        },
+        ToolPreference::Python => {
+            info!("🐍 Using Python ML path");
+            processor.process_document(pdf_path, &processing_options).await
+                .map_err(|e| anyhow::anyhow!("Python processing failed: {:?}", e))
+        },
+        ToolPreference::Auto => {
+            // This should not happen as Auto is resolved earlier
+            warn!("⚠️  Auto preference not resolved, defaulting to Python");
+            let python_options = ProcessingOptions {
+                tool: "python".to_string(),
+                extract_tables: true,
+                extract_formulas: true,
+            };
+            processor.process_document(pdf_path, &python_options).await
+                .map_err(|e| anyhow::anyhow!("Auto fallback to Python failed: {:?}", e))
+        }
+    }
+}
+
 /// Store processing telemetry for learning and optimization
+#[cfg(feature = "advanced_pdf")]
 async fn store_processing_telemetry(
     _database: &ChonkerDatabase,
     pdf_path: &PathBuf,
@@ -371,6 +493,38 @@ async fn store_processing_telemetry(
     
     // Store in database (we'll add a telemetry table later)
     debug!("📊 Telemetry: {}", telemetry);
+    
+    // For now, just log the telemetry
+    // TODO: Add actual database storage for telemetry
+    
+    Ok(())
+}
+
+/// Store processing telemetry for learning and optimization (non-advanced_pdf version)
+#[cfg(not(feature = "advanced_pdf"))]
+async fn store_processing_telemetry(
+    _database: &ChonkerDatabase,
+    pdf_path: &PathBuf,
+    complexity_score: &BasicComplexityScore,
+    processing_result: &ProcessingResult,
+) -> Result<()> {
+    debug!("📊 Storing basic processing telemetry");
+    
+    // Create basic telemetry record
+    let telemetry = serde_json::json!({
+        "file_path": pdf_path.to_string_lossy(),
+        "complexity_score": complexity_score.score,
+        "processing_result": {
+            "tool_used": processing_result.metadata.tool_used,
+            "processing_time_ms": processing_result.metadata.processing_time_ms,
+            "processing_path": format!("{:?}", processing_result.processing_path),
+            "chunk_count": processing_result.chunks.len(),
+            "success": true,
+        },
+        "timestamp": chrono::Utc::now().to_rfc3339(),
+    });
+    
+    debug!("📊 Basic telemetry: {}", telemetry);
     
     // For now, just log the telemetry
     // TODO: Add actual database storage for telemetry

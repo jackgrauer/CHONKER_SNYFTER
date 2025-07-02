@@ -912,19 +912,23 @@ class SimpleDatabase:
 class AnxietyFreeCHONKER:
     """🐹 CHONKER v6.0 - Anxiety-Free with Live Monitoring and Snyfter Integration"""
     
-    def __init__(self, chunk_size: int = 95000):
+    def __init__(self, chunk_size: int = 95000, fast_mode: bool = False):
         self.chunk_size = chunk_size
+        self.fast_mode = fast_mode
         self.current_document: Optional[SimpleDocument] = None
         
         # SNYFTER INTEGRATION: Use persistent directory instead of temp
         self.chunk_dir = Path("saved_chonker_chunks")
         self.chunk_dir.mkdir(exist_ok=True)
         
-        # Initialize monitoring
-        self.monitor = ActivityMonitor()
-        
-        # Initialize keep-awake system
-        self.keep_awake = SystemKeepAwake(self.monitor)
+        # Initialize monitoring (only if not in fast mode)
+        if not self.fast_mode:
+            self.monitor = ActivityMonitor()
+            # Initialize keep-awake system
+            self.keep_awake = SystemKeepAwake(self.monitor)
+        else:
+            self.monitor = None
+            self.keep_awake = None
         
         # Initialize components with monitoring
         self.processor = SimpleDocProcessor(self.monitor)
@@ -1397,10 +1401,16 @@ class AnxietyFreeCHONKER:
 
 def main():
     """Entry point"""
-    console.print("[bold cyan]🐹 CHONKER v6.0 - Anxiety-Free Processing (Snyfter Compatible)[/bold cyan]")
+    # Check for fast mode argument
+    fast_mode = len(sys.argv) > 1 and sys.argv[1] == "--fast"
+    
+    if fast_mode:
+        console.print("[bold cyan]🐹 CHONKER v6.0 - Fast Mode (No Live Monitoring)[/bold cyan]")
+    else:
+        console.print("[bold cyan]🐹 CHONKER v6.0 - Anxiety-Free Processing (Snyfter Compatible)[/bold cyan]")
     
     try:
-        chonker = AnxietyFreeCHONKER()
+        chonker = AnxietyFreeCHONKER(fast_mode=fast_mode)
         chonker.run()
     except Exception as e:
         console.print(f"[red]❌ Startup error: {e}[/red]")

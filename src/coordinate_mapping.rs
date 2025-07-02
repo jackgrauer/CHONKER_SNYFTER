@@ -1,5 +1,6 @@
 use serde::Deserialize;
 use std::path::Path;
+#[cfg(feature = "gui")]
 use eframe::egui;
 
 /// Docling bounding box structure (matches their JSON output)

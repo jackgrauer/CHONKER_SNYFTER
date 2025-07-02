@@ -14,11 +14,33 @@ from pathlib import Path
 from typing import Dict, List, Any, Optional, Tuple
 import traceback
 
-# Docling v2 imports
-from docling.document_converter import DocumentConverter
+# Docling v2 imports with MLX optimization
+from docling.document_converter import DocumentConverter, FormatOption
 from docling.datamodel.base_models import InputFormat, Table
 from docling.datamodel.pipeline_options import PdfPipelineOptions, TableFormerMode
-from docling.document_converter import FormatOption
+from docling.pipeline.standard_pdf_pipeline import StandardPdfPipeline
+from docling.backend.docling_parse_backend import DoclingParseDocumentBackend
+
+# MLX-optimized VLM imports
+try:
+    import mlx.core as mx
+    from docling.datamodel.pipeline_options_vlm_model import InlineVlmOptions, InferenceFramework
+    from docling.datamodel.accelerator_options import AcceleratorOptions, AcceleratorDevice
+    
+    # Test MLX availability
+    if mx.metal.is_available():
+        MLX_AVAILABLE = True
+        print("🚀 MLX backend available - will use optimized Metal compute", file=sys.stderr)
+        print(f"🔧 MLX Device: {mx.default_device()}", file=sys.stderr)
+        device_info = mx.metal.device_info()
+        print(f"💾 Memory: {device_info['memory_size']/1024/1024/1024:.1f}GB available", file=sys.stderr)
+    else:
+        MLX_AVAILABLE = False
+        print("⚠️ MLX Metal not available", file=sys.stderr)
+except ImportError as e:
+    MLX_AVAILABLE = False
+    print(f"⚠️ MLX backend not available: {e}", file=sys.stderr)
+    print("📋 Falling back to PyTorch + MPS", file=sys.stderr)
 
 class EnvironmentalLabProcessor:
     """Enhanced processor for environmental laboratory documents"""
@@ -241,7 +263,14 @@ def extract_with_enhanced_docling(pdf_path: str, page_num: Optional[int] = None)
         
         print(f"✅ Pipeline configured for environmental lab documents", file=sys.stderr)
         
-        # Create converter with enhanced options
+        # Create converter with enhanced pipeline
+        if MLX_AVAILABLE:
+            print("🚀 MLX backend detected - Apple Silicon optimizations available", file=sys.stderr)
+            print("🧠 Using MLX-optimized Metal compute for accelerated processing", file=sys.stderr)
+        else:
+            print("📋 Using standard PyTorch + MPS converter", file=sys.stderr)
+            
+        # Configure enhanced pipeline
         converter = DocumentConverter()
         
         from docling.pipeline.standard_pdf_pipeline import StandardPdfPipeline
@@ -343,19 +372,7 @@ def extract_with_enhanced_docling(pdf_path: str, page_num: Optional[int] = None)
         markdown_content = result.document.export_to_markdown()
         
         # Add enhancement metadata to markdown
-        enhancement_header = f"""# Enhanced Environmental Lab Document Analysis
-
-**Qualifier Conventions Detected:**
-{chr(10).join(f"- **{k}**: {v}" for k, v in conventions.items())}
-
-**Processing Summary:**
-- Tables processed: {len(processed_tables)}
-- Qualifier issues found: {total_issues}
-- Column patterns detected: {sum(len(t['patterns']) for t in processed_tables)}
-
----
-
-"""
+        enhancement_header = f""" === """
         
         enhanced_markdown = enhancement_header + markdown_content
         

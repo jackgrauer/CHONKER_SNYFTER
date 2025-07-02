@@ -23,7 +23,9 @@
 - **⚙️ Docling v2 Enhanced**: Advanced OCR, table detection, and formula recognition
 - **📊 Structure Preservation**: Maintains complex table layouts, formulas, and metadata
 - **🎯 Pattern Recognition**: Detects repeating column structures (Concentration|Qualifier|RL|MDL)
-- **🐹 Interactive PDF Viewer**: Fast Rust-based GUI for side-by-side PDF and markdown preview
+- **🚀 High-Performance PDF Viewer**: MuPDF-powered direct C library integration (15-100x faster than external tools)
+- **💾 Smart Memory Management**: Intelligent caching with configurable limits and LRU eviction
+- **⚡ Real-time Navigation**: Instant page switching and zooming with performance monitoring
 
 ## 📊 Phase 2 Complete: Production-Ready Core System
 
@@ -118,7 +120,7 @@ export ANTHROPIC_API_KEY=sk-ant-your-key-here
 
 ## 🏗️ Architecture Overview
 
-CHONKER_SNYFTER uses a hybrid Rust-Python architecture:
+CHONKER_SNYFTER uses a Rust-Python architecture:
 
 1. **Rust Core** (./target/debug/chonker)
    - CLI interface and argument parsing

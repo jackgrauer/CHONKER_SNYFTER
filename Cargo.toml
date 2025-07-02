@@ -9,21 +9,10 @@ authors = ["Jack <jack@chonker.ai>"]
 name = "chonker"
 path = "src/main.rs"
 
-[[bin]]
-name = "tui_mockup"
-path = "tui_mockup.rs"
-
-[[bin]]
-name = "minimal_tui"
-path = "minimal_tui.rs"
 
 [[bin]]
 name = "table_cleaner"
 path = "src/bin/table_cleaner.rs"
-
-[[bin]]
-name = "clean_tables"
-path = "src/bin/clean_tables.rs"
 
 [[bin]]
 name = "extract_tables"
@@ -37,32 +26,47 @@ path = "src/bin/pdf_viewer.rs"
 name = "chonker_gui"
 path = "src/bin/chonker_gui.rs"
 
+
 [features]
-default = []
+default = ["tui"]
 debug = []
+tui = ["ratatui", "crossterm"]
+gui = ["eframe", "image", "rfd", "arboard"]
+data_export = ["polars", "arrow", "parquet"]
+advanced_pdf = ["pdfium-render"]
+mupdf = ["mupdf-sys"]
+python_bridge = ["pyo3"]
+caching = ["redis"]
+advanced_logging = ["tracing-appender"]
+
+# Convenience feature combinations
+full_gui = ["gui", "data_export", "advanced_pdf"]
+full_tui = ["tui", "data_export"]
+minimal = []
 
 [dependencies]
 # CLI framework
 clap = { version = "4.4", features = ["derive"] }
-ratatui = "0.26"
-crossterm = "0.27"
 
-# Database and async runtime
-sqlx = { version = "0.7", features = ["runtime-tokio-native-tls", "sqlite", "json", "chrono", "uuid"] }
-tokio = { version = "1", features = ["full"] }
+# TUI framework (feature-gated)
+ratatui = { version = "0.26", optional = true }
+crossterm = { version = "0.27", optional = true }
 
-# Data processing and export
-polars = { version = "0.35", features = ["lazy", "json", "parquet", "csv"] }
-arrow = { version = "53.0", features = ["csv", "json"] }
-parquet = { version = "53.0", features = ["arrow", "async"] }
+# Database and async runtime (minimal features)
+sqlx = { version = "0.7", features = ["runtime-tokio-native-tls", "sqlite", "chrono"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs", "io-util"] }
+
+# Data processing (polars includes arrow/parquet)
+polars = { version = "0.35", features = ["lazy", "csv", "json", "parquet"], optional = true }
 
 # Markdown processing
 pulldown-cmark = "0.10"
 
-# Serialization
+# Serialization (minimal)
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 toml = "0.8"
+
 
 # Error handling
 anyhow = "1.0"
@@ -72,38 +76,38 @@ thiserror = "1.0"
 chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1.0", features = ["v4", "serde"] }
 
-# Logging
+# Logging (simplified)
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
-tracing-appender = "0.2"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 # Text processing
 textwrap = "0.16"
-unicode-width = "0.1"
-md5 = "0.7"
 regex = "1.10"
 
-# Native PDF processing (fast path)
-pdfium-render = "0.8"
+# Native PDF processing
 lopdf = "0.32"
 blake3 = "1.5"
+md5 = "0.7"
 
-# GUI for PDF preview
-egui = "0.28"
-eframe = { version = "0.28", default-features = false, features = ["default_fonts", "glow"] }
-image = "0.25"
+# GUI for PDF preview (eframe includes egui)
+eframe = { version = "0.28", default-features = false, features = ["default_fonts", "glow"], optional = true }
+image = { version = "0.25", optional = true }
 
-# Caching and processing
-redis = { version = "0.24", optional = true }
-tokio-util = "0.7"
+# Processing
 rayon = "1.8"
 
-# GUI dependencies
-rfd = "0.14"
-arboard = "3.3"
+# GUI dependencies (feature-gated)
+rfd = { version = "0.14", optional = true }
+arboard = { version = "3.3", optional = true }
 
-# PyO3 for Python bridge (optional)
+# Optional dependencies
+pdfium-render = { version = "0.8", optional = true }
+mupdf-sys = { version = "0.5", optional = true }
+redis = { version = "0.24", optional = true }
 pyo3 = { version = "0.20", features = ["auto-initialize"], optional = true }
+tracing-appender = { version = "0.2", optional = true }
+arrow = { version = "53.0", optional = true }
+parquet = { version = "53.0", optional = true }
 
 [dev-dependencies]
 tempfile = "3.0"

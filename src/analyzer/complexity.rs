@@ -1,3 +1,4 @@
+#[cfg(feature = "advanced_pdf")]
 use pdfium_render::prelude::*;
 use std::path::Path;
 use anyhow::{Result, anyhow};

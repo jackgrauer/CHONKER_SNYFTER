@@ -1,5 +1,5 @@
 use sqlx::{SqlitePool, Row};
-use anyhow::{Result, anyhow};
+use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use tracing::{info, debug};
 

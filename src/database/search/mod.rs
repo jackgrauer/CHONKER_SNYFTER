@@ -5,6 +5,6 @@ pub use fts::{
     SearchQuery, 
     SearchResult, 
     SearchOptions, 
-    BooleanQuery, 
-    BooleanOperator
+    // BooleanQuery, 
+    // BooleanOperator
 };

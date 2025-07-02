@@ -1,3 +1,4 @@
+#[cfg(feature = "gui")]
 use eframe::egui;
 use std::collections::HashMap;
 

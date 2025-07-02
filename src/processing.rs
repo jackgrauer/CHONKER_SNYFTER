@@ -1,6 +1,8 @@
 use crate::database::{DocumentChunk, ProcessingOptions};
 use crate::error::{ChonkerError, ChonkerResult};
-use crate::complexity::{ComplexityScorer, ExtractionPath};
+#[cfg(feature = "advanced_pdf")]
+use crate::analyzer::{ComplexityAnalyzer, ComplexityScore};
+#[cfg(feature = "advanced_pdf")]
 use crate::native_extractor::NativeExtractor;
 // TODO: Integrate new FastPathProcessor and ComplexityAnalyzer
 use std::path::Path;
@@ -54,7 +56,10 @@ pub struct ChonkerProcessor {
     pub python_bridge: Option<PythonBridge>,
     
     // Complexity analysis
-    pub complexity_scorer: ComplexityScorer,
+    #[cfg(feature = "advanced_pdf")]
+    pub complexity_analyzer: Option<ComplexityAnalyzer>,
+    #[cfg(not(feature = "advanced_pdf"))]
+    pub complexity_analyzer: Option<()>,
     
     // Caching
     pub processing_cache: HashMap<String, ProcessingResult>,
@@ -65,8 +70,14 @@ pub struct ChonkerProcessor {
 }
 
 /// Rust native extractor for fast path
+#[cfg(feature = "advanced_pdf")]
 pub struct RustExtractor {
     native_extractor: NativeExtractor,
+}
+
+#[cfg(not(feature = "advanced_pdf"))]
+pub struct RustExtractor {
+    _placeholder: (),
 }
 
 /// Python bridge for complex processing
@@ -98,7 +109,10 @@ impl ChonkerProcessor {
         Self {
             rust_extractor,
             python_bridge: Some(PythonBridge::new()),
-            complexity_scorer: ComplexityScorer::new(),
+            #[cfg(feature = "advanced_pdf")]
+            complexity_analyzer: ComplexityAnalyzer::new().ok(),
+            #[cfg(not(feature = "advanced_pdf"))]
+            complexity_analyzer: None,
             processing_cache: HashMap::new(),
             enable_caching: true,
             complexity_threshold: COMPLEXITY_THRESHOLD,
@@ -124,66 +138,93 @@ impl ChonkerProcessor {
             }
         }
         
-        // Analyze document complexity using the proper analyzer
-        let complexity_analysis = self.complexity_scorer.analyze_metadata(file_path)
-            .map_err(|e| ChonkerError::SystemResource {
-                resource: "complexity_analysis".to_string(),
-                source: Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())),
-            })?;
+        // Without advanced_pdf feature, always use complex path
+        #[cfg(not(feature = "advanced_pdf"))]
+        {
+            warn!("⚠️  Advanced PDF features not available, using complex path");
+            return self.process_complex_path(file_path, options).await;
+        }
         
-        info!("📊 {}", self.complexity_scorer.describe_analysis(&complexity_analysis));
-        
-        // Route to appropriate processing path based on analysis
-        let mut result = match complexity_analysis.recommended_path {
-            ExtractionPath::Native => {
-                if self.rust_extractor.is_some() {
-                    // Fast path - Rust native
-                    info!("🚀 Using fast path (Rust native)");
-                    self.process_fast_path(file_path, options).await?
-                } else {
-                    // Fallback to complex path if native extractor unavailable
-                    info!("🧠 Falling back to complex path (native unavailable)");
-                    self.process_complex_path(file_path, options).await?
+        // Analyze document complexity using the new analyzer
+        #[cfg(feature = "advanced_pdf")]
+        {
+            let complexity_analysis = match &self.complexity_analyzer {
+                Some(analyzer) => {
+                    analyzer.analyze_simple(file_path)
+                        .map_err(|e| ChonkerError::SystemResource {
+                            resource: "complexity_analysis".to_string(),
+                            source: Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())),
+                        })?
                 }
-            },
-            ExtractionPath::Python => {
-                // Complex path decision
-                if options.tool == "fast" {
-                    // Progressive: Fast path + background ML enhancement
-                    info!("⚡ Using progressive path (Fast + ML queued)");
-                    let fast_result = self.process_fast_path(file_path, options).await?;
-                    self.queue_ml_enhancement(file_path, options).await;
-                    
-                    ProcessingResult {
-                        chunks: fast_result.chunks,
-                        metadata: ProcessingMetadata {
-                            total_pages: fast_result.metadata.total_pages,
-                            processing_time_ms: start_time.elapsed().as_millis() as u64,
-                            tool_used: "rust_progressive".to_string(),
-                            complexity_score: complexity_analysis.score,
+                None => {
+                    // Fallback complexity analysis - create a simple score structure
+                    ComplexityScore {
+                        score: 5.0,
+                        factors: crate::analyzer::complexity::ComplexityFactors {
+                            page_count: 0,
+                            has_images: false,
+                            has_tables: false,
+                            has_forms: false,
+                            file_size_mb: 0.0,
+                            has_multiple_columns: false,
                         },
-                        processing_path: ProcessingPath::Progressive,
+                        reasoning: "Fallback analysis - analyzer unavailable".to_string(),
+                        should_use_fast_path: false,
                     }
-                } else {
-                    // Direct complex path
-                    info!("🧠 Using complex path (Python ML)");
-                    self.process_complex_path(file_path, options).await?
                 }
+            };
+            
+            info!("📊 Complexity analysis: {}", complexity_analysis.reasoning);
+            
+            // Route to appropriate processing path based on analysis
+            let mut result = if complexity_analysis.should_use_fast_path {
+            if self.rust_extractor.is_some() {
+                // Fast path - Rust native
+                info!("🚀 Using fast path (Rust native)");
+                self.process_fast_path(file_path, options).await?
+            } else {
+                // Fallback to complex path if native extractor unavailable
+                info!("🧠 Falling back to complex path (native unavailable)");
+                self.process_complex_path(file_path, options).await?
+            }
+        } else {
+            // Complex path decision
+            if options.tool == "fast" {
+                // Progressive: Fast path + background ML enhancement
+                info!("⚡ Using progressive path (Fast + ML queued)");
+                let fast_result = self.process_fast_path(file_path, options).await?;
+                self.queue_ml_enhancement(file_path, options).await;
+                
+                ProcessingResult {
+                    chunks: fast_result.chunks,
+                    metadata: ProcessingMetadata {
+                        total_pages: fast_result.metadata.total_pages,
+                        processing_time_ms: start_time.elapsed().as_millis() as u64,
+                        tool_used: "rust_progressive".to_string(),
+                        complexity_score: complexity_analysis.score as f64,
+                    },
+                    processing_path: ProcessingPath::Progressive,
+                }
+            } else {
+                // Direct complex path
+                info!("🧠 Using complex path (Python ML)");
+                self.process_complex_path(file_path, options).await?
             }
         };
         
-        // Update metadata with complexity analysis
-        result.metadata.complexity_score = complexity_analysis.score;
-        
-        // Cache the result
-        if self.enable_caching {
-            self.processing_cache.insert(cache_key, result.clone());
+            // Update metadata with complexity analysis
+            result.metadata.complexity_score = complexity_analysis.score as f64;
+            
+            // Cache the result
+            if self.enable_caching {
+                self.processing_cache.insert(cache_key, result.clone());
+            }
+            
+            let total_time = start_time.elapsed().as_millis() as u64;
+            info!("✅ Processing completed in {}ms", total_time);
+            
+            Ok(result)
         }
-        
-        let total_time = start_time.elapsed().as_millis() as u64;
-        info!("✅ Processing completed in {}ms", total_time);
-        
-        Ok(result)
     }
     
     /// Analyze document complexity for routing decisions
@@ -345,6 +386,7 @@ impl ChonkerProcessor {
     }
 }
 
+#[cfg(feature = "advanced_pdf")]
 impl RustExtractor {
     pub fn new() -> Result<Self, anyhow::Error> {
         let native_extractor = NativeExtractor::new()?;
@@ -395,6 +437,43 @@ impl RustExtractor {
     pub fn detect_layout(&self, _page_data: &[u8]) -> ChonkerResult<Vec<String>> {
         // Layout detection not yet implemented - return empty vector instead of fake data
         Ok(vec![])
+    }
+}
+
+#[cfg(not(feature = "advanced_pdf"))]
+impl RustExtractor {
+    pub fn new() -> Result<Self, anyhow::Error> {
+        Err(anyhow::anyhow!("Advanced PDF features not available"))
+    }
+    
+    pub async fn extract_text(&self, _file_path: &Path) -> ChonkerResult<Vec<DocumentChunk>> {
+        Err(ChonkerError::SystemResource {
+            resource: "native_extractor".to_string(),
+            source: Box::new(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "Advanced PDF features not available"
+            )),
+        })
+    }
+
+    pub fn extract_tables(&self, _page_data: &[u8]) -> ChonkerResult<Vec<String>> {
+        Err(ChonkerError::SystemResource {
+            resource: "native_extractor".to_string(),
+            source: Box::new(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "Advanced PDF features not available"
+            )),
+        })
+    }
+    
+    pub fn detect_layout(&self, _page_data: &[u8]) -> ChonkerResult<Vec<String>> {
+        Err(ChonkerError::SystemResource {
+            resource: "native_extractor".to_string(),
+            source: Box::new(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "Advanced PDF features not available"
+            )),
+        })
     }
 }
 
