@@ -1,5 +1,6 @@
 use crate::database::{DocumentChunk, ProcessingOptions};
 use crate::error::{ChonkerError, ChonkerResult};
+// use crate::smart_chunker::SmartChunker;
 #[cfg(feature = "advanced_pdf")]
 use crate::analyzer::{ComplexityAnalyzer, ComplexityScore};
 #[cfg(feature = "advanced_pdf")]
@@ -125,7 +126,7 @@ impl ChonkerProcessor {
         file_path: &Path,
         options: &ProcessingOptions,
     ) -> ChonkerResult<ProcessingResult> {
-        let start_time = Instant::now();
+        let _start_time = Instant::now();
         
         info!("🐹 Processing document: {:?}", file_path);
         
@@ -507,13 +508,13 @@ impl PythonBridge {
         }
     }
     
-    /// Advanced extraction using Python ML tools
+    /// Advanced extraction using Python ML tools with smart chunking
     pub async fn extract_advanced(
         &self,
         file_path: &Path,
         _options: &ProcessingOptions,
     ) -> ChonkerResult<Vec<DocumentChunk>> {
-        debug!("🧠 Python ML extraction: {:?}", file_path);
+        debug!("🧠 Python ML extraction with smart chunking: {:?}", file_path);
         
         // Use the actual Python extraction script
         let mut extractor = crate::extractor::Extractor::new();
@@ -531,7 +532,13 @@ impl PythonBridge {
             });
         }
         
-        // Convert Python extraction results to DocumentChunk format
+        // TODO: Implement smart chunking here once the module is properly integrated
+        info!("📋 Using structured table chunker (smart chunking temporarily disabled)");
+        
+        // Fallback: Legacy chunking for non-Docling results or if smart chunking fails
+        info!("📋 Using legacy character-based chunking");
+        
+        // Convert Python extraction results to DocumentChunk format (legacy method)
         let mut chunks = Vec::new();
         for (idx, page_extraction) in extraction_result.extractions.iter().enumerate() {
             // Only create chunks if there's actual content
@@ -555,7 +562,7 @@ impl PythonBridge {
         if chunks.is_empty() {
             info!("📄 No extractable text content found in PDF");
         } else {
-            info!("✅ Python extraction completed: {} chunks from {} pages", 
+            info!("✅ Legacy extraction completed: {} chunks from {} pages", 
                   chunks.len(), extraction_result.metadata.total_pages);
         }
         

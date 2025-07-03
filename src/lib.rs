@@ -5,8 +5,10 @@
 pub mod app;
 pub mod database;
 pub mod error;
-pub mod logging;
-pub mod extractor;
+pub mod cli;
+pub mod config;
+pub mod smart_chunker;
+pub mod document_model;
 #[cfg(feature = "advanced_pdf")]
 pub mod native_extractor;
 pub mod processing;
@@ -15,15 +17,20 @@ pub mod export;
 pub mod pdf;
 #[cfg(feature = "advanced_pdf")]
 pub mod analyzer;
-pub mod config;
+pub mod extractor;
+pub mod logging;
 pub mod smart_column_extractor;
-#[cfg(feature = "gui")]
-pub mod pdf_viewer;
 #[cfg(all(feature = "mupdf", feature = "gui"))]
 pub mod mupdf_viewer;
 #[cfg(feature = "gui")]
 pub mod markdown_editor;
 #[cfg(feature = "gui")]
 pub mod coordinate_mapping;
+#[cfg(feature = "gui")]
+pub mod validation_editor;
+#[cfg(feature = "gui")]
+pub mod data_visualization;
+#[cfg(feature = "gui")]
+pub mod extraction_integration;
 pub mod sync;
 pub mod project;

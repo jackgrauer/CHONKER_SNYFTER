@@ -4,7 +4,7 @@ use mupdf_sys as fz;
 use eframe::egui::{self, *};
 use std::path::{Path, PathBuf};
 use std::collections::HashMap;
-use std::ffi::{CString, CStr};
+use std::ffi::CString;
 use std::ptr;
 #[cfg(feature = "gui")]
 use crate::coordinate_mapping::CoordinateMapper;
@@ -31,6 +31,14 @@ pub struct MuPdfViewer {
     pub coordinate_mapper: CoordinateMapper,
     pub debug_overlay: bool,
     zoom_level: f32,
+    show_images: bool,
+    dark_mode: bool,
+    
+    // Navigation and gesture state
+    pan_offset: egui::Vec2,
+    is_dragging: bool,
+    last_drag_pos: Option<egui::Pos2>,
+    pinch_start_zoom: Option<f32>,
     
     // Performance monitoring
     render_times: Vec<std::time::Duration>,
@@ -38,7 +46,7 @@ pub struct MuPdfViewer {
 }
 
 #[derive(Debug, Clone)]
-struct MemoryStats {
+pub struct MemoryStats {
     peak_usage: usize,
     current_usage: usize,
     cache_hits: usize,
@@ -79,7 +87,15 @@ impl MuPdfViewer {
             
             coordinate_mapper: CoordinateMapper::new(),
             debug_overlay: false,
-            zoom_level: 1.0,
+            zoom_level: 1.0, // Default to 100% zoom
+            show_images: false,
+            dark_mode: true, // Default to dark mode
+            
+            // Initialize navigation and gesture state
+            pan_offset: egui::Vec2::ZERO,
+            is_dragging: false,
+            last_drag_pos: None,
+            pinch_start_zoom: None,
             
             render_times: Vec::new(),
             memory_stats: MemoryStats::default(),
@@ -179,97 +195,56 @@ impl MuPdfViewer {
             ui.available_size(),
             Layout::centered_and_justified(Direction::TopDown),
             |ui| {
-                ui.heading("🚀 MuPDF Viewer");
-                ui.add_space(20.0);
                 ui.label("No PDF loaded");
                 ui.label("Use Ctrl+O to load a document");
-                ui.add_space(10.0);
-                ui.label("⚡ High-performance PDF rendering with MuPDF!");
-                ui.label(format!("💾 Cache limit: {} MB", self.cache_memory_limit / (1024 * 1024)));
-                ui.add_space(10.0);
-                
-                // Show memory stats
-                ui.group(|ui| {
-                    ui.label("📊 Memory Stats:");
-                    ui.label(format!("Current usage: {} KB", self.memory_stats.current_usage / 1024));
-                    ui.label(format!("Peak usage: {} KB", self.memory_stats.peak_usage / 1024));
-                    ui.label(format!("Cached textures: {}", self.memory_stats.texture_count));
-                    ui.label(format!("Cache hits: {}", self.memory_stats.cache_hits));
-                    ui.label(format!("Cache misses: {}", self.memory_stats.cache_misses));
-                });
             },
         );
     }
     
     fn render_pdf_content(&mut self, ui: &mut Ui) {
         ui.vertical(|ui| {
-            ui.heading("🚀 MuPDF Content");
-            ui.separator();
-            
-            if let Some(ref file) = self.current_file {
-                ui.horizontal(|ui| {
-                    ui.label(format!("File: {}", file.file_name().unwrap_or_default().to_string_lossy()));
-                    ui.separator();
-                    ui.label(format!("Pages: {}", self.page_count));
-                    ui.separator();
-                    ui.label(format!("Current: {}/{}", self.current_page + 1, self.page_count));
-                });
-                
-                ui.separator();
-                
-                // Enhanced controls row
+            if let Some(ref _file) = self.current_file {
+                // Simple controls row - minimal UI
                 ui.horizontal(|ui| {
                     // Page navigation
-                    if ui.button("⬅ Previous").clicked() && self.current_page > 0 {
+                    if ui.button("⬅").clicked() && self.current_page > 0 {
                         self.current_page -= 1;
+                        self.pan_offset = egui::Vec2::ZERO; // Reset pan when changing pages
                     }
                     
-                    ui.label(format!("{} / {}", self.current_page + 1, self.page_count));
+                    ui.label(format!("{}/{}", self.current_page + 1, self.page_count));
                     
-                    if ui.button("➡ Next").clicked() && self.current_page < self.page_count.saturating_sub(1) {
+                    if ui.button("➡").clicked() && self.current_page < self.page_count.saturating_sub(1) {
                         self.current_page += 1;
+                        self.pan_offset = egui::Vec2::ZERO; // Reset pan when changing pages
                     }
                     
                     ui.separator();
                     
-                    // Zoom controls
-                    ui.label("Zoom:");
-                    if ui.button("-").clicked() {
+                    // Zoom controls with trackpad gesture feedback
+                    if ui.button("🔍-").clicked() {
                         self.zoom_level = (self.zoom_level - 0.1).max(0.1);
+                        self.page_cache.remove(&self.current_page);
                     }
                     ui.label(format!("{:.0}%", self.zoom_level * 100.0));
-                    if ui.button("+").clicked() {
+                    if ui.button("🔍+").clicked() {
                         self.zoom_level = (self.zoom_level + 0.1).min(5.0);
+                        self.page_cache.remove(&self.current_page);
                     }
                     
                     ui.separator();
                     
-                    // Cache management
-                    if ui.button("🗑️ Clear Cache").clicked() {
-                        self.clear_cache();
+                    // Reset view button
+                    if ui.button("🎯 Reset View").clicked() {
+                        self.zoom_level = 1.0;
+                        self.pan_offset = egui::Vec2::ZERO;
+                        self.page_cache.remove(&self.current_page);
                     }
                     
                     ui.separator();
-                    ui.checkbox(&mut self.debug_overlay, "Debug overlay");
-                });
-                
-                // Performance and memory info
-                ui.horizontal(|ui| {
-                    ui.label(format!("💾 Memory: {} KB / {} MB", 
-                        self.memory_stats.current_usage / 1024,
-                        self.cache_memory_limit / (1024 * 1024)
-                    ));
-                    ui.separator();
-                    ui.label(format!("📊 Cache: {} hits, {} misses", 
-                        self.memory_stats.cache_hits, 
-                        self.memory_stats.cache_misses
-                    ));
                     
-                    if !self.render_times.is_empty() {
-                        let avg_time = self.render_times.iter().sum::<std::time::Duration>() / self.render_times.len() as u32;
-                        ui.separator();
-                        ui.label(format!("⚡ Avg render: {:.2}ms", avg_time.as_secs_f64() * 1000.0));
-                    }
+                    // Gesture help
+                    ui.small("💡 Pinch to zoom • Drag to pan • Cmd+scroll to zoom");
                 });
                 
                 ui.separator();
@@ -317,8 +292,9 @@ impl MuPdfViewer {
             // Get page bounds
             let bounds = unsafe { fz::fz_bound_page(mupdf_ctx, page) };
             
-            // Calculate render matrix for good quality
-            let scale = 2.0 * self.zoom_level; // 2.0 for good quality
+            // Calculate render matrix to match Docling's 72 DPI
+            // 72 DPI is 1.0 scale, multiply by zoom level only
+            let scale = 1.0 * self.zoom_level; // Match Docling's 72 DPI
             let matrix = fz::fz_matrix {
                 a: scale,
                 b: 0.0,
@@ -329,7 +305,7 @@ impl MuPdfViewer {
             };
             
             // Transform bounds
-            let mut bbox = fz::fz_irect { x0: 0, y0: 0, x1: 0, y1: 0 };
+            let bbox;
             unsafe { 
                 let transformed_bounds = fz::fz_transform_rect(bounds, matrix);
                 bbox = fz::fz_round_rect(transformed_bounds);
@@ -437,41 +413,163 @@ impl MuPdfViewer {
     }
     
     fn display_page_texture(&mut self, ui: &mut Ui, texture: &TextureHandle) {
-        let available_width = ui.available_width();
-        let available_height = ui.available_height() - 50.0;
+        let available_width = ui.available_width().max(400.0); // Ensure minimum width
+        let available_height = (ui.available_height() - 50.0).max(400.0); // Less height reduction, more space for PDF
         
         let texture_size = texture.size_vec2();
-        let base_scale = (available_width / texture_size.x).min(available_height / texture_size.y).min(1.0);
+        
+        // Calculate appropriate scale - prioritize width fitting to avoid right-side cutoff
+        let base_scale = if texture_size.x > 0.0 && texture_size.y > 0.0 {
+            let width_scale = available_width / texture_size.x;
+            let height_scale = available_height / texture_size.y;
+            
+            // println!("🔍 PDF Display Scaling Debug:");
+            // println!("  Available space: {}x{}", available_width, available_height);
+            // println!("  Texture size: {}x{}", texture_size.x, texture_size.y);
+            // println!("  Width scale: {:.3}, Height scale: {:.3}", width_scale, height_scale);
+            
+            // ALWAYS use width scale to show full page width - let ScrollArea handle height overflow
+            let chosen_scale = width_scale;
+            // println!("  ✅ Using WIDTH scale: {:.3} (allowing vertical scroll for height overflow)", width_scale);
+            
+            chosen_scale
+        } else {
+            // println!("  ⚠️ Invalid texture size, using fallback scale");
+            1.0 // Fallback if texture size is invalid
+        };
+        
         let final_scale = base_scale * self.zoom_level;
         let display_size = texture_size * final_scale;
         
-        ScrollArea::both()
+        // Ensure display size is valid
+        if display_size.x <= 0.0 || display_size.y <= 0.0 {
+            ui.label("⚠️ Invalid page size calculated");
+            return;
+        }
+        
+        
+        let mut scroll_area = ScrollArea::both()
             .max_height(available_height)
-            .show(ui, |ui| {
-                let response = ui.add(
-                    Image::from_texture(texture)
-                        .fit_to_exact_size(display_size)
-                        .sense(Sense::click())
-                );
-                
-                // Handle PDF clicks for coordinate mapping
-                if response.clicked() {
-                    if let Some(click_pos) = response.interact_pointer_pos() {
-                        let relative_vec = click_pos - response.rect.min;
-                        let relative_pos = egui::pos2(relative_vec.x, relative_vec.y);
-                        let scale_factor = egui::vec2(final_scale, final_scale);
-                        
-                        if let Some(region_index) = self.coordinate_mapper.handle_pdf_click(relative_pos, scale_factor) {
-                            tracing::info!("Clicked PDF region: {}", region_index);
+            .auto_shrink([false, false]) // Don't auto-shrink, use full space
+            .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::VisibleWhenNeeded);
+            
+        // Reset scroll position to top when page changes
+        scroll_area = scroll_area.vertical_scroll_offset(0.0);
+        
+        scroll_area.show(ui, |ui| {
+                // Ensure content starts at the top by setting a vertical layout with no spacing
+                ui.vertical(|ui| {
+                    ui.spacing_mut().item_spacing.y = 0.0; // No extra spacing
+                    
+                    // Create response area for PDF image with comprehensive gesture support
+                    let response = ui.allocate_response(display_size, Sense::click_and_drag());
+                    
+                    // Apply pan offset to the image position
+                    let image_rect = egui::Rect::from_min_size(
+                        response.rect.min + self.pan_offset,
+                        display_size
+                    );
+                    
+                    // Render the PDF image at the adjusted position
+                    ui.allocate_ui_at_rect(image_rect, |ui| {
+                        ui.add(
+                            Image::from_texture(texture)
+                                .fit_to_exact_size(display_size)
+                                .sense(Sense::hover())
+                        );
+                    });
+                    
+                    // === COMPREHENSIVE MACOS TRACKPAD & MOUSE GESTURE HANDLING ===
+                    if response.hovered() {
+                        ui.ctx().input(|i| {
+                            // === PINCH TO ZOOM (Two-finger zoom) ===
+                            if let Some(multi_touch) = i.multi_touch() {
+                                let zoom_delta = multi_touch.zoom_delta_2d;
+                                if zoom_delta != egui::Vec2::ZERO {
+                                    // Natural pinch-to-zoom: spread fingers apart = zoom in
+                                    let zoom_factor = 1.0 + zoom_delta.length() * 0.1; // Scale down the sensitivity
+                                    if (zoom_factor - 1.0).abs() > 0.01 { // Threshold to avoid jitter
+                                        self.zoom_level = (self.zoom_level * zoom_factor).clamp(0.1, 10.0);
+                                        
+                                        // Clear cache to force re-render at new zoom level
+                                        if let Some(texture) = self.page_cache.remove(&self.current_page) {
+                                            let texture_size = texture.size_vec2();
+                                            let texture_memory = (texture_size.x * texture_size.y * 4.0) as usize;
+                                            self.cache_memory_used = self.cache_memory_used.saturating_sub(texture_memory);
+                                        }
+                                    }
+                                }
+                                
+                                // === TWO-FINGER PAN (Trackpad scrolling) ===
+                                let pan_delta = multi_touch.translation_delta;
+                                if pan_delta.length() > 1.0 { // Threshold to avoid jitter
+                                    self.pan_offset += pan_delta;
+                                }
+                            }
+                            
+                            // === SCROLL WHEEL ZOOM (Cmd/Ctrl + scroll) ===
+                            let scroll_delta = i.raw_scroll_delta.y;
+                            let modifiers = i.modifiers;
+                            
+                            // Zoom with Cmd+scroll (macOS) or Ctrl+scroll (Windows/Linux)
+                            if (modifiers.command || modifiers.ctrl) && scroll_delta.abs() > 0.1 {
+                                let zoom_factor = 1.0 + (scroll_delta / 500.0); // Smoother zoom
+                                self.zoom_level = (self.zoom_level * zoom_factor).clamp(0.1, 10.0);
+                                
+                                // Clear cache to force re-render at new zoom level
+                                if let Some(texture) = self.page_cache.remove(&self.current_page) {
+                                    let texture_size = texture.size_vec2();
+                                    let texture_memory = (texture_size.x * texture_size.y * 4.0) as usize;
+                                    self.cache_memory_used = self.cache_memory_used.saturating_sub(texture_memory);
+                                }
+                            }
+                            
+                            // === REGULAR SCROLL (without modifiers) for panning ===
+                            else if !modifiers.command && !modifiers.ctrl && (scroll_delta.abs() > 0.1 || i.raw_scroll_delta.x.abs() > 0.1) {
+                                // Natural scrolling: scroll up = move content up (pan down)
+                                self.pan_offset += egui::vec2(-i.raw_scroll_delta.x, -i.raw_scroll_delta.y);
+                            }
+                        });
+                    }
+                    
+                    // === MOUSE DRAG NAVIGATION ===
+                    if response.drag_started() {
+                        self.is_dragging = true;
+                        self.last_drag_pos = response.interact_pointer_pos();
+                    }
+                    
+                    if response.dragged() && self.is_dragging {
+                        if let (Some(current_pos), Some(last_pos)) = (response.interact_pointer_pos(), self.last_drag_pos) {
+                            let drag_delta = current_pos - last_pos;
+                            self.pan_offset += drag_delta;
+                            self.last_drag_pos = Some(current_pos);
                         }
                     }
-                }
-                
-                // Render debug overlay if enabled
-                if self.debug_overlay {
-                    let scale_factor = egui::vec2(final_scale, final_scale);
-                    self.coordinate_mapper.render_debug_overlay(ui, response.rect, scale_factor);
-                }
+                    
+                    if response.drag_stopped() {
+                        self.is_dragging = false;
+                        self.last_drag_pos = None;
+                    }
+                    
+                    // Handle PDF clicks for coordinate mapping
+                    if response.clicked() {
+                        if let Some(click_pos) = response.interact_pointer_pos() {
+                            let relative_vec = click_pos - response.rect.min;
+                            let relative_pos = egui::pos2(relative_vec.x, relative_vec.y);
+                            let scale_factor = egui::vec2(final_scale, final_scale);
+                            
+                            if let Some(region_index) = self.coordinate_mapper.handle_pdf_click(relative_pos, scale_factor) {
+                                tracing::info!("Clicked PDF region: {}", region_index);
+                            }
+                        }
+                    }
+                    
+                    // Render debug overlay if enabled
+                    if self.debug_overlay {
+                        let scale_factor = egui::vec2(final_scale, final_scale);
+                        self.coordinate_mapper.render_debug_overlay(ui, response.rect, scale_factor);
+                    }
+                });
             });
     }
     

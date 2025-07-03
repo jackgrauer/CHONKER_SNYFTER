@@ -25,59 +25,56 @@ impl DataFrameExporter {
     }
     
     /// Export documents to CSV format
-    pub async fn export_to_csv(&self, output_path: &Path, doc_id_filter: Option<&str>) -> Result<()> {
+    pub async fn export_to_csv(&self, output_path: &Path, _doc_id_filter: Option<&str>) -> Result<()> {
         info!("Exporting to CSV: {:?}", output_path);
         
         #[cfg(feature = "data_export")]
-        let df = self.create_dataframe(doc_id_filter).await?;
-        #[cfg(not(feature = "data_export"))]
-        return Err(anyhow::anyhow!("Data export feature not enabled"));
-        
-        #[cfg(feature = "data_export")]
         {
+            let df = self.create_dataframe(_doc_id_filter).await?;
             let mut file = std::fs::File::create(output_path)?;
             CsvWriter::new(&mut file)
                 .include_header(true)
                 .finish(&mut df.clone())?;
             info!("CSV export completed: {} rows", df.height());
+            Ok(())
         }
-        Ok(())
+        
+        #[cfg(not(feature = "data_export"))]
+        Err(anyhow::anyhow!("Data export feature not enabled"))
     }
     
     /// Export documents to JSON format
-    pub async fn export_to_json(&self, output_path: &Path, doc_id_filter: Option<&str>) -> Result<()> {
+    pub async fn export_to_json(&self, output_path: &Path, _doc_id_filter: Option<&str>) -> Result<()> {
         info!("Exporting to JSON: {:?}", output_path);
         
         #[cfg(feature = "data_export")]
-        let df = self.create_dataframe(doc_id_filter).await?;
-        #[cfg(not(feature = "data_export"))]
-        return Err(anyhow::anyhow!("Data export feature not enabled"));
-        
-        #[cfg(feature = "data_export")]
         {
+            let df = self.create_dataframe(_doc_id_filter).await?;
             let mut file = std::fs::File::create(output_path)?;
             JsonWriter::new(&mut file).finish(&mut df.clone())?;
             info!("JSON export completed: {} rows", df.height());
+            Ok(())
         }
-        Ok(())
+        
+        #[cfg(not(feature = "data_export"))]
+        Err(anyhow::anyhow!("Data export feature not enabled"))
     }
     
     /// Export documents to Parquet format
-    pub async fn export_to_parquet(&self, output_path: &Path, doc_id_filter: Option<&str>) -> Result<()> {
+    pub async fn export_to_parquet(&self, output_path: &Path, _doc_id_filter: Option<&str>) -> Result<()> {
         info!("Exporting to Parquet: {:?}", output_path);
         
         #[cfg(feature = "data_export")]
-        let df = self.create_dataframe(doc_id_filter).await?;
-        #[cfg(not(feature = "data_export"))]
-        return Err(anyhow::anyhow!("Data export feature not enabled"));
-        
-        #[cfg(feature = "data_export")]
         {
+            let df = self.create_dataframe(_doc_id_filter).await?;
             let file = std::fs::File::create(output_path)?;
             ParquetWriter::new(file).finish(&mut df.clone())?;
             info!("Parquet export completed: {} rows", df.height());
+            Ok(())
         }
-        Ok(())
+        
+        #[cfg(not(feature = "data_export"))]
+        Err(anyhow::anyhow!("Data export feature not enabled"))
     }
     
     /// Create DataFrame from database documents

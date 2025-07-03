@@ -11,10 +11,6 @@ path = "src/main.rs"
 
 
 [[bin]]
-name = "table_cleaner"
-path = "src/bin/table_cleaner.rs"
-
-[[bin]]
 name = "extract_tables"
 path = "src/bin/extract_tables.rs"
 
@@ -65,15 +61,15 @@ pulldown-cmark = "0.10"
 # Serialization (minimal)
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+chrono = { version = "0.4", features = ["serde"] }
+regex = "1.0"
 toml = "0.8"
-
 
 # Error handling
 anyhow = "1.0"
 thiserror = "1.0"
 
 # File system and utilities
-chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1.0", features = ["v4", "serde"] }
 
 # Logging (simplified)
@@ -82,7 +78,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 # Text processing
 textwrap = "0.16"
-regex = "1.10"
+nom = "7.1"
 
 # Native PDF processing
 lopdf = "0.32"
@@ -111,3 +107,17 @@ parquet = { version = "53.0", optional = true }
 
 [dev-dependencies]
 tempfile = "3.0"
+
+# Build profiles for performance and memory optimization
+[profile.release]
+strip = true
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+
+# Memory-optimized development profile
+[profile.dev]
+opt-level = 1
+overflow-checks = false
+strip = "symbols"
