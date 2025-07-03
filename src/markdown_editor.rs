@@ -65,17 +65,20 @@ impl MarkdownEditor {
     }
     
     fn render_editor(&mut self, ui: &mut egui::Ui) {
-        // TODO: Implement syntax-highlighted editor
-        // For now, use basic text edit
-        
+        // Use a more readable font with better spacing and line height
         egui::ScrollArea::vertical()
             .max_height(ui.available_height())
             .show(ui, |ui| {
+                // Better text formatting with line spacing
+                ui.style_mut().spacing.item_spacing.y = 8.0; // More space between lines
+                
                 ui.add_sized(
                     [ui.available_width(), ui.available_height()],
                     egui::TextEdit::multiline(&mut self.content)
-                        .font(egui::TextStyle::Monospace)
+                        .font(egui::FontId::proportional(16.0)) // Larger, more readable font
                         .interactive(true)
+                        .desired_width(ui.available_width())
+                        .lock_focus(false)
                 );
             });
     }

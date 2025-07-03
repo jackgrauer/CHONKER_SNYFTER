@@ -92,9 +92,7 @@ use eframe::egui;
 use std::path::PathBuf;
 use tracing::{info, debug};
 use crate::error::{ChonkerError, ChonkerResult};
-use crate::log_error;
 use crate::database::ChonkerDatabase;
-use crate::pdf_viewer::PdfViewer;
 #[cfg(all(feature = "mupdf", feature = "gui"))]
 use crate::mupdf_viewer::MuPdfViewer;
 use crate::markdown_editor::MarkdownEditor;
@@ -105,11 +103,39 @@ use crate::project::Project;
 use std::sync::mpsc;
 use std::thread;
 
-#[derive(Debug, Clone)]
-pub enum QcMessage {
+#[derive(Debug)]
+enum QcMessage {
     Progress(String),
     Complete(String),
     Error(String),
+}
+
+#[derive(Debug)]
+enum ProcessingMessage {
+    Progress(f32, String),
+    Complete(Vec<DocumentChunk>, Option<String>), // Added raw JSON
+    Error(String),
+}
+
+// Structures for parsing structured chunks from Python bridge
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct StructuredChunk {
+    pub id: String,
+    #[serde(rename = "type")]
+    pub chunk_type: String,
+    pub element_type: String,
+    pub content: String,
+    pub page_number: u32,
+    pub bbox: Option<BoundingBox>,
+    pub table_data: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct BoundingBox {
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -209,7 +235,6 @@ pub struct VisualSelection {
 }
 
 pub enum PdfViewerType {
-    Standard(PdfViewer),
     #[cfg(all(feature = "mupdf", feature = "gui"))]
     MuPdf(MuPdfViewer),
 }
@@ -217,25 +242,28 @@ pub enum PdfViewerType {
 impl PdfViewerType {
     pub fn render(&mut self, ui: &mut egui::Ui) {
         match self {
-            PdfViewerType::Standard(viewer) => viewer.render(ui),
             #[cfg(all(feature = "mupdf", feature = "gui"))]
             PdfViewerType::MuPdf(viewer) => viewer.render(ui),
+            #[cfg(not(all(feature = "mupdf", feature = "gui")))]
+            _ => {},
         }
     }
     
     pub fn load_pdf(&mut self, path: &std::path::Path) -> Result<(), Box<dyn std::error::Error>> {
         match self {
-            PdfViewerType::Standard(viewer) => viewer.load_pdf(path),
             #[cfg(all(feature = "mupdf", feature = "gui"))]
             PdfViewerType::MuPdf(viewer) => viewer.load_pdf(path),
+            #[cfg(not(all(feature = "mupdf", feature = "gui")))]
+            _ => Err("MuPDF feature not enabled".into()),
         }
     }
     
     pub fn get_page_count(&self) -> usize {
         match self {
-            PdfViewerType::Standard(viewer) => viewer.get_page_count(),
             #[cfg(all(feature = "mupdf", feature = "gui"))]
             PdfViewerType::MuPdf(viewer) => viewer.get_page_count(),
+            #[cfg(not(all(feature = "mupdf", feature = "gui")))]
+            _ => 0,
         }
     }
 }
@@ -244,6 +272,8 @@ pub struct ChonkerApp {
     // App state for loading screen
     pub state: AppState,
     
+    // Auto-load tracking
+    pub auto_loaded: bool,
     
     // Core components
     pub pdf_viewer: PdfViewerType,
@@ -282,6 +312,7 @@ pub struct ChonkerApp {
     // Export bin for SNYFTER mode
     pub export_bin: Vec<DocumentChunk>,
     
+    
     // Coordinate mapping state
     pub selected_pdf_region: Option<usize>,
     pub selected_text_chunk: Option<usize>,
@@ -290,6 +321,13 @@ pub struct ChonkerApp {
     pub qc_processing: bool,
     pub qc_progress_message: String,
     pub qc_receiver: Option<mpsc::Receiver<QcMessage>>,
+    
+    // Async PDF processing
+    pub processing_receiver: Option<mpsc::Receiver<ProcessingMessage>>,
+    
+    // Data visualization components
+    #[cfg(feature = "gui")]
+    pub data_viz_pane: crate::data_visualization::DataVisualizationPane,
 }
 
 impl ChonkerApp {
@@ -298,8 +336,10 @@ impl ChonkerApp {
             // Initialize app state as ready, not loading
             state: AppState::Ready,
             
+            // Auto-load tracking
+            auto_loaded: false,
             
-            // Initialize core components with MuPDF if available
+            // Initialize core components with MuPDF
             pdf_viewer: {
                 #[cfg(all(feature = "mupdf", feature = "gui"))]
                 {
@@ -308,8 +348,7 @@ impl ChonkerApp {
                 }
                 #[cfg(not(all(feature = "mupdf", feature = "gui")))]
                 {
-                    println!("📄 Using standard PDF viewer (build with --features mupdf for better performance)");
-                    PdfViewerType::Standard(PdfViewer::new())
+                    panic!("MuPDF feature must be enabled - no fallback PDF viewer available");
                 }
             },
             markdown_editor: MarkdownEditor::new(),
@@ -351,6 +390,11 @@ impl ChonkerApp {
             qc_processing: false,
             qc_progress_message: String::new(),
             qc_receiver: None,
+            processing_receiver: None,
+            
+            // Initialize data visualization component
+            #[cfg(feature = "gui")]
+            data_viz_pane: crate::data_visualization::DataVisualizationPane::new(),
         }
     }
     
@@ -381,8 +425,8 @@ impl ChonkerApp {
                 
                 // Validate file
                 if let Err(e) = self.validate_selected_file(&file) {
-                    log_error!(e, "file_validation");
-                    self.error_message = Some(e.user_message());
+                    tracing::error!("File validation failed: {}", e);
+                    self.error_message = Some(format!("{}", e));
                     self.selected_file = None;
                     self.file_input.clear();
                 } else {
@@ -459,58 +503,48 @@ impl ChonkerApp {
             self.processing_progress = 0.0;
             self.status_message = "🐹 CHONKER is processing PDF... Please wait".to_string();
             
-            // Try to process the actual PDF with simple Docling
-            match self.process_pdf(file_path) {
-                Ok(chunks) => {
-                    info!("PDF processing successful: {} chunks created", chunks.len());
-                    self.chunks = chunks;
-                    self.processing_progress = 100.0;
-                    self.is_processing = false;
-                    self.status_message = format!("✅ Processing complete! {} chunks created", self.chunks.len());
-                    
-                    // Generate markdown content immediately
-                    self.generate_markdown_from_chunks();
-                    
-                    // Automatically save to database if available
-                    if self.database.is_some() {
-                        if let Err(e) = self.save_to_database_async() {
-                            self.error_message = Some(format!("⚠️ Document processed but database save failed: {}", e));
-                        } else {
-                            self.status_message = format!("✅ Processing complete! {} chunks created and saved to database", self.chunks.len());
-                        }
-                    }
-                    
-                    // Optional QC reporting and Qwen table cleaning (can be slow)
-                    // Only run if user specifically requests it to avoid GUI freezing
-                    // self.call_existing_pipeline();
-                }
-                Err(e) => {
-                    self.is_processing = false;
-                    self.error_message = Some(format!("❌ Processing failed: {}", e));
-                    self.status_message = "❌ Processing failed".to_string();
-                }
-            }
+            // Start async processing in background thread
+            self.start_async_processing(file_path.clone());
         }
     }
-    fn process_pdf(&self, file_path: &std::path::Path) -> Result<Vec<DocumentChunk>, Box<dyn std::error::Error>> {
+    
+    fn start_async_processing(&mut self, file_path: std::path::PathBuf) {
+        let (sender, receiver) = mpsc::channel();
+        self.processing_receiver = Some(receiver);
+        
+        // Spawn background task for PDF processing
+        thread::spawn(move || {
+            let _ = sender.send(ProcessingMessage::Progress(10.0, "🔍 Analyzing PDF structure...".to_string()));
+            
+            // Run the actual PDF processing
+            match Self::process_pdf_blocking(&file_path) {
+                Ok((chunks, raw_json)) => {
+                    let _ = sender.send(ProcessingMessage::Progress(90.0, "✅ Processing complete, generating chunks...".to_string()));
+                    let _ = sender.send(ProcessingMessage::Complete(chunks, raw_json));
+                }
+                Err(e) => {
+                    let _ = sender.send(ProcessingMessage::Error(format!("❌ Processing failed: {}", e)));
+                }
+            }
+        });
+    }
+    fn process_pdf_blocking(file_path: &std::path::Path) -> Result<(Vec<DocumentChunk>, Option<String>), Box<dyn std::error::Error>> {
         // Performance timing
         let total_start = std::time::Instant::now();
         println!("🔍 Starting PDF processing for: {:?}", file_path);
         
-        // IMMEDIATE UI FEEDBACK: Use fast extraction to populate UI instantly
-        let fast_start = std::time::Instant::now();
-        if let Ok(fast_text) = self.extract_pdf_fast(file_path) {
-            if !fast_text.is_empty() {
-                println!("⚡ Fast preview extraction took: {:?} - {} chars", fast_start.elapsed(), fast_text.len());
-                // TODO: Could show this as preview in UI while Docling processes
-            }
+        // Memory optimization: Check file size first
+        let file_size = std::fs::metadata(file_path)?.len();
+        let is_large_file = file_size > 50_000_000; // 50MB threshold
+        
+        if is_large_file {
+            println!("⚠️ Large file detected ({:.1}MB) - using memory-optimized processing", file_size as f64 / 1_048_576.0);
         }
         
-        // PRIMARY PATH: Always use Docling for full processing (this is our core engine)
         println!("🧠 Running Docling processing (this is our main engine)...");
         
         let path_buf = file_path.to_path_buf();
-        let mut extractor = self.extractor.clone();
+        let mut extractor = Extractor::new();
         extractor.set_preferred_tool("auto".to_string());
         
         let extraction_start = std::time::Instant::now();
@@ -527,17 +561,47 @@ impl ChonkerApp {
                 let stdout = String::from_utf8_lossy(&output.stdout);
                 match serde_json::from_str::<serde_json::Value>(&stdout) {
                     Ok(json) => {
-                        // Parse the JSON response to extract text from extraction bridge format
+                        // Store the raw JSON for ValidationPane
+                        let raw_docling_json = stdout.to_string();
+                        
+                        // Check for structured chunks in the new format
+                        if let Some(extractions) = json["extractions"].as_array() {
+                            if let Some(extraction) = extractions.first() {
+                                if let Some(structured_chunks_json) = extraction["structured_chunks"].as_array() {
+                                    println!("✅ Found {} structured chunks from Docling!", structured_chunks_json.len());
+                                    
+                                    // Parse structured chunks directly
+                                    let structured_chunks: Vec<StructuredChunk> = structured_chunks_json.iter()
+                                        .filter_map(|chunk_json| {
+                                            match serde_json::from_value::<StructuredChunk>(chunk_json.clone()) {
+                                                Ok(chunk) => Some(chunk),
+                                                Err(e) => {
+                                                    println!("⚠️ Failed to parse structured chunk: {}", e);
+                                                    None
+                                                }
+                                            }
+                                        })
+                                        .collect();
+                                    
+                                    println!("📊 Successfully parsed {} structured chunks", structured_chunks.len());
+                                    
+                                    // Convert structured chunks to DocumentChunk format
+                                    return Ok((Self::convert_structured_chunks_to_document_chunks(structured_chunks), Some(raw_docling_json)));
+                                }
+                            }
+                        }
+                        
+                        // Fallback to old text extraction only if structured chunking failed
+                        println!("⚠️ No structured chunks found, falling back to old text extraction");
                         let text = if let Some(extractions) = json["extractions"].as_array() {
                             extractions.iter()
                                 .filter_map(|ext| ext["text"].as_str())
                                 .collect::<Vec<&str>>()
                                 .join("\n\n")
                         } else {
-                            // Fallback to other possible structures
                             json["text"].as_str().unwrap_or("No text extracted").to_string()
                         };
-                        Ok(crate::extractor::ExtractionResult {
+                        Ok((crate::extractor::ExtractionResult {
                             success: true,
                             tool: "python_bridge".to_string(),
                             extractions: vec![crate::extractor::PageExtraction {
@@ -555,7 +619,7 @@ impl ChonkerApp {
                                 processing_time: 0,
                             },
                             error: None,
-                        })
+                        }, Some(raw_docling_json)))
                     }
                     Err(e) => Err(format!("Failed to parse JSON response: {}", e))
                 }
@@ -569,15 +633,17 @@ impl ChonkerApp {
         
         println!("🔍 Advanced PDF extraction took: {:?}", extraction_start.elapsed());
         
-        let text = match extraction_result {
-            Ok(result) => {
+        let (text, raw_json) = match extraction_result {
+            Ok((result, raw_json)) => {
                 info!("Extraction successful with tool: {}", result.tool);
                 
                 // Convert extraction result to text
-                result.extractions.iter()
+                let text = result.extractions.iter()
                     .map(|page| page.text.clone())
                     .collect::<Vec<_>>()
-                    .join("\n\n")
+                    .join("\n\n");
+                    
+                (text, raw_json)
             }
             Err(e) => {
                 return Err(format!("Advanced extraction failed: {}. Please check if Python dependencies (Docling/Magic-PDF) are installed correctly.", e).into());
@@ -588,15 +654,24 @@ impl ChonkerApp {
             return Err("No text found in PDF - document might be image-based or encrypted. Try enabling OCR!".into());
         }
 
-        // Adaptive chunking for large documents
+        // Memory optimization: Adaptive chunking for large documents
         let file_size = std::fs::metadata(file_path)?.len();
         let is_large_doc = file_size > 10_000_000; // 10MB threshold
+        let is_huge_doc = file_size > 50_000_000; // 50MB threshold
         
-        let chunk_size = if is_large_doc {
+        let chunk_size = if is_huge_doc {
+            5000 // Much larger chunks for huge documents to save memory
+        } else if is_large_doc {
             2000 // Larger chunks for big documents for performance
         } else {
             800  // Smaller chunks for better granularity
         };
+        
+        // Memory optimization: Process text in streaming mode for large files
+        if is_huge_doc {
+            // For huge files, process in smaller memory-efficient chunks
+            return Self::process_huge_document_streaming(&text, file_path, raw_json);
+        }
         
         // Smart chunking: try to break on sentence boundaries
         let sentences: Vec<&str> = text.split(".")
@@ -682,61 +757,253 @@ impl ChonkerApp {
             chunks.iter().map(|c| c.char_count).sum::<usize>()
         );
         
-        Ok(chunks)
+        Ok((chunks, raw_json))
     }
     
-    /// Fast PDF text extraction using pdfplumber or pymupdf
-    fn extract_pdf_fast(&self, file_path: &std::path::Path) -> Result<String, Box<dyn std::error::Error>> {
-        println!("⚡ Trying fast PDF extraction...");
+    /// Convert structured chunks from Python to DocumentChunk format
+    fn convert_structured_chunks_to_document_chunks(structured_chunks: Vec<StructuredChunk>) -> Vec<DocumentChunk> {
+        let mut chunks = Vec::new();
         
-        // Try pdfplumber first (usually fastest)
-        match std::process::Command::new("./venv/bin/python")
-            .arg("-c")
-            .arg(format!(
-                "import pdfplumber; \
-                 pdf = pdfplumber.open('{}'); \
-                 text = '\\n\\n'.join([page.extract_text() or '' for page in pdf.pages]); \
-                 pdf.close(); \
-                 print(text)",
-                file_path.to_string_lossy()
-            ))
-            .output()
-        {
-            Ok(output) if output.status.success() => {
-                let text = String::from_utf8_lossy(&output.stdout).to_string();
-                if !text.trim().is_empty() {
-                    println!("✅ pdfplumber extraction successful: {} chars", text.len());
-                    return Ok(text);
+        for (index, structured_chunk) in structured_chunks.into_iter().enumerate() {
+            let chunk_id = index + 1;
+            
+            // Determine element types based on structured chunk data
+            let mut element_types = vec![structured_chunk.element_type.clone()];
+            
+            // Clone content early to avoid borrow checker issues
+            let content_text = structured_chunk.content.clone();
+            
+            // Parse content based on element type
+            let content = match structured_chunk.element_type.as_str() {
+                "table" => {
+                    // For tables, try to extract structured table data from table_data field
+                    if let Some(table_data_json) = structured_chunk.table_data {
+                        // Try to parse the table_data as structured data
+                        if let Ok(table_structure) = serde_json::from_value::<serde_json::Value>(table_data_json) {
+                            println!("📊 Found structured table data for chunk {}", chunk_id);
+                            // Store as JSON string for now, but mark as structured table
+                            element_types.push("structured_table".to_string());
+                            serde_json::to_string_pretty(&table_structure).unwrap_or(content_text)
+                        } else {
+                            // Fallback to content
+                            content_text
+                        }
+                    } else {
+                        // No structured table data, use content as-is
+                        content_text
+                    }
+                },
+                "heading" => {
+                    element_types.push("heading".to_string());
+                    content_text
+                },
+                "list" => {
+                    element_types.push("list".to_string());
+                    content_text
+                },
+                "formula" => {
+                    element_types.push("formula".to_string());
+                    content_text
+                },
+                _ => {
+                    // Default to text
+                    element_types.push("text".to_string());
+                    content_text
                 }
-            }
-            _ => println!("⚠️ pdfplumber failed, trying pymupdf..."),
+            };
+            
+            // Create page range from page number
+            let page_range = format!("page_{}", structured_chunk.page_number);
+            
+            // Create spatial bounds from bbox if available
+            let spatial_bounds = if let Some(bbox) = structured_chunk.bbox {
+                Some(format!("x:{:.1},y:{:.1},w:{:.1},h:{:.1}", bbox.x, bbox.y, bbox.width, bbox.height))
+            } else {
+                Some(format!("chunk_bounds_{}", chunk_id))
+            };
+            
+            chunks.push(DocumentChunk {
+                id: chunk_id,
+                content,
+                page_range,
+                element_types,
+                spatial_bounds,
+                char_count: structured_chunk.content.len(),
+            });
         }
         
-        // Try pymupdf as fallback
-        match std::process::Command::new("./venv/bin/python")
-            .arg("-c")
-            .arg(format!(
-                "import fitz; \
-                 doc = fitz.open('{}'); \
-                 text = '\\n\\n'.join([page.get_text() for page in doc]); \
-                 doc.close(); \
-                 print(text)",
-                file_path.to_string_lossy()
-            ))
-            .output()
-        {
-            Ok(output) if output.status.success() => {
-                let text = String::from_utf8_lossy(&output.stdout).to_string();
-                if !text.trim().is_empty() {
-                    println!("✅ pymupdf extraction successful: {} chars", text.len());
-                    return Ok(text);
-                }
-            }
-            _ => println!("⚠️ pymupdf also failed"),
-        }
+        println!("📊 Converted {} structured chunks to DocumentChunks", chunks.len());
+        println!("📊 Element types found: {:?}", 
+            chunks.iter().flat_map(|c| &c.element_types).collect::<std::collections::HashSet<_>>());
         
-        Err("Fast PDF extraction failed - no working libraries found".into())
+        chunks
     }
+    
+    /// Convert Document model back to chunks for compatibility
+    fn convert_document_to_chunks(document: &crate::document_model::Document) -> Vec<DocumentChunk> {
+        let mut chunks = Vec::new();
+        let mut chunk_id = 1;
+        
+        for element in &document.elements {
+            let (content, element_types, page_range) = match element {
+                crate::document_model::DocumentElement::Table { data, page_number, .. } => {
+                    // Convert table data to markdown format
+                    let mut table_content = String::new();
+                    
+                    // Add headers if available
+                    if data.total_rows > 0 && data.total_cols > 0 {
+                        table_content.push_str("| ");
+                        for col in 0..data.total_cols {
+                            if let Some(cell) = data.cells.get(0).and_then(|row| row.get(col)) {
+                                let cell_text = match &cell.content {
+                                    crate::document_model::CellContent::Text(s) => s.clone(),
+                                    crate::document_model::CellContent::Number(n) => n.to_string(),
+                                    crate::document_model::CellContent::Formula(f) => f.clone(),
+                                    crate::document_model::CellContent::Empty => "-".to_string(),
+                                    crate::document_model::CellContent::Mixed(_) => "[Mixed]".to_string(),
+                                };
+                                table_content.push_str(&cell_text);
+                            } else {
+                                table_content.push_str("Header");
+                            }
+                            if col < data.total_cols - 1 {
+                                table_content.push_str(" | ");
+                            }
+                        }
+                        table_content.push_str(" |\n");
+                        
+                        // Add separator
+                        table_content.push_str("|");
+                        for _ in 0..data.total_cols {
+                            table_content.push_str("---|")
+                        }
+                        table_content.push_str("\n");
+                        
+                        // Add data rows
+                        for row in 1..data.total_rows {
+                            table_content.push_str("| ");
+                            for col in 0..data.total_cols {
+                                if let Some(cell) = data.cells.get(row).and_then(|r| r.get(col)) {
+                                    let cell_text = match &cell.content {
+                                        crate::document_model::CellContent::Text(s) => s.clone(),
+                                        crate::document_model::CellContent::Number(n) => n.to_string(),
+                                        crate::document_model::CellContent::Formula(f) => f.clone(),
+                                        crate::document_model::CellContent::Empty => "-".to_string(),
+                                        crate::document_model::CellContent::Mixed(_) => "[Mixed]".to_string(),
+                                    };
+                                    table_content.push_str(&cell_text);
+                                } else {
+                                    table_content.push_str("-");
+                                }
+                                if col < data.total_cols - 1 {
+                                    table_content.push_str(" | ");
+                                }
+                            }
+                            table_content.push_str(" |\n");
+                        }
+                    }
+                    
+                    (table_content, vec!["table".to_string(), "native_parsed".to_string()], format!("page_{}", page_number))
+                }
+                crate::document_model::DocumentElement::Paragraph { text, page_number, .. } => {
+                    (text.clone(), vec!["text".to_string(), "native_parsed".to_string()], format!("page_{}", page_number))
+                }
+                crate::document_model::DocumentElement::Heading { text, level, page_number, .. } => {
+                    let heading_content = format!("{} {}", "#".repeat(*level as usize), text);
+                    (heading_content, vec!["heading".to_string(), "native_parsed".to_string()], format!("page_{}", page_number))
+                }
+                crate::document_model::DocumentElement::List { items, page_number, .. } => {
+                    let list_content = items.iter()
+                        .map(|item| format!("- {}", item.text))
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    (list_content, vec!["list".to_string(), "native_parsed".to_string()], format!("page_{}", page_number))
+                }
+                crate::document_model::DocumentElement::Image { caption, page_number, .. } => {
+                    let caption_text = caption.as_ref().map(|c| c.as_str()).unwrap_or("[Image]");
+                    (caption_text.to_string(), vec!["image".to_string(), "native_parsed".to_string()], format!("page_{}", page_number))
+                }
+                crate::document_model::DocumentElement::Formula { latex, page_number, .. } => {
+                    (latex.clone(), vec!["formula".to_string(), "native_parsed".to_string()], format!("page_{}", page_number))
+                }
+                crate::document_model::DocumentElement::Section { title, page_number, .. } => {
+                    (title.clone(), vec!["section".to_string(), "native_parsed".to_string()], format!("page_{}", page_number))
+                }
+            };
+            
+            let char_count = content.len();
+            chunks.push(DocumentChunk {
+                id: chunk_id,
+                content,
+                page_range,
+                element_types,
+                spatial_bounds: Some(format!("native_element_{}", chunk_id)),
+                char_count,
+            });
+            
+            chunk_id += 1;
+        }
+        
+        chunks
+    }
+    
+    /// Memory-efficient processing for huge documents (50MB+)
+    fn process_huge_document_streaming(
+        text: &str, 
+        _file_path: &std::path::Path, 
+        raw_json: Option<String>
+    ) -> Result<(Vec<DocumentChunk>, Option<String>), Box<dyn std::error::Error>> {
+        println!("⚡ Processing huge document in streaming mode to save memory");
+        
+        let mut chunks = Vec::new();
+        let chunk_size = 8000; // Larger chunks for huge files
+        let mut chunk_id = 1;
+        
+        // Process text in streaming chunks to avoid loading everything into memory
+        let mut current_pos = 0;
+        let text_len = text.len();
+        
+        while current_pos < text_len {
+            let end_pos = std::cmp::min(current_pos + chunk_size, text_len);
+            
+            // Try to break at sentence boundaries for better chunk quality
+            let actual_end = if end_pos < text_len {
+                // Look back for sentence boundary
+                if let Some(sentence_end) = text[current_pos..end_pos].rfind('.') {
+                    current_pos + sentence_end + 1
+                } else {
+                    end_pos
+                }
+            } else {
+                end_pos
+            };
+            
+            let chunk_text = &text[current_pos..actual_end];
+            if !chunk_text.trim().is_empty() {
+                chunks.push(DocumentChunk {
+                    id: chunk_id,
+                    content: chunk_text.trim().to_string(),
+                    page_range: format!("stream_chunk_{}", chunk_id),
+                    element_types: vec!["text".to_string(), "streaming".to_string()],
+                    spatial_bounds: Some(format!("stream_bounds_{}", chunk_id)),
+                    char_count: chunk_text.trim().len(),
+                });
+                
+                chunk_id += 1;
+            }
+            
+            current_pos = actual_end;
+            
+            // Memory optimization: Force garbage collection every 100 chunks
+            if chunk_id % 100 == 0 {
+                println!("💾 Processed {} streaming chunks, forcing cleanup", chunk_id - 1);
+            }
+        }
+        
+        println!("✅ Streaming processing complete: {} chunks", chunks.len());
+        Ok((chunks, raw_json))
+    }
+    
     
 
     pub fn get_current_chunk(&self) -> Option<&DocumentChunk> {
@@ -769,6 +1036,12 @@ impl ChonkerApp {
     }
     
     fn save_to_database_async(&mut self) -> ChonkerResult<()> {
+        // Database storage temporarily disabled
+        self.status_message = "💾 Database storage is temporarily disabled".to_string();
+        Ok(())
+    }
+    
+    fn _save_to_database_async_original(&mut self) -> ChonkerResult<()> {
         if let (Some(ref file_path), Some(ref _database)) = (&self.selected_file, &self.database) {
             let filename = file_path.file_name()
                 .unwrap_or_default()
@@ -1061,10 +1334,26 @@ impl ChonkerApp {
             false
         }
     }
+    
+    fn clean_chunk_content(&self, content: &str) -> String {
+        // Remove Docling markup tags
+        content
+            .replace("<fcel>", "")
+            .replace("<ecel>", "")
+            .replace("<nl>", "\n")
+            .replace("<rhed>", "")
+            .replace("<srow>", "")
+    }
 }
 
 impl eframe::App for ChonkerApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // Auto-load disabled - let user choose PDF
+        if !self.auto_loaded {
+            self.status_message = "🐹 CHONKER ready! Use Ctrl+O to open a PDF".to_string();
+            self.auto_loaded = true;
+        }
+        
         apply_retro_theme(ctx);
         
         
@@ -1135,7 +1424,7 @@ impl eframe::App for ChonkerApp {
                                 AppMode::Chonker => "CHONKER - Review & Edit",
                                 AppMode::Snyfter => "SNYFTER - Finalize & Export",
                             };
-                            ui.label(egui::RichText::new(mode_text).size(18.0).strong());
+                ui.label(egui::RichText::new(mode_text).size(18.0).strong());
                         });
                     });
                 });
@@ -1212,10 +1501,8 @@ impl eframe::App for ChonkerApp {
             });
         });
         
-        // FORCE UPDATE: Always ensure markdown is updated when chunks exist
-        if !self.chunks.is_empty() && self.markdown_content.len() < 100 {
-            println!("🔧 FORCING markdown update - chunks: {}, current content: {} chars", 
-                self.chunks.len(), self.markdown_content.len());
+        // CONDITIONAL UPDATE: Update markdown only if chunks changed and not already generated
+        if !self.chunks.is_empty() && self.markdown_content.is_empty() {
             self.generate_markdown_from_chunks();
         }
         
@@ -1224,43 +1511,37 @@ impl eframe::App for ChonkerApp {
             AppMode::Chonker => {
                 // CHONKER MODE: Panel A (PDF) + Panel B (Markdown)
                 
-                // Panel A: PDF (left side panel)
+                // Panel A: PDF (left side panel) - increased width for full PDF display
                 egui::SidePanel::left("panel_a_pdf")
                     .resizable(true)
-                    .default_width(ctx.screen_rect().width() * 0.5)
-                    .min_width(200.0)
-                    .max_width(ctx.screen_rect().width() * 0.8)
+                    .default_width(ctx.screen_rect().width() * 0.65)  // Increased from 50% to 65%
+                    .min_width(300.0)  // Increased minimum width
+                    .max_width(ctx.screen_rect().width() * 0.85)  // Increased max from 80% to 85%
                     .show(ctx, |ui| {
-                        ui.label(egui::RichText::new("📄 Panel A - Original PDF").size(20.0).strong());
-                        ui.separator();
                         self.pdf_viewer.render(ui);
                     });
 
-                // Panel B: Markdown (central panel)
+                // Panel B: Document Content (central panel)
                 egui::CentralPanel::default().show(ctx, |ui| {
-                    ui.label(egui::RichText::new("📝 Panel B - Proposed Markdown").size(20.0).strong());
-                    ui.separator();
-                    self.markdown_editor.render(ui);
+                    self.render_document_content(ui);
                 });
             },
             AppMode::Snyfter => {
-                // SNYFTER MODE: Panel B (Markdown) + Panel C (Export Bin)
+                // SNYFTER MODE: Panel A (Same Semantic Editor) + Panel B (Export Dialog)
                 
-                // Panel B: Markdown (left side panel)
-                egui::SidePanel::left("panel_b_markdown")
+                // Panel A: Document Content Display (left side panel)
+                egui::SidePanel::left("panel_a_semantic")
                     .resizable(true)
                     .default_width(ctx.screen_rect().width() * 0.5)
                     .min_width(200.0)
                     .max_width(ctx.screen_rect().width() * 0.8)
                     .show(ctx, |ui| {
-                        ui.heading("📝 Panel B - Proposed Markdown");
-                        ui.separator();
-                        self.markdown_editor.render(ui);
+                        self.render_document_content(ui);
                     });
 
-                // Panel C: Export Bin (central panel)
+                // Panel B: Export Dialog (central panel)
                 egui::CentralPanel::default().show(ctx, |ui| {
-                    ui.heading("📦 Panel C - Export Bin");
+                    ui.heading("📦 Panel B - Export Dialog");
                     ui.separator();
                     
                     ui.label(format!("Export bin contains {} items", self.export_bin.len()));
@@ -1368,10 +1649,10 @@ impl eframe::App for ChonkerApp {
                         }
                     }
                 });
-            }
+            },
         }
         
-        // Bottom help bar (cleaner, no overlapping status)
+                        // Bottom help bar (cleaner, no overlapping status)
         egui::TopBottomPanel::bottom("help_bar").show(ctx, |ui| {
             ui.horizontal_centered(|ui| {
                 ui.label("💡");
@@ -1379,19 +1660,55 @@ impl eframe::App for ChonkerApp {
                 
                 match self.mode {
                     AppMode::Chonker => {
-                        ui.label("Ctrl+O: Open | Space: Process | Cmd+R: QC Report | Tab: Switch to SNYFTER");
+                        ui.label("Ctrl+O: Open | Space: Process | Cmd+R: QC Report | Tab: Switch to SNYFTER | 💾 Database storage temporarily disabled");
                     },
                     AppMode::Snyfter => {
-                        ui.label("Tab: Switch to CHONKER | E: Export | Add chunks to bin");
-                    }
+                        ui.label("Tab: Switch to CHONKER | E: Export | Add chunks to bin | 💾 Database storage temporarily disabled");
+                    },
                 }
             });
         });
         
-        // Check for QC processing messages - keep GUI responsive
-        let mut should_clear_receiver = false;
+        // Check for async processing messages - keep GUI responsive
+        let mut should_clear_processing_receiver = false;
+        let mut should_clear_qc_receiver = false;
         let mut should_request_repaint = false;
+        let mut should_generate_markdown = false;
         
+        // Handle PDF processing messages
+        if let Some(ref receiver) = self.processing_receiver {
+            while let Ok(message) = receiver.try_recv() {
+                match message {
+                    ProcessingMessage::Progress(progress, msg) => {
+                        self.processing_progress = progress as f64;
+                        self.status_message = msg;
+                        should_request_repaint = true;
+                    }
+                    ProcessingMessage::Complete(chunks, raw_json) => {
+                        self.is_processing = false;
+                        self.processing_progress = 100.0;
+                        let chunk_count = chunks.len();
+                        self.chunks = chunks;
+                        should_clear_processing_receiver = true;
+                        should_generate_markdown = true;
+                        
+                        self.status_message = format!("✅ Processing complete! {} chunks created", chunk_count);
+                        
+                        // Note: Database storage is temporarily disabled
+                        should_request_repaint = true;
+                    }
+                    ProcessingMessage::Error(err) => {
+                        self.is_processing = false;
+                        self.processing_progress = 0.0;
+                        should_clear_processing_receiver = true;
+                        self.error_message = Some(err);
+                        should_request_repaint = true;
+                    }
+                }
+            }
+        }
+        
+        // Check for QC processing messages - keep GUI responsive
         if let Some(ref receiver) = self.qc_receiver {
             // Process all available messages to keep UI responsive
             while let Ok(message) = receiver.try_recv() {
@@ -1403,7 +1720,7 @@ impl eframe::App for ChonkerApp {
                     }
                     QcMessage::Complete(report_path) => {
                         self.qc_processing = false;
-                        should_clear_receiver = true;
+                        should_clear_qc_receiver = true;
                         self.qc_progress_message.clear();
                         self.status_message = "✅ QC processing complete!".to_string();
                         println!("✅ QC processing completed successfully");
@@ -1419,7 +1736,7 @@ impl eframe::App for ChonkerApp {
                     }
                     QcMessage::Error(err) => {
                         self.qc_processing = false;
-                        should_clear_receiver = true;
+                        should_clear_qc_receiver = true;
                         self.qc_progress_message.clear();
                         self.error_message = Some(format!("❌ QC processing failed: {}", err));
                         println!("❌ QC processing error: {}", err);
@@ -1430,9 +1747,17 @@ impl eframe::App for ChonkerApp {
             should_request_repaint = true;
         }
         
-        // Clear receiver after borrowing is done
-        if should_clear_receiver {
+        // Clear receivers after borrowing is done
+        if should_clear_processing_receiver {
+            self.processing_receiver = None;
+        }
+        if should_clear_qc_receiver {
             self.qc_receiver = None;
+        }
+        
+        // Generate markdown after all borrows are complete
+        if should_generate_markdown {
+            self.generate_markdown_from_chunks();
         }
         
         // Request repaint to keep GUI updating while processing
@@ -1994,7 +2319,7 @@ impl ChonkerApp {
         self.markdown_editor.set_content(markdown.clone());
         self.markdown_content = markdown;
         
-        println!("✅ Generated markdown content: {} characters", self.markdown_content.len());
+        println!("📺 Generated GUI display markdown: {} characters (from {} native chunks)", self.markdown_content.len(), self.chunks.len());
     }
     
     /// Start QC processing in background thread with progress updates
@@ -2056,11 +2381,1394 @@ impl ChonkerApp {
         }
     }
     
+    fn render_document_content(&mut self, ui: &mut egui::Ui) {
+        // Check if we have data to visualize
+        if self.chunks.is_empty() {
+            ui.vertical_centered(|ui| {
+                ui.add_space(50.0);
+                ui.label("No document processed yet.");
+                ui.add_space(10.0);
+                ui.label("Load a PDF to see the extracted data here.");
+            });
+        } else {
+            // Convert chunks to data visualization format
+            let data = self.convert_chunks_to_viz_data();
+            
+            // Load data into the visualization pane and render
+            #[cfg(feature = "gui")]
+            {
+                self.data_viz_pane.load_data(data);
+                self.data_viz_pane.render(ui);
+            }
+        }
+    }
+    
+    /// Convert chunks to data visualization format
+    fn convert_chunks_to_viz_data(&self) -> crate::data_visualization::ExtractedData {
+        let mut content_blocks = Vec::new();
+        let mut tables_count = 0;
+        let mut text_blocks_count = 0;
+        let mut formulas_count = 0;
+        let mut quality_issues = Vec::new();
+        
+        for chunk in &self.chunks {
+            // Convert each chunk to a content block
+            let block = if chunk.element_types.contains(&"table".to_string()) {
+                // Parse as table
+                let (headers, rows) = self.parse_markdown_table(&chunk.content);
+                if !headers.is_empty() || !rows.is_empty() {
+                    tables_count += 1;
+                    let mut qualifiers = Vec::new();
+                    
+                    // Add adversarial content qualifier if detected
+                    if chunk.element_types.contains(&"adversarial_content".to_string()) {
+                        qualifiers.push(crate::data_visualization::DataQualifier {
+                            symbol: "⚠️".to_string(),
+                            description: "Adversarial content detected".to_string(),
+                            applies_to: vec![], // Apply to whole table
+                            severity: crate::data_visualization::QualifierSeverity::Critical,
+                        });
+                        
+                        quality_issues.push(crate::data_visualization::QualityIssue {
+                            block_id: chunk.id.to_string(),
+                            issue_type: crate::data_visualization::IssueType::DataInconsistency,
+                            description: "Adversarial content detected in this table".to_string(),
+                            severity: crate::data_visualization::QualifierSeverity::Critical,
+                            suggested_fix: Some("Review and verify table data for accuracy".to_string()),
+                        });
+                    }
+                    
+                    crate::data_visualization::ContentBlock::Table {
+                        id: chunk.id.to_string(),
+                        title: Some(format!("Table {} ({})", chunk.id, chunk.page_range)),
+                        headers,
+                        rows,
+                        qualifiers,
+                        metadata: std::collections::HashMap::new(),
+                    }
+                } else {
+                    // Fallback to text if table parsing failed
+                    text_blocks_count += 1;
+                    self.create_text_block_from_chunk(chunk, &mut quality_issues)
+                }
+            } else if chunk.element_types.contains(&"formula".to_string()) {
+                formulas_count += 1;
+                crate::data_visualization::ContentBlock::Formula {
+                    id: chunk.id.to_string(),
+                    latex: chunk.content.clone(),
+                    rendered_text: None,
+                    metadata: std::collections::HashMap::new(),
+                }
+            } else {
+                // Default to text block
+                text_blocks_count += 1;
+                self.create_text_block_from_chunk(chunk, &mut quality_issues)
+            };
+            
+            content_blocks.push(block);
+        }
+        
+        // Create document metadata
+        let mut metadata = std::collections::HashMap::new();
+        metadata.insert("total_chunks".to_string(), self.chunks.len().to_string());
+        metadata.insert("total_characters".to_string(), 
+            self.chunks.iter().map(|c| c.char_count).sum::<usize>().to_string());
+        
+        let adversarial_count = self.chunks.iter()
+            .filter(|c| c.element_types.contains(&"adversarial_content".to_string()))
+            .count();
+        metadata.insert("adversarial_chunks".to_string(), adversarial_count.to_string());
+        
+        let source_file = if let Some(ref file) = self.selected_file {
+            file.file_name().unwrap_or_default().to_string_lossy().to_string()
+        } else {
+            "Unknown".to_string()
+        };
+        
+        // Create extraction statistics
+        let statistics = crate::data_visualization::ExtractionStatistics {
+            total_content_blocks: content_blocks.len(),
+            tables_count,
+            text_blocks_count,
+            lists_count: 0,
+            images_count: 0,
+            formulas_count,
+            charts_count: 0,
+            total_qualifiers: content_blocks.iter().map(|block| {
+                match block {
+                    crate::data_visualization::ContentBlock::Table { qualifiers, .. } => qualifiers.len(),
+                    _ => 0,
+                }
+            }).sum(),
+            confidence_score: 0.85, // Default confidence
+            quality_issues,
+        };
+        
+        crate::data_visualization::ExtractedData {
+            source_file,
+            extraction_timestamp: chrono::Utc::now().to_rfc3339(),
+            tool_used: "CHONKER Enhanced Docling".to_string(),
+            processing_time_ms: 0, // We don't track this currently
+            content_blocks,
+            metadata,
+            statistics,
+        }
+    }
+    
+    /// Helper function to create text blocks from chunks
+    fn create_text_block_from_chunk(
+        &self, 
+        chunk: &DocumentChunk, 
+        quality_issues: &mut Vec<crate::data_visualization::QualityIssue>
+    ) -> crate::data_visualization::ContentBlock {
+        // Add adversarial content issue if detected
+        if chunk.element_types.contains(&"adversarial_content".to_string()) {
+            quality_issues.push(crate::data_visualization::QualityIssue {
+                block_id: chunk.id.to_string(),
+                issue_type: crate::data_visualization::IssueType::DataInconsistency,
+                description: "Adversarial content detected in this text block".to_string(),
+                severity: crate::data_visualization::QualifierSeverity::Critical,
+                suggested_fix: Some("Review and verify text content for accuracy".to_string()),
+            });
+        }
+        
+        crate::data_visualization::ContentBlock::Text {
+            id: chunk.id.to_string(),
+            title: Some(format!("Text Block {} ({})", chunk.id, chunk.page_range)),
+            content: chunk.content.clone(),
+            formatting: crate::data_visualization::TextFormatting {
+                is_bold: false,
+                is_italic: false,
+                font_size: None,
+                alignment: crate::data_visualization::TextAlignment::Left,
+            },
+            metadata: std::collections::HashMap::new(),
+        }
+    }
+    
+    /// Interactive table rendering for DocTags content with inline table editor
+    fn render_doctags_content_interactive(&mut self, ui: &mut egui::Ui, content: &str) {
+        // Enhanced DocTags parser with interactive table editing
+        if content.contains("<page_") || content.contains("<loc_") || content.contains("<table>") {
+            // Native DocTags format - parse and render interactively
+            self.render_native_doctags_interactive(ui, content);
+        } else if content.contains("<otsl>") {
+            // Legacy OTSL (Open Table and Structure Language) - Docling's table format
+            self.render_otsl_tables_interactive(ui, content);
+        } else if content.contains("<fcel>") || content.contains("<rhed>") || content.contains("<nl>") {
+            // Inline OTSL content without wrapper tags - parse directly
+            let (headers, rows) = Self::parse_otsl_content_robust(content);
+            
+            if !headers.is_empty() || !rows.is_empty() {
+                // Render interactive table instead of static
+                self.render_otsl_table_interactive(ui, &headers, &rows);
+            } else {
+                // Fallback to text if table parsing failed
+                ui.label(content);
+            }
+        } else if content.contains('|') && content.lines().filter(|line| line.trim().starts_with('|')).count() > 1 {
+            // Markdown table format - convert to interactive table
+            let (headers, rows) = self.parse_markdown_table(content);
+            if !headers.is_empty() || !rows.is_empty() {
+                self.render_otsl_table_interactive(ui, &headers, &rows);
+            } else {
+                // Fallback to text if table parsing failed
+                self.render_text_content_interactive(ui, content);
+            }
+        } else {
+            // Fallback: render as formatted text with some structure awareness
+            self.render_text_content_interactive(ui, content);
+        }
+    }
+
+    /// Render OTSL tables with interactive editing capabilities
+    fn render_otsl_tables_interactive(&mut self, ui: &mut egui::Ui, content: &str) {
+        let lines: Vec<&str> = content.lines().collect();
+        let mut i = 0;
+        let mut table_count = 0;
+        
+        while i < lines.len() {
+            let line = lines[i];
+            
+            if line.contains("<otsl>") {
+                table_count += 1;
+                
+                // Extract OTSL content between <otsl> and </otsl>
+                let mut otsl_content = String::new();
+                i += 1; // Skip opening OTSL tag
+                
+                let mut max_iterations = 1000; // Safety limit
+                while i < lines.len() && !lines[i].contains("</otsl>") && max_iterations > 0 {
+                    otsl_content.push_str(lines[i]);
+                    otsl_content.push('\n');
+                    i += 1;
+                    max_iterations -= 1;
+                }
+                
+                if max_iterations == 0 {
+                    break;
+                }
+                
+                if i < lines.len() && lines[i].contains("</otsl>") {
+                    i += 1; // Skip closing tag
+                }
+                
+                if !otsl_content.trim().is_empty() {
+                    let (headers, rows) = Self::parse_otsl_content_robust(&otsl_content);
+                    self.render_otsl_table_interactive(ui, &headers, &rows);
+                    ui.separator();
+                }
+            } else {
+                i += 1;
+            }
+        }
+    }
+
+    /// Render XML-style tables with interactive editing
+    fn render_doctags_with_tables_interactive(&mut self, ui: &mut egui::Ui, content: &str) {
+        let lines: Vec<&str> = content.lines().collect();
+        let mut i = 0;
+        
+        while i < lines.len() {
+            let line = lines[i];
+            
+            if line.contains("<table>") {
+                // Found a table - extract and render it
+                let mut table_lines = Vec::new();
+                i += 1; // Skip opening table tag
+                
+                // Collect table content until closing tag
+                while i < lines.len() && !lines[i].contains("</table>") {
+                    if lines[i].trim() != "<thead>" && lines[i].trim() != "</thead>" &&
+                       lines[i].trim() != "<tbody>" && lines[i].trim() != "</tbody>" {
+                        table_lines.push(lines[i]);
+                    }
+                    i += 1;
+                }
+                
+                // Parse and render the table interactively
+                let (headers, rows) = self.parse_xml_table(&table_lines);
+                self.render_otsl_table_interactive(ui, &headers, &rows);
+                
+                ui.add_space(10.0);
+                ui.separator();
+            } else {
+                // Regular content
+                self.render_text_content_interactive(ui, line);
+            }
+            
+            i += 1;
+        }
+    }
+
+    /// Render regular text content with structure awareness
+    fn render_text_content_interactive(&mut self, ui: &mut egui::Ui, content: &str) {
+        let lines: Vec<&str> = content.lines().collect();
+        
+        for line in lines {
+            if line.trim().is_empty() {
+                ui.add_space(5.0);
+                continue;
+            }
+            
+            // Check for DocTags structural elements
+            if line.contains("<heading") {
+                let text = Self::extract_text_between_tags_static(line, "heading");
+                ui.heading(&text);
+            } else if line.contains("<section-header") {
+                let text = Self::extract_text_between_tags_static(line, "section-header");
+                ui.label(egui::RichText::new(&text).strong().size(18.0));
+            } else if line.contains("<list-item") {
+                let text = Self::extract_text_between_tags_static(line, "list-item");
+                ui.horizontal(|ui| {
+                    ui.label("•");
+                    ui.label(&text);
+                });
+            } else if line.contains("<paragraph") {
+                let text = Self::extract_text_between_tags_static(line, "paragraph");
+                ui.label(&text);
+            } else {
+                ui.label(line);
+            }
+        }
+    }
+
+    /// Parse XML-style table content
+    fn parse_xml_table(&self, table_lines: &[&str]) -> (Vec<String>, Vec<Vec<String>>) {
+        let mut headers = Vec::new();
+        let mut rows = Vec::new();
+        let mut current_row = Vec::new();
+        let mut is_header_row = false;
+        
+        for line in table_lines {
+            if line.contains("<tr>") {
+                current_row.clear();
+                is_header_row = false;
+            } else if line.contains("</tr>") {
+                if !current_row.is_empty() {
+                    if is_header_row || headers.is_empty() {
+                        headers = current_row.clone();
+                    } else {
+                        rows.push(current_row.clone());
+                    }
+                }
+            } else if line.contains("<th>") {
+                is_header_row = true;
+                let text = Self::extract_text_between_tags_static(line, "th");
+                current_row.push(text);
+            } else if line.contains("<td>") {
+                let text = Self::extract_text_between_tags_static(line, "td");
+                current_row.push(text);
+            }
+        }
+        
+        (headers, rows)
+    }
+
+    /// Render native DocTags content with full structure parsing
+    fn render_native_doctags_interactive(&mut self, ui: &mut egui::Ui, content: &str) {
+        let lines: Vec<&str> = content.lines().collect();
+        let mut i = 0;
+        
+        ui.label(egui::RichText::new("📋 Native DocTags Content").strong().size(16.0));
+        ui.separator();
+        ui.add_space(5.0);
+        
+        while i < lines.len() {
+            let line = lines[i];
+            
+            // Parse DocTags elements based on tags
+            if line.contains("<page_") {
+                // Page marker
+                let page_num = self.extract_page_number(line);
+                ui.horizontal(|ui| {
+                    ui.label("📄");
+                    ui.label(egui::RichText::new(format!("Page {}", page_num)).strong());
+                });
+                ui.separator();
+            } else if line.contains("<loc_") {
+                // Location tag - could show coordinates in debug mode
+                if self.debug_mode().unwrap_or(false) {
+                    let coords = self.extract_location_coords(line);
+                    ui.label(egui::RichText::new(format!("📍 Location: {}", coords)).size(10.0).color(egui::Color32::GRAY));
+                }
+            } else if line.contains("<table>") {
+                // Native DocTags table - parse and render interactively
+                let table_content = self.extract_table_content(&lines, &mut i);
+                let (headers, rows) = self.parse_doctags_table(&table_content);
+                self.render_otsl_table_interactive(ui, &headers, &rows);
+            } else if line.contains("<title>") {
+                let text = Self::extract_text_between_tags_static(line, "title");
+                ui.heading(&text);
+            } else if line.contains("<section_header>") {
+                let text = Self::extract_text_between_tags_static(line, "section_header");
+                ui.label(egui::RichText::new(&text).strong().size(18.0));
+            } else if line.contains("<paragraph>") {
+                let text = Self::extract_text_between_tags_static(line, "paragraph");
+                ui.label(&text);
+            } else if line.contains("<list_item>") {
+                let text = Self::extract_text_between_tags_static(line, "list_item");
+                ui.horizontal(|ui| {
+                    ui.label("•");
+                    ui.label(&text);
+                });
+            } else if line.contains("<formula>") {
+                let text = Self::extract_text_between_tags_static(line, "formula");
+                ui.label(egui::RichText::new(&text).monospace().color(egui::Color32::LIGHT_YELLOW));
+            } else if !line.trim().is_empty() && !line.starts_with('<') {
+                // Regular text content
+                ui.label(line);
+            }
+            
+            i += 1;
+        }
+    }
+    
+    /// Extract page number from page tag
+    fn extract_page_number(&self, line: &str) -> String {
+        if let Some(start) = line.find("<page_") {
+            if let Some(end) = line[start..].find('>') {
+                let tag = &line[start..start + end + 1];
+                return tag.replace("<page_", "").replace(">", "");
+            }
+        }
+        "?".to_string()
+    }
+    
+    /// Extract location coordinates from location tag
+    fn extract_location_coords(&self, line: &str) -> String {
+        if let Some(start) = line.find("<loc_") {
+            if let Some(end) = line[start..].find('>') {
+                let tag = &line[start..start + end + 1];
+                return tag.replace("<loc_", "").replace(">", "");
+            }
+        }
+        "0,0".to_string()
+    }
+    
+    /// Extract table content from DocTags
+    fn extract_table_content(&self, lines: &[&str], current_pos: &mut usize) -> Vec<String> {
+        let mut table_lines = Vec::new();
+        let mut i = *current_pos + 1; // Skip opening <table>
+        
+        while i < lines.len() && !lines[i].contains("</table>") {
+            table_lines.push(lines[i].to_string());
+            i += 1;
+        }
+        
+        *current_pos = i; // Update position past </table>
+        table_lines
+    }
+    
+    /// Parse DocTags table content
+    fn parse_doctags_table(&self, table_lines: &[String]) -> (Vec<String>, Vec<Vec<String>>) {
+        let mut headers = Vec::new();
+        let mut rows = Vec::new();
+        let mut current_row = Vec::new();
+        let mut in_header = false;
+        
+        for line in table_lines {
+            if line.contains("<row>") || line.contains("<tr>") {
+                current_row.clear();
+            } else if line.contains("</row>") || line.contains("</tr>") {
+                if !current_row.is_empty() {
+                    if in_header || headers.is_empty() {
+                        headers = current_row.clone();
+                        in_header = false;
+                    } else {
+                        rows.push(current_row.clone());
+                    }
+                }
+            } else if line.contains("<cell>") || line.contains("<td>") || line.contains("<th>") {
+                if line.contains("<th>") {
+                    in_header = true;
+                }
+                let content = if line.contains("<cell>") {
+                    Self::extract_text_between_tags_static(line, "cell")
+                } else if line.contains("<td>") {
+                    Self::extract_text_between_tags_static(line, "td")
+                } else {
+                    Self::extract_text_between_tags_static(line, "th")
+                };
+                current_row.push(content);
+            }
+        }
+        
+        (headers, rows)
+    }
+    
+    /// Parse markdown table format
+    fn parse_markdown_table(&self, content: &str) -> (Vec<String>, Vec<Vec<String>>) {
+        let mut headers = Vec::new();
+        let mut rows = Vec::new();
+        let lines: Vec<&str> = content.lines().collect();
+        
+        for line in lines {
+            let trimmed = line.trim();
+            if trimmed.starts_with('|') && trimmed.ends_with('|') {
+                // Skip separator lines
+                if trimmed.chars().all(|c| c == '|' || c == '-' || c == ':' || c.is_whitespace()) {
+                    continue;
+                }
+                
+                let cells: Vec<String> = trimmed
+                    .split('|')
+                    .map(|cell| cell.trim().to_string())
+                    .filter(|cell| !cell.is_empty())
+                    .collect();
+                
+                if !cells.is_empty() {
+                    if headers.is_empty() {
+                        headers = cells;
+                    } else {
+                        rows.push(cells);
+                    }
+                }
+            }
+        }
+        
+        (headers, rows)
+    }
+    
+    /// Debug mode flag
+    fn debug_mode(&self) -> Option<bool> {
+        Some(false) // Can be made configurable later
+    }
+
+    /// Render interactive OTSL table with editing capabilities  
+    fn render_otsl_table_interactive(&mut self, ui: &mut egui::Ui, headers: &[String], rows: &[Vec<String>]) {
+        if headers.is_empty() && rows.is_empty() {
+            ui.label("⚠️ Empty table data");
+            return;
+        }
+        
+        // Add proper spacing before table
+        ui.add_space(10.0);
+        ui.separator();
+        ui.add_space(8.0);
+        
+        ui.horizontal(|ui| {
+            ui.label(egui::RichText::new("📊 Interactive Table").strong().size(16.0));
+            
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui.button("⚙️ Edit Structure").clicked() {
+                    // Future: Open table structure editor
+                }
+            });
+        });
+        ui.add_space(8.0);
+        
+        // Show table stats
+        if !headers.is_empty() && !rows.is_empty() {
+            ui.label(format!("📏 {} columns × {} rows", headers.len(), rows.len()));
+            ui.add_space(5.0);
+        }
+        
+        // Use a frame to contain the interactive table
+        egui::Frame::default()
+            .fill(egui::Color32::from_rgba_unmultiplied(15, 15, 15, 150))
+            .stroke(egui::Stroke::new(1.0, egui::Color32::GRAY))
+            .inner_margin(egui::Margin::same(10.0))
+            .show(ui, |ui| {
+                egui::ScrollArea::horizontal()
+                    .show(ui, |ui| {
+                        egui::Grid::new(format!("interactive_table_{}", headers.len()))
+                            .striped(true)
+                            .min_col_width(100.0)  // Larger minimum for better readability
+                            .max_col_width(200.0)  // Prevent extremely wide columns
+                            .spacing([8.0, 6.0])   // Good spacing for readability
+                            .show(ui, |ui| {
+                                // Render headers with better styling
+                                if !headers.is_empty() {
+                                    for (col_idx, header) in headers.iter().enumerate() {
+                                        let header_text = if header.is_empty() { 
+                                            format!("Col {}", col_idx + 1) 
+                                        } else { 
+                                            header.clone() 
+                                        };
+                                        
+                                        ui.label(
+                                            egui::RichText::new(header_text)
+                                                .strong()
+                                                .size(13.0)
+                                                .color(egui::Color32::LIGHT_BLUE)
+                                        );
+                                    }
+                                    ui.end_row();
+                                }
+                                
+                                // Render data rows with interactive elements
+                                for (row_idx, row) in rows.iter().enumerate() {
+                                    let max_cols = headers.len().max(row.len());
+                                    
+                                    for col_idx in 0..max_cols {
+                                        let cell_content = row.get(col_idx)
+                                            .map(|s| s.as_str())
+                                            .unwrap_or("");
+                                        
+                                        let display_text = if cell_content.is_empty() { 
+                                            "-".to_string() 
+                                        } else if cell_content.len() > 50 {
+                                            format!("{}...", &cell_content[..47])
+                                        } else {
+                                            cell_content.to_string()
+                                        };
+                                        
+                                        // Make cells clickable for future editing
+                                        let cell_response = ui.add(
+                                            egui::Label::new(
+                                                if cell_content.chars().all(|c| {
+                                                    c.is_ascii_digit() || c == ',' || c == '.' || c == '-' || c == ' '
+                                                }) && !cell_content.is_empty() {
+                                                    egui::RichText::new(display_text).monospace()
+                                                } else {
+                                                    egui::RichText::new(display_text)
+                                                }
+                                            )
+                                            .sense(egui::Sense::click())
+                                        );
+                                        
+                                        // Show tooltip with full content on hover and handle clicks
+                                        if cell_content.len() > 50 {
+                                            let cell_response_with_tooltip = cell_response.on_hover_text(cell_content);
+                                            // Future: Handle cell clicks for editing
+                                            if cell_response_with_tooltip.clicked() {
+                                                // Store cell position for future editing
+                                                debug!("Cell clicked: row {}, col {}, content: {}", row_idx, col_idx, cell_content);
+                                            }
+                                        } else {
+                                            // Future: Handle cell clicks for editing
+                                            if cell_response.clicked() {
+                                                // Store cell position for future editing
+                                                debug!("Cell clicked: row {}, col {}, content: {}", row_idx, col_idx, cell_content);
+                                            }
+                                        }
+                                    }
+                                    ui.end_row();
+                                }
+                            });
+                    });
+            });
+        
+        // Add proper spacing after table
+        ui.add_space(10.0);
+        ui.separator();
+        ui.add_space(10.0);
+    }
+    
+    fn render_doctags_content_static(ui: &mut egui::Ui, content: &str) {
+        // Enhanced DocTags parser with OTSL support for structured tables
+        if content.contains("<otsl>") {
+            // OTSL (Open Table and Structure Language) - Docling's table format
+            Self::render_otsl_tables_static(ui, content);
+        } else if content.contains("<table>") {
+            // Standard XML-style tables
+            Self::render_doctags_with_tables_static(ui, content);
+        } else if content.contains("<fcel>") || content.contains("<rhed>") || content.contains("<nl>") {
+            // Inline OTSL content without wrapper tags - parse directly
+            println!("🔍 OTSL Debug: Found inline OTSL content, parsing directly");
+            let (headers, rows) = Self::parse_otsl_content_robust(content);
+            
+            println!("🔍 OTSL Debug: Parsed {} headers, {} rows from inline content", headers.len(), rows.len());
+            if !headers.is_empty() {
+                println!("🔍 OTSL Debug: Headers: {:?}", headers);
+            }
+            if !rows.is_empty() {
+                println!("🔍 OTSL Debug: First row ({} cells): {:?}", rows[0].len(), rows[0]);
+            }
+            
+            // Render the OTSL table
+            Self::render_otsl_table_static(ui, &headers, &rows);
+        } else {
+            // Fallback: render as formatted text with some structure awareness
+            let lines: Vec<&str> = content.lines().collect();
+            
+            for line in lines {
+                if line.trim().is_empty() {
+                    ui.add_space(5.0);
+                    continue;
+                }
+                
+                // Check for DocTags structural elements
+                if line.contains("<heading") {
+                    // Extract heading text
+                    let text = Self::extract_text_between_tags_static(line, "heading");
+                    ui.heading(&text);
+                } else if line.contains("<section-header") {
+                    let text = Self::extract_text_between_tags_static(line, "section-header");
+                    ui.label(egui::RichText::new(&text).strong().size(18.0));
+                } else if line.contains("<list-item") {
+                    let text = Self::extract_text_between_tags_static(line, "list-item");
+                    ui.horizontal(|ui| {
+                        ui.label("•");
+                        ui.label(&text);
+                    });
+                } else if line.contains("<paragraph") {
+                    let text = Self::extract_text_between_tags_static(line, "paragraph");
+                    ui.label(&text);
+                } else {
+                    // Regular text line
+                    ui.label(line);
+                }
+            }
+        }
+    }
+    
+    fn render_otsl_tables_static(ui: &mut egui::Ui, content: &str) {
+        println!("🔍 OTSL Debug: Processing content length: {}", content.len());
+        
+        let lines: Vec<&str> = content.lines().collect();
+        let mut i = 0;
+        let mut table_count = 0;
+        
+        while i < lines.len() {
+            let line = lines[i];
+            
+            if line.contains("<otsl>") {
+                table_count += 1;
+                println!("🔍 OTSL Debug: Found table #{} at line {}", table_count, i);
+                
+                // Extract OTSL content between <otsl> and </otsl>
+                let mut otsl_content = String::new();
+                let start_line = i;
+                i += 1; // Skip opening OTSL tag
+                
+                // Critical fix: Add boundary check to prevent infinite loop
+                let mut max_iterations = 1000; // Safety limit
+                while i < lines.len() && !lines[i].contains("</otsl>") && max_iterations > 0 {
+                    otsl_content.push_str(lines[i]);
+                    otsl_content.push('\n');
+                    i += 1;
+                    max_iterations -= 1;
+                }
+                
+                // If we hit the iteration limit, log error and break
+                if max_iterations == 0 {
+                    println!("❌ OTSL Debug: Hit iteration limit extracting table content - possible infinite loop");
+                    break;
+                }
+                
+                // Critical fix: Ensure we advance past the closing tag
+                if i < lines.len() && lines[i].contains("</otsl>") {
+                    i += 1; // Skip closing tag
+                }
+                
+                println!("🔍 OTSL Debug: Extracted content ({} chars):\n{}", otsl_content.len(), &otsl_content);
+                
+                // Also log just the first few lines to see structure
+                let preview_lines: Vec<&str> = otsl_content.lines().take(10).collect();
+                println!("🔍 OTSL Debug: First 10 lines: {:?}", preview_lines);
+                
+                // Only parse if we have actual content
+                if !otsl_content.trim().is_empty() {
+                    // Parse the OTSL content with robust error handling
+                    let (headers, rows) = Self::parse_otsl_content_robust(&otsl_content);
+                    
+                    println!("🔍 OTSL Debug: Parsed {} headers, {} rows", headers.len(), rows.len());
+                    if !headers.is_empty() {
+                        println!("🔍 OTSL Debug: Headers: {:?}", headers);
+                    }
+                    if !rows.is_empty() {
+                        println!("🔍 OTSL Debug: First row ({} cells): {:?}", rows[0].len(), rows[0]);
+                    }
+                    
+                    // Render the OTSL table with validation
+                    Self::render_otsl_table_static(ui, &headers, &rows);
+                    ui.separator();
+                } else {
+                    println!("⚠️ OTSL Debug: Empty OTSL content, skipping table rendering");
+                }
+            } else {
+                i += 1;
+            }
+        }
+        
+        if table_count == 0 {
+            println!("🔍 OTSL Debug: No OTSL tables found in content");
+        }
+    }
+    
+    fn render_doctags_with_tables_static(ui: &mut egui::Ui, content: &str) {
+        let lines: Vec<&str> = content.lines().collect();
+        let mut i = 0;
+        
+        while i < lines.len() {
+            let line = lines[i];
+            
+            if line.contains("<table>") {
+                // Found a table - extract and render it
+                let mut table_lines = Vec::new();
+                i += 1; // Skip opening table tag
+                
+                // Collect table content until closing tag
+                while i < lines.len() && !lines[i].contains("</table>") {
+                    if lines[i].trim() != "<thead>" && lines[i].trim() != "</thead>" &&
+                       lines[i].trim() != "<tbody>" && lines[i].trim() != "</tbody>" {
+                        table_lines.push(lines[i]);
+                    }
+                    i += 1;
+                }
+                
+                // Render the table
+                ui.separator();
+                ui.label(egui::RichText::new("📊 Table").strong());
+                ui.add_space(5.0);
+                
+                Self::render_doctags_table_static(ui, &table_lines);
+                
+                ui.add_space(10.0);
+                ui.separator();
+            } else {
+                // Regular content
+                if line.contains("<heading") {
+                    let text = Self::extract_text_between_tags_static(line, "heading");
+                    ui.heading(&text);
+                } else if line.contains("<paragraph") {
+                    let text = Self::extract_text_between_tags_static(line, "paragraph");
+                    ui.label(&text);
+                } else if !line.trim().is_empty() {
+                    ui.label(line);
+                }
+            }
+            
+            i += 1;
+        }
+    }
+    
+    fn parse_otsl_content_robust(content: &str) -> (Vec<String>, Vec<Vec<String>>) {
+        let mut headers = Vec::new();
+        let mut rows = Vec::new();
+        let mut current_row = Vec::new();
+        
+        println!("🔍 OTSL Debug: Parsing content: {}", &content[..content.len().min(200)]);
+        
+        // Handle inline OTSL content (continuous stream)
+        if content.contains("<fcel>") || content.contains("<rhed>") {
+            // Parse as continuous inline stream
+            let mut tokens = Vec::new();
+            let mut current_pos = 0;
+            
+            // Extract all OTSL tokens from the content
+            while current_pos < content.len() {
+                if let Some(tag_start) = content[current_pos..].find('<') {
+                    let abs_tag_start = current_pos + tag_start;
+                    if let Some(tag_end) = content[abs_tag_start..].find('>') {
+                        let abs_tag_end = abs_tag_start + tag_end + 1;
+                        let tag = &content[abs_tag_start..abs_tag_end];
+                        
+                        // Extract content between this tag and the next tag (if any)
+                        let content_start = abs_tag_end;
+                        let content_end = if let Some(next_tag) = content[content_start..].find('<') {
+                            content_start + next_tag
+                        } else {
+                            content.len()
+                        };
+                        
+                        let cell_content = content[content_start..content_end].trim();
+                        
+                        tokens.push((tag.to_string(), cell_content.to_string()));
+                        current_pos = content_end;
+                    } else {
+                        break;
+                    }
+                } else {
+                    break;
+                }
+            }
+            
+            println!("🔍 OTSL Debug: Found {} tokens", tokens.len());
+            
+            // Convert tokens to table structure
+            for (tag, cell_content) in tokens {
+                match tag.as_str() {
+                    "<nl>" => {
+                        // New line - finish current row
+                        if !current_row.is_empty() {
+                            rows.push(current_row.clone());
+                            current_row.clear();
+                        }
+                    }
+                    "<rhed>" => {
+                        // Row header - could be start of new row or header definition
+                        if !cell_content.is_empty() {
+                            current_row.push(cell_content);
+                        }
+                    }
+                    "<fcel>" => {
+                        // Field cell - regular data cell
+                        if cell_content.is_empty() || cell_content == "-" || cell_content == "- -" {
+                            current_row.push("".to_string());
+                        } else {
+                            current_row.push(cell_content);
+                        }
+                    }
+                    "<ecel>" => {
+                        // Empty cell
+                        current_row.push("".to_string());
+                    }
+                    "<ched>" => {
+                        // Column header
+                        if !cell_content.is_empty() {
+                            headers.push(cell_content);
+                        }
+                    }
+                    _ => {
+                        // Unknown tag, treat as content
+                        if !cell_content.is_empty() {
+                            current_row.push(cell_content);
+                        }
+                    }
+                }
+            }
+            
+            // Add final row if not empty
+            if !current_row.is_empty() {
+                rows.push(current_row);
+            }
+        } else {
+            // Original line-by-line parsing for structured content
+            for line in content.lines() {
+                let line = line.trim();
+                
+                if line.is_empty() {
+                    continue;
+                }
+                
+                // Handle cell content with robust parsing
+                if line.contains("<fcel>") || line.contains("<ched>") || line.contains("<rhed>") || line.contains("<ecel>") {
+                    Self::parse_cell_content_robust(line, &mut current_row);
+                }
+            }
+            
+            if !current_row.is_empty() {
+                rows.push(current_row);
+            }
+        }
+        
+        // If no explicit headers but we have rows, try to detect header row
+        if headers.is_empty() && !rows.is_empty() {
+            // Use first row as headers if it looks like headers
+            let first_row = &rows[0];
+            if first_row.len() > 1 && first_row.iter().any(|cell| {
+                !cell.is_empty() && !cell.chars().all(|c| c.is_ascii_digit() || c == ',' || c == '.' || c == '-' || c.is_whitespace())
+            }) {
+                headers = rows.remove(0);
+            }
+        }
+        
+        println!("🔍 OTSL Debug: Final result - {} headers, {} rows", headers.len(), rows.len());
+        
+        (headers, rows)
+    }
+    
+    fn parse_cell_content_robust(line: &str, current_row: &mut Vec<String>) {
+        // Handle different cell types and malformed content
+        if line.contains("<ecel>") {
+            // Empty cell - but only add one empty cell, not multiple
+            current_row.push(String::new());
+        } else if let Some(content) = Self::extract_cell_content_robust(line) {
+            // Parse cell content, handling space-separated values
+            let content = content.trim();
+            
+            // Handle empty/dash representations
+            if content == "-" || content == "- -" || content.is_empty() {
+                current_row.push(String::new());
+            } else {
+                // Critical fix: Don't auto-split on spaces for most content
+                // Only split if it's clearly numeric data with specific patterns
+                if content.contains(' ') && 
+                   content.split_whitespace().count() > 1 &&
+                   content.split_whitespace().all(|part| {
+                       part.chars().all(|c| c.is_ascii_digit() || c == ',' || c == '.' || c == '-') &&
+                       !part.is_empty()
+                   }) {
+                    // Space-separated numeric values - split into separate cells
+                    for value in content.split_whitespace() {
+                        if !value.is_empty() {
+                            current_row.push(value.to_string());
+                        }
+                    }
+                } else {
+                    // Keep content as single cell (most common case)
+                    current_row.push(content.to_string());
+                }
+            }
+        }
+    }
+    
+    fn extract_cell_content_robust(line: &str) -> Option<String> {
+        // Try different tag patterns
+        if let Some(content) = Self::extract_between_tags_robust(line, "fcel") {
+            return Some(content);
+        }
+        if let Some(content) = Self::extract_between_tags_robust(line, "ched") {
+            return Some(content);
+        }
+        if let Some(content) = Self::extract_between_tags_robust(line, "rhed") {
+            return Some(content);
+        }
+        None
+    }
+    
+    fn extract_between_tags_robust(text: &str, tag: &str) -> Option<String> {
+        let start_tag = format!("<{}>", tag);
+        let end_tag = format!("</{}>", tag);
+        
+        if let Some(start) = text.find(&start_tag) {
+            let content_start = start + start_tag.len();
+            if let Some(end) = text[content_start..].find(&end_tag) {
+                let content = &text[content_start..content_start + end];
+                // Clean up the content by trimming whitespace and newlines
+                return Some(content.trim().to_string());
+            }
+        }
+        None
+    }
+    
+    fn normalize_row_length(row: &mut Vec<String>, target_length: usize) {
+        while row.len() < target_length {
+            row.push(String::new()); // Pad with empty cells
+        }
+        if row.len() > target_length {
+            row.truncate(target_length); // Trim excess cells
+        }
+    }
+    
+    fn render_otsl_table_static(ui: &mut egui::Ui, headers: &[String], rows: &[Vec<String>]) {
+        if headers.is_empty() && rows.is_empty() {
+            ui.label("⚠️ Empty table data");
+            return;
+        }
+        
+        // Add proper spacing before table
+        ui.add_space(10.0);
+        ui.separator();
+        ui.add_space(8.0);
+        
+        ui.label(egui::RichText::new("📊 Financial Table (OTSL)").strong().size(16.0));
+        ui.add_space(8.0);
+        
+        // Show table stats
+        if !headers.is_empty() && !rows.is_empty() {
+            ui.label(format!("📏 {} columns × {} rows", headers.len(), rows.len()));
+            ui.add_space(5.0);
+        }
+        
+        // Use a frame to contain the table and prevent overlap
+        egui::Frame::default()
+            .fill(egui::Color32::from_rgba_unmultiplied(15, 15, 15, 150))
+            .stroke(egui::Stroke::new(1.0, egui::Color32::GRAY))
+            .inner_margin(egui::Margin::same(10.0))
+            .show(ui, |ui| {
+                egui::Grid::new("otsl_table")
+                    .striped(true)
+                    .min_col_width(80.0)  // Ensure minimum column width
+                    .spacing([10.0, 8.0]) // Add horizontal and vertical spacing
+                    .show(ui, |ui| {
+                        // Render headers
+                        if !headers.is_empty() {
+                            for header in headers {
+                                ui.label(egui::RichText::new(header).strong().color(egui::Color32::LIGHT_BLUE));
+                            }
+                            ui.end_row();
+                        }
+                        
+                        // Render data rows with error handling
+                        for (row_idx, row) in rows.iter().enumerate() {
+                            for (cell_idx, cell) in row.iter().enumerate() {
+                                // Show cell index in debug mode if cell is suspiciously long
+                                if cell.len() > 100 {
+                                    println!("⚠️ OTSL Debug: Long cell at row {} col {}: {} chars", row_idx, cell_idx, cell.len());
+                                }
+                                
+                                let display_text = if cell.is_empty() { 
+                                    "-".to_string() 
+                                } else { 
+                                    // Wrap long text to prevent overflow
+                                    if cell.len() > 50 {
+                                        format!("{}...", &cell[..47])
+                                    } else {
+                                        cell.clone()
+                                    }
+                                };
+                                
+                                // Use monospace font for numeric data alignment
+                                if cell.chars().all(|c| c.is_ascii_digit() || c == ',' || c == '.' || c == '-' || c == ' ') {
+                                    ui.label(egui::RichText::new(display_text).monospace());
+                                } else {
+                                    ui.label(display_text);
+                                }
+                            }
+                            ui.end_row();
+                        }
+                    });
+            });
+        
+        // Add proper spacing after table
+        ui.add_space(10.0);
+        ui.separator();
+        ui.add_space(10.0);
+    }
+    
+    fn render_doctags_table_static(ui: &mut egui::Ui, table_lines: &[&str]) {
+        // Parse table rows
+        let mut rows = Vec::new();
+        let mut current_row = Vec::new();
+        
+        for line in table_lines {
+            if line.contains("<tr>") {
+                current_row.clear();
+            } else if line.contains("</tr>") {
+                if !current_row.is_empty() {
+                    rows.push(current_row.clone());
+                }
+            } else if line.contains("<td>") || line.contains("<th>") {
+                let text = if line.contains("<td>") {
+                    Self::extract_text_between_tags_static(line, "td")
+                } else {
+                    Self::extract_text_between_tags_static(line, "th")
+                };
+                current_row.push(text);
+            }
+        }
+        
+        // Render table using egui Grid
+        if !rows.is_empty() {
+            egui::Grid::new(format!("doctags_table_{}", rows.len()))
+                .striped(true)
+                .show(ui, |ui| {
+                    for (row_idx, row) in rows.iter().enumerate() {
+                        for cell in row {
+                            if row_idx == 0 {
+                                // Header row
+                                ui.label(egui::RichText::new(cell).strong());
+                            } else {
+                                ui.label(cell);
+                            }
+                        }
+                        ui.end_row();
+                    }
+                });
+        }
+    }
+    
+    fn extract_text_between_tags_static(line: &str, tag: &str) -> String {
+        // Simple text extraction between XML-like tags
+        let start_tag = format!("<{}>", tag);
+        let end_tag = format!("</{}>", tag);
+        
+        if let Some(start) = line.find(&start_tag) {
+            if let Some(end) = line.find(&end_tag) {
+                let start_pos = start + start_tag.len();
+                if start_pos < end {
+                    return line[start_pos..end].to_string();
+                }
+            }
+        }
+        
+        // Fallback: try to extract from self-closing tags or partial matches
+        if line.contains(&format!("<{}", tag)) {
+            // Look for content after the tag
+            if let Some(start) = line.find('>') {
+                let content = &line[start + 1..];
+                if let Some(end) = content.find('<') {
+                    return content[..end].trim().to_string();
+                } else {
+                    return content.trim().to_string();
+                }
+            }
+        }
+        
+        // Ultimate fallback: return the line as-is
+        line.trim().to_string()
+    }
+    
+    /// Create mock Docling JSON from existing chunks for table editor
+    fn create_mock_docling_json(&self) -> serde_json::Value {
+        let mut structured_tables = Vec::new();
+        let mut extractions = Vec::new();
+        
+        // Create mock structured tables from chunks that contain table data
+        for (idx, chunk) in self.chunks.iter().enumerate() {
+            if chunk.element_types.contains(&"table".to_string()) {
+                // Try to parse the chunk content as table data
+                let table_data = self.parse_chunk_as_table_data(&chunk.content);
+                if !table_data.is_empty() {
+                    structured_tables.push(serde_json::json!({
+                        "table_index": idx,
+                        "processed_data": table_data,
+                        "bounds": chunk.spatial_bounds.clone().unwrap_or_default()
+                    }));
+                }
+            }
+        }
+        
+        // Create mock extraction from all chunks
+        let all_text = self.chunks.iter()
+            .map(|chunk| chunk.content.clone())
+            .collect::<Vec<_>>()
+            .join("\n\n");
+        
+        extractions.push(serde_json::json!({
+            "page_number": 1,
+            "text": all_text,
+            "tables": [],
+            "figures": [],
+            "formulas": [],
+            "confidence": 0.9,
+            "layout_boxes": [],
+            "tool": "mock_data"
+        }));
+        
+        serde_json::json!({
+            "success": true,
+            "tool": "mock_docling",
+            "extractions": extractions,
+            "structured_tables": structured_tables,
+            "metadata": {
+                "total_pages": 1,
+                "tables_found": structured_tables.len(),
+                "figures_found": 0,
+                "processing_time": 0
+            }
+        })
+    }
+    
+    /// Parse chunk content as table data for mock JSON
+    fn parse_chunk_as_table_data(&self, content: &str) -> Vec<Vec<String>> {
+        let mut table_data = Vec::new();
+        
+        // Look for markdown table patterns
+        if content.contains('|') {
+            for line in content.lines() {
+                let trimmed = line.trim();
+                if trimmed.starts_with('|') && trimmed.ends_with('|') {
+                    // Skip separator lines
+                    if trimmed.chars().all(|c| c == '|' || c == '-' || c == ':' || c.is_whitespace()) {
+                        continue;
+                    }
+                    
+                    let cells: Vec<String> = trimmed
+                        .split('|')
+                        .map(|cell| cell.trim().to_string())
+                        .filter(|cell| !cell.is_empty())
+                        .collect();
+                    
+                    if !cells.is_empty() {
+                        table_data.push(cells);
+                    }
+                }
+            }
+        }
+        
+        table_data
+    }
+    
+    /// Get the latest processed native document for Table Editor
+    fn get_latest_native_document(&self) -> Option<crate::document_model::Document> {
+        // For now, check if we have any chunks that were processed with the native parser
+        if self.chunks.iter().any(|chunk| chunk.element_types.contains(&"native_parsed".to_string())) {
+            // Create a mock document from the native chunks
+            // TODO: Store the actual Document model from native parsing
+            let mut document = crate::document_model::Document::new();
+            
+            for chunk in &self.chunks {
+                if chunk.element_types.contains(&"table".to_string()) {
+                    // Convert chunk back to table element
+                    let table_data = self.create_table_data_from_chunk(chunk);
+                    let element = crate::document_model::DocumentElement::Table {
+                        id: chunk.id.to_string(),
+                        data: table_data,
+                        bounds: crate::document_model::BoundingBox {
+                            x: 0.0,
+                            y: 0.0,
+                            width: 100.0,
+                            height: 50.0,
+                        },
+                        page_number: 1,
+                        caption: None,
+                        table_type: crate::document_model::TableType::General,
+                    };
+                    document.add_element(element);
+                } else if chunk.element_types.contains(&"text".to_string()) {
+                    let element = crate::document_model::DocumentElement::Paragraph {
+                        id: chunk.id.to_string(),
+                        text: chunk.content.clone(),
+                        style: crate::document_model::TextStyle::default(),
+                        bounds: crate::document_model::BoundingBox {
+                            x: 0.0,
+                            y: 0.0,
+                            width: 100.0,
+                            height: 20.0,
+                        },
+                        page_number: 1,
+                    };
+                    document.add_element(element);
+                }
+            }
+            
+            Some(document)
+        } else {
+            None
+        }
+    }
+    
+    /// Create TableData from a chunk for Document model
+    fn create_table_data_from_chunk(&self, chunk: &DocumentChunk) -> crate::document_model::TableData {
+        // Parse the chunk content as markdown table and convert to TableData
+        let (headers, rows) = self.parse_markdown_table(&chunk.content);
+        
+        let total_rows = rows.len() + if headers.is_empty() { 0 } else { 1 };
+        let total_cols = headers.len().max(rows.iter().map(|row| row.len()).max().unwrap_or(0));
+        
+        let mut cells = Vec::new();
+        
+        // Add header row if present
+        if !headers.is_empty() {
+            let mut header_row = Vec::new();
+            for header in &headers {
+                header_row.push(crate::document_model::Cell {
+                    content: crate::document_model::CellContent::Text(header.clone()),
+                    span: crate::document_model::CellSpan { row_span: 1, col_span: 1 },
+                    style: crate::document_model::CellStyle::default(),
+                    is_header: true,
+                    is_empty: header.is_empty(),
+                    confidence: Some(0.9),
+                });
+            }
+            // Pad header row to match total columns
+            while header_row.len() < total_cols {
+                header_row.push(crate::document_model::Cell {
+                    content: crate::document_model::CellContent::Empty,
+                    span: crate::document_model::CellSpan { row_span: 1, col_span: 1 },
+                    style: crate::document_model::CellStyle::default(),
+                    is_header: true,
+                    is_empty: true,
+                    confidence: Some(0.5),
+                });
+            }
+            cells.push(header_row);
+        }
+        
+        // Add data rows
+        for row in &rows {
+            let mut cell_row = Vec::new();
+            for cell_text in row {
+                cell_row.push(crate::document_model::Cell {
+                    content: if cell_text.is_empty() {
+                        crate::document_model::CellContent::Empty
+                    } else if cell_text.chars().all(|c| c.is_ascii_digit() || c == '.' || c == ',' || c == '-') {
+                        // Try to parse as number
+                        match cell_text.replace(',', "").parse::<f64>() {
+                            Ok(num) => crate::document_model::CellContent::Number(num),
+                            Err(_) => crate::document_model::CellContent::Text(cell_text.clone()),
+                        }
+                    } else {
+                        crate::document_model::CellContent::Text(cell_text.clone())
+                    },
+                    span: crate::document_model::CellSpan { row_span: 1, col_span: 1 },
+                    style: crate::document_model::CellStyle::default(),
+                    is_header: false,
+                    is_empty: cell_text.is_empty(),
+                    confidence: Some(0.8),
+                });
+            }
+            // Pad row to match total columns
+            while cell_row.len() < total_cols {
+                cell_row.push(crate::document_model::Cell {
+                    content: crate::document_model::CellContent::Empty,
+                    span: crate::document_model::CellSpan { row_span: 1, col_span: 1 },
+                    style: crate::document_model::CellStyle::default(),
+                    is_header: false,
+                    is_empty: true,
+                    confidence: Some(0.5),
+                });
+            }
+            cells.push(cell_row);
+        }
+        
+        crate::document_model::TableData {
+            cells,
+            headers: headers.into_iter().enumerate().map(|(i, text)| {
+                crate::document_model::TableHeader {
+                    text,
+                    column_index: i,
+                    span: 1,
+                    is_multi_level: false,
+                    parent_header: None,
+                }
+            }).collect(),
+            col_widths: vec![100.0; total_cols],
+            row_heights: vec![25.0; total_rows],
+            total_rows,
+            total_cols,
+            merged_regions: Vec::new(),
+        }
+    }
+    
     fn set_warp_theme(&self, ctx: &egui::Context) {
-        // Set the default font to system monospace (we'll add Hack later)
+        // Use default fonts for now
         let fonts = egui::FontDefinitions::default();
-        // For now, just use better system fonts
-        // TODO: Add Hack font file later
         ctx.set_fonts(fonts);
         
         let mut visuals = egui::Visuals::dark();

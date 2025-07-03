@@ -197,6 +197,81 @@ class EnvironmentalLabProcessor:
             'processed_data': processed_data,
             'issues': issues
         }
+
+    def table_to_otsl(self, table_data: List[List[str]], headers: Optional[List[str]] = None) -> str:
+        """Convert table data to OTSL (Open Table and Structure Language) format"""
+        if not table_data:
+            return ""
+
+        otsl_lines = ["<otsl>"]
+
+        # Determine headers
+        if headers:
+            header_row = headers
+            data_rows = table_data
+        else:
+            # Use first row as headers
+            header_row = table_data[0] if table_data else []
+            data_rows = table_data[1:] if len(table_data) > 1 else []
+
+        # Add table header section
+        if header_row:
+            otsl_lines.append("<thead>")
+            otsl_lines.append("<tr>")
+            for header in header_row:
+                if header and header.strip():
+                    otsl_lines.append(f"<rhed>{str(header).strip()}</rhed>")
+                else:
+                    otsl_lines.append("<rhed></rhed>")
+            otsl_lines.append("</tr>")
+            otsl_lines.append("</thead>")
+
+        # Add table body section
+        if data_rows:
+            otsl_lines.append("<tbody>")
+            for row in data_rows:
+                if any(cell and str(cell).strip() for cell in row):  # Skip empty rows
+                    otsl_lines.append("<tr>")
+                    for i, cell in enumerate(row):
+                        cell_content = str(cell).strip() if cell is not None else ""
+                        if i == 0:  # First column could be row header
+                            otsl_lines.append(f"<rhed>{cell_content}</rhed>")
+                        else:
+                            otsl_lines.append(f"<fcel>{cell_content}</fcel>")
+                    otsl_lines.append("</tr>")
+            otsl_lines.append("</tbody>")
+
+        otsl_lines.append("</otsl>")
+
+        return "\n".join(otsl_lines)
+
+    def convert_doctags_to_otsl(self, doctags_content: str, structured_tables: List[Dict]) -> str:
+        """Convert DocTags content to include OTSL tables where appropriate"""
+        if not structured_tables:
+            return doctags_content
+
+        # Create OTSL versions of the structured tables
+        otsl_tables = []
+        for table_info in structured_tables:
+            if 'processed_data' in table_info and table_info['processed_data']:
+                table_data = table_info['processed_data']
+                # Extract headers if available
+                headers = None
+                if 'formats' in table_info and 'dataframe' in table_info['formats']:
+                    headers = table_info['formats']['dataframe'].get('headers')
+
+                otsl_content = self.table_to_otsl(table_data, headers)
+                if otsl_content:
+                    otsl_tables.append(otsl_content)
+
+        # If we have OTSL tables, create enhanced content
+        if otsl_tables:
+            enhanced_content = f"{doctags_content}\n\n<!-- STRUCTURED TABLES IN OTSL FORMAT -->\n"
+            for i, otsl_table in enumerate(otsl_tables):
+                enhanced_content += f"\n<!-- Table {i+1} -->\n{otsl_table}\n"
+            return enhanced_content
+
+        return doctags_content
     
     def parse_markdown_table(self, table_lines: List[str]) -> List[List[str]]:
         """Parse markdown table lines into table data"""
@@ -219,6 +294,107 @@ class EnvironmentalLabProcessor:
                 table_data.append(cells)
         
         return table_data
+
+def parse_markdown_to_structured_chunks(markdown_content: str) -> List[Dict[str, Any]]:
+    """Parse markdown content into structured chunks with element type detection"""
+    chunks = []
+    lines = markdown_content.split('\n')
+    current_chunk_lines = []
+    current_type = 'text'
+    chunk_id = 1
+    
+    for line in lines:
+        line_stripped = line.strip()
+        
+        # Detect element types
+        if line_stripped.startswith('#'):
+            # Finish previous chunk
+            if current_chunk_lines:
+                chunks.append({
+                    'id': f"chunk_{chunk_id}",
+                    'type': current_type,
+                    'element_type': current_type,
+                    'content': '\n'.join(current_chunk_lines).strip(),
+                    'page_number': 1,
+                    'bbox': None
+                })
+                chunk_id += 1
+                current_chunk_lines = []
+            
+            # Start new heading chunk
+            current_type = 'heading'
+            current_chunk_lines = [line]
+        elif '|' in line and len(line.split('|')) > 2:
+            # Table row detected
+            if current_type != 'table':
+                # Finish previous chunk
+                if current_chunk_lines:
+                    chunks.append({
+                        'id': f"chunk_{chunk_id}",
+                        'type': current_type,
+                        'element_type': current_type,
+                        'content': '\n'.join(current_chunk_lines).strip(),
+                        'page_number': 1,
+                        'bbox': None
+                    })
+                    chunk_id += 1
+                    current_chunk_lines = []
+                
+                current_type = 'table'
+            current_chunk_lines.append(line)
+        elif line_stripped.startswith(('- ', '* ', '+ ')) or (line_stripped and line_stripped[0].isdigit() and '. ' in line_stripped):
+            # List item detected
+            if current_type != 'list':
+                # Finish previous chunk
+                if current_chunk_lines:
+                    chunks.append({
+                        'id': f"chunk_{chunk_id}",
+                        'type': current_type,
+                        'element_type': current_type,
+                        'content': '\n'.join(current_chunk_lines).strip(),
+                        'page_number': 1,
+                        'bbox': None
+                    })
+                    chunk_id += 1
+                    current_chunk_lines = []
+                
+                current_type = 'list'
+            current_chunk_lines.append(line)
+        elif line_stripped:
+            # Regular text
+            if current_type not in ['text', 'heading'] or (current_type == 'heading' and len(current_chunk_lines) > 1):
+                # Finish previous chunk if it's not text
+                if current_chunk_lines:
+                    chunks.append({
+                        'id': f"chunk_{chunk_id}",
+                        'type': current_type,
+                        'element_type': current_type,
+                        'content': '\n'.join(current_chunk_lines).strip(),
+                        'page_number': 1,
+                        'bbox': None
+                    })
+                    chunk_id += 1
+                    current_chunk_lines = []
+                
+                current_type = 'text'
+            current_chunk_lines.append(line)
+        else:
+            # Empty line - continue current chunk
+            if current_chunk_lines:
+                current_chunk_lines.append(line)
+    
+    # Add final chunk
+    if current_chunk_lines:
+        chunks.append({
+            'id': f"chunk_{chunk_id}",
+            'type': current_type,
+            'element_type': current_type,
+            'content': '\n'.join(current_chunk_lines).strip(),
+            'page_number': 1,
+            'bbox': None
+        })
+    
+    return chunks
 
 def extract_with_enhanced_docling(pdf_path: str, page_num: Optional[int] = None) -> Dict[str, Any]:
     """
@@ -294,47 +470,143 @@ def extract_with_enhanced_docling(pdf_path: str, page_num: Optional[int] = None)
         
         print(f"📄 Document converted, analyzing for lab conventions...", file=sys.stderr)
         
-        # Export to markdown first to get full text
+        # Export to structured JSON format for proper element type detection
+        structured_chunks = []
+        print(f"🔍 Extracting structured elements from document...", file=sys.stderr)
+        
+        # Process document elements from Docling's internal structure
+        if hasattr(result.document, '_doc_items') and result.document._doc_items:
+            print(f"📋 Found {len(result.document._doc_items)} document items", file=sys.stderr)
+            
+            for idx, item in enumerate(result.document._doc_items):
+                try:
+                    # Extract element type and content
+                    element_type = getattr(item, 'label', 'unknown')
+                    content_text = getattr(item, 'text', '')
+                    
+                    # Get bounding box if available
+                    bbox = None
+                    if hasattr(item, 'bbox'):
+                        bbox = {
+                            'x': float(item.bbox.l),
+                            'y': float(item.bbox.t), 
+                            'width': float(item.bbox.r - item.bbox.l),
+                            'height': float(item.bbox.b - item.bbox.t)
+                        }
+                    
+                    # Get page number
+                    page_number = getattr(item, 'page', 1)
+                    
+                    structured_chunk = {
+                        'id': f"chunk_{idx + 1}",
+                        'type': element_type.lower(),
+                        'content': content_text,
+                        'page_number': page_number,
+                        'bbox': bbox
+                    }
+                    
+                    # Special handling for tables
+                    if element_type.lower() in ['table', 'table-cell', 'table-header']:
+                        structured_chunk['element_type'] = 'table'
+                        # Try to get table data if it's a table
+                        if hasattr(item, 'table_data'):
+                            structured_chunk['table_data'] = item.table_data
+                    elif element_type.lower() in ['title', 'section-header', 'heading']:
+                        structured_chunk['element_type'] = 'heading'
+                    elif element_type.lower() in ['text', 'paragraph']:
+                        structured_chunk['element_type'] = 'text'
+                    elif element_type.lower() in ['list', 'list-item']:
+                        structured_chunk['element_type'] = 'list'
+                    elif element_type.lower() in ['formula', 'equation']:
+                        structured_chunk['element_type'] = 'formula'
+                    else:
+                        structured_chunk['element_type'] = 'text'  # Default fallback
+                    
+                    structured_chunks.append(structured_chunk)
+                    
+                except Exception as item_error:
+                    print(f"⚠️ Error processing item {idx}: {item_error}", file=sys.stderr)
+                    # Fallback text chunk
+                    structured_chunks.append({
+                        'id': f"chunk_{idx + 1}",
+                        'type': 'text',
+                        'element_type': 'text',
+                        'content': str(getattr(item, 'text', '')),
+                        'page_number': 1,
+                        'bbox': None
+                    })
+        
+        # Fallback: Export to markdown and parse structure
+        markdown_content = result.document.export_to_markdown()
+        
+        if not structured_chunks:
+            print(f"📋 No structured items found, parsing markdown content...", file=sys.stderr)
+            structured_chunks = parse_markdown_to_structured_chunks(markdown_content)
+            
+        print(f"✅ Extracted {len(structured_chunks)} structured chunks", file=sys.stderr)
+        
+        # Also get DocTags as fallback
+        try:
+            doctags_content = result.document.export_to_doctags(
+                add_location=True,
+                add_content=True,
+                add_page_index=True,
+                add_table_cell_location=True,
+                add_table_cell_text=True,
+                minified=False
+            )
+        except Exception as e:
+            print(f"⚠️ DocTags export failed: {e}", file=sys.stderr)
+            doctags_content = markdown_content
+        
+        # Also get markdown for compatibility
         markdown_content = result.document.export_to_markdown()
         
         # First pass: analyze document for conventions
         conventions = processor.analyze_document_conventions(markdown_content)
         
-        # Second pass: process tables with lab awareness
+        # Second pass: Extract structured tables using Docling's Table API
         processed_tables = []
         total_issues = 0
+        structured_tables = []
         
-        # Extract tables from the document using Docling v2 API
-        # Tables are embedded in the markdown, so we'll parse them from there
-        # This is more reliable than trying to access the internal table structure
-        print(f"🔍 Looking for tables in markdown content...", file=sys.stderr)
+        print(f"🔍 Extracting structured tables using Docling Table API...", file=sys.stderr)
         
-        # Parse tables from markdown using simple regex approach
-        table_lines = []
-        lines = markdown_content.split('\n')
-        
-        for i, line in enumerate(lines):
-            if '|' in line and len(line.split('|')) > 2:
-                table_lines.append((i, line))
-        
-        if table_lines:
-            print(f"📋 Found {len(table_lines)} table-like lines in markdown", file=sys.stderr)
+        # Access tables directly from the document structure
+        if hasattr(result.document, 'tables') and result.document.tables:
+            print(f"📋 Found {len(result.document.tables)} structured tables in document", file=sys.stderr)
             
-            # Group consecutive table lines into tables
-            current_table = []
-            for line_num, line in table_lines:
-                if current_table and line_num > current_table[-1][0] + 1:
-                    # Process completed table
-                    if len(current_table) >= 2:
-                        table_data = processor.parse_markdown_table([l[1] for l in current_table])
-                        if table_data:
-                            headers = table_data[0] if table_data else []
-                            patterns = processor.detect_column_patterns(headers)
+            for table_idx, table in enumerate(result.document.tables):
+                try:
+                    # Export table to different formats for maximum compatibility
+                    table_formats = {}
+                    
+                    # Try to get DataFrame if available
+                    try:
+                        table_df = table.export_to_dataframe()
+                        if table_df is not None and not table_df.empty:
+                            # Convert DataFrame to list of lists for processing
+                            headers = table_df.columns.tolist()
+                            table_data = [headers] + table_df.values.tolist()
                             
-                            # Process the table
+                            # Convert all values to strings for consistency
+                            table_data = [[str(cell) if cell is not None else "" for cell in row] for row in table_data]
+                            
+                            table_formats['dataframe'] = {
+                                'headers': headers,
+                                'data': table_data,
+                                'shape': table_df.shape
+                            }
+                            
+                            print(f"📊 Table {table_idx + 1}: {table_df.shape[0]} rows × {table_df.shape[1]} columns", file=sys.stderr)
+                            
+                            # Process with environmental lab awareness
+                            patterns = processor.detect_column_patterns(headers)
                             table_result = processor.process_table_data(table_data, patterns)
                             
-                            processed_tables.append({
+                            structured_tables.append({
+                                'table_index': table_idx,
+                                'formats': table_formats,
                                 'original_data': table_data,
                                 'processed_data': table_result['processed_data'],
                                 'patterns': patterns,
@@ -342,31 +614,98 @@ def extract_with_enhanced_docling(pdf_path: str, page_num: Optional[int] = None)
                             })
                             
                             total_issues += len(table_result['issues'])
-                            print(f"📋 Processed table with {len(table_result['issues'])} issues found", file=sys.stderr)
+                            print(f"📋 Processed structured table {table_idx + 1} with {len(table_result['issues'])} issues found", file=sys.stderr)
+                            
+                    except Exception as df_error:
+                        print(f"⚠️ Could not export table {table_idx + 1} to DataFrame: {df_error}", file=sys.stderr)
                     
-                    current_table = []
-                
-                current_table.append((line_num, line))
+                    # Try to get HTML format
+                    try:
+                        table_html = table.export_to_html()
+                        if table_html:
+                            table_formats['html'] = table_html
+                            print(f"📄 Table {table_idx + 1}: HTML export successful", file=sys.stderr)
+                    except Exception as html_error:
+                        print(f"⚠️ Could not export table {table_idx + 1} to HTML: {html_error}", file=sys.stderr)
+                    
+                    # Try to get CSV format
+                    try:
+                        table_csv = table.export_to_csv()
+                        if table_csv:
+                            table_formats['csv'] = table_csv
+                            print(f"📊 Table {table_idx + 1}: CSV export successful", file=sys.stderr)
+                    except Exception as csv_error:
+                        print(f"⚠️ Could not export table {table_idx + 1} to CSV: {csv_error}", file=sys.stderr)
+                    
+                except Exception as e:
+                    print(f"❌ Error processing table {table_idx + 1}: {e}", file=sys.stderr)
+                    
+        else:
+            print(f"⚠️ No structured tables found in document - falling back to markdown parsing", file=sys.stderr)
             
-            # Process final table
-            if len(current_table) >= 2:
-                table_data = processor.parse_markdown_table([l[1] for l in current_table])
-                if table_data:
-                    headers = table_data[0] if table_data else []
-                    patterns = processor.detect_column_patterns(headers)
+            # Fallback: Parse tables from markdown if no structured tables found
+            table_lines = []
+            lines = markdown_content.split('\n')
+            
+            for i, line in enumerate(lines):
+                if '|' in line and len(line.split('|')) > 2:
+                    table_lines.append((i, line))
+            
+            if table_lines:
+                print(f"📋 Found {len(table_lines)} table-like lines in markdown (fallback mode)", file=sys.stderr)
+                
+                # Group consecutive table lines into tables
+                current_table = []
+                for line_num, line in table_lines:
+                    if current_table and line_num > current_table[-1][0] + 1:
+                        # Process completed table
+                        if len(current_table) >= 2:
+                            table_data = processor.parse_markdown_table([l[1] for l in current_table])
+                            if table_data:
+                                headers = table_data[0] if table_data else []
+                                patterns = processor.detect_column_patterns(headers)
+                                
+                                # Process the table
+                                table_result = processor.process_table_data(table_data, patterns)
+                                
+                                processed_tables.append({
+                                    'table_index': len(processed_tables),
+                                    'original_data': table_data,
+                                    'processed_data': table_result['processed_data'],
+                                    'patterns': patterns,
+                                    'issues': table_result['issues']
+                                })
+                                
+                                total_issues += len(table_result['issues'])
+                                print(f"📋 Processed markdown table with {len(table_result['issues'])} issues found", file=sys.stderr)
+                        
+                        current_table = []
                     
-                    # Process the table
-                    table_result = processor.process_table_data(table_data, patterns)
-                    
-                    processed_tables.append({
-                        'original_data': table_data,
-                        'processed_data': table_result['processed_data'],
-                        'patterns': patterns,
-                        'issues': table_result['issues']
-                    })
-                    
-                    total_issues += len(table_result['issues'])
-                    print(f"📋 Processed table with {len(table_result['issues'])} issues found", file=sys.stderr)
+                    current_table.append((line_num, line))
+                
+                # Process final table
+                if len(current_table) >= 2:
+                    table_data = processor.parse_markdown_table([l[1] for l in current_table])
+                    if table_data:
+                        headers = table_data[0] if table_data else []
+                        patterns = processor.detect_column_patterns(headers)
+                        
+                        # Process the table
+                        table_result = processor.process_table_data(table_data, patterns)
+                        
+                        processed_tables.append({
+                            'table_index': len(processed_tables),
+                            'original_data': table_data,
+                            'processed_data': table_result['processed_data'],
+                            'patterns': patterns,
+                            'issues': table_result['issues']
+                        })
+                        
+                        total_issues += len(table_result['issues'])
+                        print(f"📋 Processed markdown table with {len(table_result['issues'])} issues found", file=sys.stderr)
+        
+        # Combine structured and processed tables
+        all_processed_tables = structured_tables + processed_tables
         
         # Export enhanced markdown
         markdown_content = result.document.export_to_markdown()
@@ -385,16 +724,41 @@ def extract_with_enhanced_docling(pdf_path: str, page_num: Optional[int] = None)
         
         print(f"✅ Enhanced extraction complete! Pages: {page_count}, Tables: {tables_found}, Issues: {total_issues}, Time: {processing_time}ms", file=sys.stderr)
         
-        # Convert to expected format
+        # Convert structured tables to format compatible with Rust
+        structured_table_data = []
+        for table_info in all_processed_tables:
+            table_output = {
+                'index': table_info['table_index'],
+                'original_data': table_info['original_data'],
+                'processed_data': table_info['processed_data'],
+                'patterns': table_info['patterns'],
+                'issues': table_info['issues']
+            }
+            
+            # Add format exports if available
+            if 'formats' in table_info:
+                table_output['formats'] = table_info['formats']
+            
+            structured_table_data.append(table_output)
+        
+        # Use pure DocTags format for proper structured parsing in Rust
+        print(f"📊 Using pure DocTags format with {len(structured_table_data)} structured tables", file=sys.stderr)
+        print(f"📊 DocTags content sample (first 500 chars): {doctags_content[:500]}...", file=sys.stderr)
+        
+        # Return structured chunks format instead of DocTags
         extraction = {
             'page_number': 1,
-            'text': enhanced_markdown,
-            'tables': [],  # Tables are embedded in enhanced markdown
+            'text': markdown_content,  # Fallback text
+            'structured_chunks': structured_chunks,  # NEW: Structured chunks with element types
+            'markdown_text': markdown_content,
+            'doctags_text': doctags_content,  # Keep DocTags as fallback
+            'tables': structured_table_data,
             'figures': [],
             'formulas': [],
             'confidence': 0.95,
             'layout_boxes': [],
-            'tool': 'docling_v2_enhanced_lab'
+            'tool': 'docling_v2_enhanced_lab',
+            'content_format': 'structured_chunks',  # NEW: Indicate structured format
         }
         
         return {
@@ -403,14 +767,17 @@ def extract_with_enhanced_docling(pdf_path: str, page_num: Optional[int] = None)
             'extractions': [extraction],
             'metadata': {
                 'total_pages': page_count,
-                'tables_found': tables_found,
+                'tables_found': len(all_processed_tables),
                 'figures_found': figures_found,
                 'processing_time': processing_time,
                 'qualifier_issues': total_issues,
                 'conventions_found': len(conventions),
-                'column_patterns': sum(len(t['patterns']) for t in processed_tables),
-                'processed_tables': processed_tables
-            }
+                'column_patterns': sum(len(t['patterns']) for t in all_processed_tables),
+                'structured_tables_extracted': len(structured_tables),
+                'markdown_tables_parsed': len(processed_tables)
+            },
+            'structured_tables': structured_table_data,  # Also available at top level
+            'conventions': conventions  # Include qualifier conventions
         }
         
     except Exception as e:
