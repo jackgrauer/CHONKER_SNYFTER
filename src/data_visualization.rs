@@ -241,7 +241,9 @@ impl DataVisualizationPane {
     }
 
     fn render_detailed_view(&mut self, ui: &mut Ui, data: &ExtractedData) {
-        ScrollArea::vertical().show(ui, |ui| {
+        ScrollArea::both()
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
             for (index, block) in data.content_blocks.iter().enumerate() {
                 if self.matches_filter(block) {
                     let is_expanded = self.expanded_blocks.get(index).copied().unwrap_or(false);

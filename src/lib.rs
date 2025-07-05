@@ -30,6 +30,7 @@ pub mod coordinate_mapping;
 pub mod validation_editor;
 #[cfg(feature = "gui")]
 pub mod data_visualization;
+pub mod html_extractor;
 #[cfg(feature = "gui")]
 pub mod extraction_integration;
 pub mod sync;

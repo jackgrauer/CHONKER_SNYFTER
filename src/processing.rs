@@ -418,6 +418,7 @@ impl RustExtractor {
                     element_types: vec!["text".to_string()],
                     spatial_bounds: None, // Native extractor doesn't provide detailed bounds
                     char_count: page_extraction.character_count as i64,
+                    table_data: None,
                 });
             }
         }
@@ -554,6 +555,7 @@ impl PythonBridge {
                         None
                     },
                     char_count: page_extraction.text.chars().count() as i64,
+                    table_data: None,
                 });
             }
         }
