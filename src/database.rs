@@ -352,6 +352,7 @@ impl ChonkerDatabase {
                 element_types,
                 spatial_bounds: row.try_get::<Option<String>, _>("spatial_bounds").unwrap_or(None),
                 char_count: row.try_get::<i64, _>("char_count").unwrap_or(0),
+                table_data: None, // TODO: Add table_data retrieval from database
             });
         }
         
@@ -496,6 +497,7 @@ impl ChonkerDatabase {
                 element_types,
                 spatial_bounds: row.get::<Option<String>, _>("spatial_bounds"),
                 char_count: row.get("char_count"),
+                table_data: None, // TODO: Add table_data retrieval from database
             });
         }
         
@@ -595,6 +597,8 @@ pub struct DocumentChunk {
     pub element_types: Vec<String>,
     pub spatial_bounds: Option<String>,
     pub char_count: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub table_data: Option<String>, // JSON serialized table data
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

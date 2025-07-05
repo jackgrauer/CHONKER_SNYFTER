@@ -117,7 +117,76 @@ enum ProcessingMessage {
     Error(String),
 }
 
-// Structures for parsing structured chunks from Python bridge
+// Structures for parsing structured data from Python bridge
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct StructuredDocument {
+    pub metadata: DocumentMetadata,
+    pub elements: Vec<DocumentElement>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct DocumentMetadata {
+    pub source_file: String,
+    pub extraction_tool: String,
+    pub extraction_time: String,
+    pub page_count: u32,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct DocumentElement {
+    pub id: String,
+    #[serde(rename = "type")]
+    pub element_type: String,
+    pub element_index: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub content: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub table_structure: Option<TableStructure>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub grid_data: Option<GridData>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub heading_level: Option<u32>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct TableStructure {
+    pub num_rows: u32,
+    pub num_cols: u32,
+    pub cells: Vec<TableCell>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct TableCell {
+    pub text: String,
+    pub row_span: u32,
+    pub col_span: u32,
+    pub start_row: u32,
+    pub end_row: u32,
+    pub start_col: u32,
+    pub end_col: u32,
+    pub is_header: bool,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct GridData {
+    pub num_rows: u32,
+    pub num_cols: u32,
+    pub grid: Vec<Vec<GridCell>>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(untagged)]
+pub enum GridCell {
+    Complex { 
+        text: String, 
+        row_span: u32, 
+        col_span: u32 
+    },
+    Simple(String),
+    Empty,
+}
+
+// Legacy structures for backward compatibility
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StructuredChunk {
     pub id: String,
@@ -169,6 +238,8 @@ pub struct DocumentChunk {
     pub element_types: Vec<String>,
     pub spatial_bounds: Option<String>,
     pub char_count: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub table_data: Option<GridData>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -549,109 +620,76 @@ impl ChonkerApp {
         
         let extraction_start = std::time::Instant::now();
         
-        // Use the extraction bridge directly with venv Python
-        let extraction_result = match std::process::Command::new("./venv/bin/python")
-            .arg("python/extraction_bridge.py")
+        // Use the structured JSON extraction bridge for table-accurate data
+        let json_result = match std::process::Command::new("./venv/bin/python")
+            .arg("python/docling_html_bridge.py")
             .arg(path_buf.to_string_lossy().as_ref())
-            .arg("--tool")
-            .arg("docling_enhanced")
             .output()
         {
             Ok(output) if output.status.success() => {
-                let stdout = String::from_utf8_lossy(&output.stdout);
-                match serde_json::from_str::<serde_json::Value>(&stdout) {
-                    Ok(json) => {
-                        // Store the raw JSON for ValidationPane
-                        let raw_docling_json = stdout.to_string();
-                        
-                        // Check for structured chunks in the new format
-                        if let Some(extractions) = json["extractions"].as_array() {
-                            if let Some(extraction) = extractions.first() {
-                                if let Some(structured_chunks_json) = extraction["structured_chunks"].as_array() {
-                                    println!("✅ Found {} structured chunks from Docling!", structured_chunks_json.len());
-                                    
-                                    // Parse structured chunks directly
-                                    let structured_chunks: Vec<StructuredChunk> = structured_chunks_json.iter()
-                                        .filter_map(|chunk_json| {
-                                            match serde_json::from_value::<StructuredChunk>(chunk_json.clone()) {
-                                                Ok(chunk) => Some(chunk),
-                                                Err(e) => {
-                                                    println!("⚠️ Failed to parse structured chunk: {}", e);
-                                                    None
-                                                }
-                                            }
-                                        })
-                                        .collect();
-                                    
-                                    println!("📊 Successfully parsed {} structured chunks", structured_chunks.len());
-                                    
-                                    // Convert structured chunks to DocumentChunk format
-                                    return Ok((Self::convert_structured_chunks_to_document_chunks(structured_chunks), Some(raw_docling_json)));
-                                }
-                            }
-                        }
-                        
-                        // Fallback to old text extraction only if structured chunking failed
-                        println!("⚠️ No structured chunks found, falling back to old text extraction");
-                        let text = if let Some(extractions) = json["extractions"].as_array() {
-                            extractions.iter()
-                                .filter_map(|ext| ext["text"].as_str())
-                                .collect::<Vec<&str>>()
-                                .join("\n\n")
-                        } else {
-                            json["text"].as_str().unwrap_or("No text extracted").to_string()
-                        };
-                        Ok((crate::extractor::ExtractionResult {
-                            success: true,
-                            tool: "python_bridge".to_string(),
-                            extractions: vec![crate::extractor::PageExtraction {
-                                page_number: 1,
-                                text,
-                                tables: vec![],
-                                figures: vec![],
-                                formulas: vec![],
-                                confidence: 0.9,
-                                layout_boxes: vec![],
-                                tool: "python_bridge".to_string(),
-                            }],
-                            metadata: crate::extractor::ExtractionMetadata {
-                                total_pages: 1,
-                                processing_time: 0,
-                            },
-                            error: None,
-                        }, Some(raw_docling_json)))
-                    }
-                    Err(e) => Err(format!("Failed to parse JSON response: {}", e))
-                }
+                let json_content = String::from_utf8_lossy(&output.stdout).to_string();
+                Ok(json_content)
             }
             Ok(output) => {
                 let stderr = String::from_utf8_lossy(&output.stderr);
-                Err(format!("Python extraction failed: {}", stderr))
+                Err(format!("JSON extraction failed: {}", stderr))
             }
-            Err(e) => Err(format!("Failed to run Python extraction: {}", e))
+            Err(e) => Err(format!("Failed to run JSON extraction: {}", e))
+        };
+        
+        let extraction_result = match json_result {
+            Ok(json_content) => {
+                println!("✅ Received structured JSON content: {} characters", json_content.len());
+                
+                // Parse the new structured JSON format first
+                match Self::parse_structured_json(&json_content) {
+                    Ok(chunks) => {
+                        println!("📊 Created {} structured chunks from new JSON format", chunks.len());
+                        Ok((chunks, Some(json_content)))
+                    }
+                    Err(e) => {
+                        println!("❌ New format failed: {}, trying legacy format", e);
+                        // Fallback to legacy format
+                        match Self::parse_docling_json(&json_content) {
+                            Ok(chunks) => {
+                                println!("📊 Created {} chunks from legacy JSON format", chunks.len());
+                                Ok((chunks, Some(json_content)))
+                            }
+                            Err(e2) => {
+                                println!("❌ Both parsing methods failed: new={}, legacy={}", e, e2);
+                                // Final fallback: create single chunk with raw JSON
+                                let fallback_chunk = crate::app::DocumentChunk {
+                                    id: 1,
+                                    content: json_content.clone(),
+                                    page_range: "full_document".to_string(),
+                                    element_types: vec!["json_fallback".to_string(), "docling_output".to_string()],
+                                    spatial_bounds: Some("full_document".to_string()),
+                                    char_count: json_content.len(),
+                                    table_data: None,
+                                };
+                                Ok((vec![fallback_chunk], Some(json_content)))
+                            }
+                        }
+                    }
+                }
+            }
+            Err(e) => Err(e)
         };
         
         println!("🔍 Advanced PDF extraction took: {:?}", extraction_start.elapsed());
         
-        let (text, raw_json) = match extraction_result {
-            Ok((result, raw_json)) => {
-                info!("Extraction successful with tool: {}", result.tool);
-                
-                // Convert extraction result to text
-                let text = result.extractions.iter()
-                    .map(|page| page.text.clone())
-                    .collect::<Vec<_>>()
-                    .join("\n\n");
-                    
-                (text, raw_json)
+        let (mut chunks, raw_json) = match extraction_result {
+            Ok((chunks, raw_json)) => {
+                info!("HTML extraction successful: {} chunks extracted", chunks.len());
+                (chunks, raw_json)
             }
             Err(e) => {
                 return Err(format!("Advanced extraction failed: {}. Please check if Python dependencies (Docling/Magic-PDF) are installed correctly.", e).into());
             }
         };
         
-        if text.is_empty() {
-            return Err("No text found in PDF - document might be image-based or encrypted. Try enabling OCR!".into());
+        if chunks.is_empty() {
+            return Err("No chunks extracted from PDF - document might be image-based or encrypted. Try enabling OCR!".into());
         }
 
         // Memory optimization: Adaptive chunking for large documents
@@ -659,7 +697,7 @@ impl ChonkerApp {
         let is_large_doc = file_size > 10_000_000; // 10MB threshold
         let is_huge_doc = file_size > 50_000_000; // 50MB threshold
         
-        let chunk_size = if is_huge_doc {
+        let _chunk_size = if is_huge_doc {
             5000 // Much larger chunks for huge documents to save memory
         } else if is_large_doc {
             2000 // Larger chunks for big documents for performance
@@ -667,78 +705,11 @@ impl ChonkerApp {
             800  // Smaller chunks for better granularity
         };
         
-        // Memory optimization: Process text in streaming mode for large files
-        if is_huge_doc {
-            // For huge files, process in smaller memory-efficient chunks
-            return Self::process_huge_document_streaming(&text, file_path, raw_json);
-        }
-        
-        // Smart chunking: try to break on sentence boundaries
-        let sentences: Vec<&str> = text.split(".")
-            .filter(|s| !s.trim().is_empty() && s.len() > 10)
-            .collect();
-        
-        let mut chunks = Vec::new();
-        let mut current_chunk = String::new();
-        let mut chunk_id = 1;
-        
-        // Progress tracking for large documents
-        let total_sentences = sentences.len();
-        
-        for (i, sentence) in sentences.iter().enumerate() {
-            // Add sentence with period back
-            let sentence_with_period = format!("{}.\n", sentence.trim());
-            
-            if current_chunk.len() + sentence_with_period.len() > chunk_size && !current_chunk.is_empty() {
-                // Create chunk with metadata
-                let element_types = vec![
-                    "text".to_string(),
-                    if current_chunk.contains("Table") || current_chunk.contains("table") { "table" } else { "paragraph" }.to_string()
-                ];
-                
-                chunks.push(DocumentChunk {
-                    id: chunk_id,
-                    content: current_chunk.trim().to_string(),
-                    page_range: format!("sentences_{}-{}", i.saturating_sub(10), i),
-                    element_types,
-                    spatial_bounds: Some(format!("chunk_bounds_{}", chunk_id)),
-                    char_count: current_chunk.trim().len(),
-                });
-                current_chunk.clear();
-                chunk_id += 1;
-            }
-            current_chunk.push_str(&sentence_with_period);
-            
-            // Progress update for large documents
-            if is_large_doc && i % 100 == 0 {
-                let _progress = (i as f64 / total_sentences as f64) * 80.0; // 80% for text processing
-                // Note: In real implementation, you'd update progress here
-            }
-        }
-
-        // Add final chunk if there's content
-        if !current_chunk.trim().is_empty() {
-            chunks.push(DocumentChunk {
-                id: chunk_id,
-                content: current_chunk.trim().to_string(),
-                page_range: format!("final_chunk_{}", chunk_id),
-                element_types: vec!["text".to_string()],
-                spatial_bounds: Some(format!("chunk_bounds_{}", chunk_id)),
-                char_count: current_chunk.trim().len(),
-            });
-        }
-
-        // Fallback for edge cases
-        if chunks.is_empty() {
-            let text_len = text.len();
-            chunks.push(DocumentChunk {
-                id: 1,
-                content: text,
-                page_range: "full_document".to_string(),
-                element_types: vec!["text".to_string(), "fallback".to_string()],
-                spatial_bounds: Some("full_document_bounds".to_string()),
-                char_count: text_len,
-            });
+        // chunks variable should already be defined by this point from the extraction result
+        // Memory optimization: For huge documents, fallback to simple chunking
+        if is_huge_doc && !chunks.is_empty() {
+            // For huge files, just use the chunks we already have
+            println!("⚡ Using existing chunks for huge document to save memory");
         }
 
         // Post-processing: add adversarial document analysis metadata
@@ -829,6 +800,7 @@ impl ChonkerApp {
                 element_types,
                 spatial_bounds,
                 char_count: structured_chunk.content.len(),
+                table_data: None,
             });
         }
         
@@ -939,6 +911,7 @@ impl ChonkerApp {
                 element_types,
                 spatial_bounds: Some(format!("native_element_{}", chunk_id)),
                 char_count,
+                table_data: None,
             });
             
             chunk_id += 1;
@@ -987,6 +960,7 @@ impl ChonkerApp {
                     element_types: vec!["text".to_string(), "streaming".to_string()],
                     spatial_bounds: Some(format!("stream_bounds_{}", chunk_id)),
                     char_count: chunk_text.trim().len(),
+                    table_data: None,
                 });
                 
                 chunk_id += 1;
@@ -1065,6 +1039,7 @@ impl ChonkerApp {
                     element_types: chunk.element_types.clone(),
                     spatial_bounds: chunk.spatial_bounds.clone(),
                     char_count: chunk.char_count as i64,
+                    table_data: chunk.table_data.as_ref().map(|data| serde_json::to_string(data).unwrap_or_default()),
                 }
             }).collect();
             
@@ -2129,14 +2104,13 @@ impl ChonkerApp {
                     
                     self.markdown_content = markdown.clone();
                     
-                    egui::ScrollArea::vertical()
+                    egui::ScrollArea::both()
                         .max_height(remaining_height)
+                        .auto_shrink([false, false])
                         .show(ui, |ui| {
-                            ui.add_sized(
-                                [ui.available_width(), remaining_height],
-                                egui::TextEdit::multiline(&mut self.markdown_content)
-                                    .font(egui::FontId::proportional(16.0))
-                                    .interactive(true)
+                            ui.add(
+                                egui::Label::new(&self.markdown_content)
+                                    .selectable(true)
                             );
                         });
                 } else {
@@ -2267,59 +2241,16 @@ impl ChonkerApp {
             return;
         }
         
-        let mut markdown = String::from("# Document Analysis\n\n");
+        // For the new human-friendly rendering, we'll just store the raw HTML
+        // and let the render function handle the display
+        let all_content = self.chunks.iter()
+            .map(|chunk| chunk.content.clone())
+            .collect::<Vec<_>>()
+            .join("\n\n");
         
-        markdown.push_str(&format!("**File:** {}\n", 
-            self.selected_file.as_ref()
-                .and_then(|f| f.file_name())
-                .map(|n| n.to_string_lossy())
-                .unwrap_or_default()
-        ));
+        self.markdown_content = all_content;
         
-        markdown.push_str(&format!("**Chunks:** {}\n", self.chunks.len()));
-        markdown.push_str(&format!("**Characters:** {}\n\n", 
-            self.chunks.iter().map(|c| c.char_count).sum::<usize>()
-        ));
-        
-        let adversarial_count = self.chunks.iter()
-            .filter(|c| c.element_types.contains(&"adversarial_content".to_string()))
-            .count();
-        
-        if adversarial_count > 0 {
-            markdown.push_str(&format!("**⚠️ Adversarial Content:** {} chunks detected\n\n", adversarial_count));
-        } else {
-            markdown.push_str("**✅ Status:** Clean content detected\n\n");
-        }
-        
-        markdown.push_str("---\n\n");
-        
-        for (i, chunk) in self.chunks.iter().enumerate() {
-            let is_adversarial = chunk.element_types.contains(&"adversarial_content".to_string());
-            let status_icon = if is_adversarial { "⚠️" } else { "✅" };
-            
-            markdown.push_str(&format!(
-                "## {} Chunk {} - {}\n\n",
-                status_icon,
-                chunk.id,
-                chunk.page_range
-            ));
-            
-            if is_adversarial {
-                markdown.push_str("**⚠️ ADVERSARIAL CONTENT DETECTED**\n\n");
-            }
-            
-            markdown.push_str(&format!("{}\n\n", chunk.content));
-            
-            if i < self.chunks.len() - 1 {
-                markdown.push_str("---\n\n");
-            }
-        }
-        
-        // Set both markdown editor content and internal content
-        self.markdown_editor.set_content(markdown.clone());
-        self.markdown_content = markdown;
-        
-        println!("📺 Generated GUI display markdown: {} characters (from {} native chunks)", self.markdown_content.len(), self.chunks.len());
+        println!("📺 Generated human-friendly display content: {} characters (from {} chunks)", self.markdown_content.len(), self.chunks.len());
     }
     
     /// Start QC processing in background thread with progress updates
@@ -2391,15 +2322,8 @@ impl ChonkerApp {
                 ui.label("Load a PDF to see the extracted data here.");
             });
         } else {
-            // Convert chunks to data visualization format
-            let data = self.convert_chunks_to_viz_data();
-            
-            // Load data into the visualization pane and render
-            #[cfg(feature = "gui")]
-            {
-                self.data_viz_pane.load_data(data);
-                self.data_viz_pane.render(ui);
-            }
+            // Render structured content with maximum accuracy
+            self.render_structured_content_accurate(ui);
         }
     }
     
@@ -3764,6 +3688,1151 @@ impl ChonkerApp {
             total_cols,
             merged_regions: Vec::new(),
         }
+    }
+    
+    /// Render HTML content in a human-friendly way that preserves PDF formatting
+    fn render_html_content_human_friendly(&mut self, ui: &mut egui::Ui) {
+        egui::ScrollArea::vertical()
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.heading("📄 Document Content");
+                    if let Some(ref file) = self.selected_file {
+                        ui.separator();
+                        ui.label(file.file_name().unwrap_or_default().to_string_lossy());
+                    }
+                });
+                ui.separator();
+                ui.add_space(10.0);
+                
+                // Parse and render the HTML content from each chunk
+                let chunks_content: Vec<String> = self.chunks.iter().map(|chunk| chunk.content.clone()).collect();
+                for content in chunks_content {
+                    self.render_html_chunk_content(ui, &content);
+                    ui.add_space(15.0);
+                }
+            });
+    }
+    
+    /// Parse and render individual HTML chunk content with proper formatting
+    fn render_html_chunk_content(&mut self, ui: &mut egui::Ui, html_content: &str) {
+        // Parse the entire HTML content to render it more intelligently
+        self.render_html_document_structure(ui, html_content);
+    }
+    
+    /// Render the complete HTML document with proper structure recognition
+    fn render_html_document_structure(&mut self, ui: &mut egui::Ui, html_content: &str) {
+        // Split content into logical sections and render each appropriately
+        let mut current_section = String::new();
+        let mut in_table = false;
+        let mut in_list = false;
+        let mut table_content = String::new();
+        let mut list_content = String::new();
+        
+        for line in html_content.lines() {
+            let trimmed = line.trim();
+            
+            // Handle table sections
+            if trimmed.contains("<table") {
+                if !current_section.trim().is_empty() {
+                    self.render_text_section(ui, &current_section);
+                    current_section.clear();
+                }
+                in_table = true;
+                table_content.clear();
+                table_content.push_str(line);
+                table_content.push('\n');
+            } else if in_table {
+                table_content.push_str(line);
+                table_content.push('\n');
+                if trimmed.contains("</table>") {
+                    in_table = false;
+                    self.render_html_table_standalone(ui, &table_content);
+                    table_content.clear();
+                }
+            }
+            // Handle list sections
+            else if trimmed.contains("<ul") || trimmed.contains("<ol") {
+                if !current_section.trim().is_empty() {
+                    self.render_text_section(ui, &current_section);
+                    current_section.clear();
+                }
+                in_list = true;
+                list_content.clear();
+                list_content.push_str(line);
+                list_content.push('\n');
+            } else if in_list {
+                list_content.push_str(line);
+                list_content.push('\n');
+                if trimmed.contains("</ul>") || trimmed.contains("</ol>") {
+                    in_list = false;
+                    self.render_html_list_standalone(ui, &list_content);
+                    list_content.clear();
+                }
+            }
+            // Regular content
+            else {
+                current_section.push_str(line);
+                current_section.push('\n');
+            }
+        }
+        
+        // Render any remaining content
+        if !current_section.trim().is_empty() {
+            self.render_text_section(ui, &current_section);
+        }
+    }
+    
+    /// Render a section of text content with proper formatting
+    fn render_text_section(&mut self, ui: &mut egui::Ui, content: &str) {
+        let lines: Vec<&str> = content.lines().collect();
+        
+        for line in lines {
+            let trimmed = line.trim();
+            if trimmed.is_empty() {
+                ui.add_space(3.0);
+                continue;
+            }
+            
+            // Handle different HTML elements
+            if trimmed.starts_with("<h1") {
+                let text = self.extract_html_text(trimmed);
+                if !text.is_empty() {
+                    ui.add_space(12.0);
+                    ui.heading(egui::RichText::new(text).size(26.0).strong());
+                    ui.add_space(10.0);
+                }
+            } else if trimmed.starts_with("<h2") {
+                let text = self.extract_html_text(trimmed);
+                if !text.is_empty() {
+                    ui.add_space(10.0);
+                    ui.heading(egui::RichText::new(text).size(22.0).strong());
+                    ui.add_space(8.0);
+                }
+            } else if trimmed.starts_with("<h3") {
+                let text = self.extract_html_text(trimmed);
+                if !text.is_empty() {
+                    ui.add_space(8.0);
+                    ui.heading(egui::RichText::new(text).size(18.0).strong());
+                    ui.add_space(6.0);
+                }
+            } else if trimmed.starts_with("<h4") {
+                let text = self.extract_html_text(trimmed);
+                if !text.is_empty() {
+                    ui.add_space(6.0);
+                    ui.label(egui::RichText::new(text).size(16.0).strong());
+                    ui.add_space(4.0);
+                }
+            } else if trimmed.starts_with("<p") {
+                let text = self.extract_html_text(trimmed);
+                if !text.is_empty() {
+                    ui.label(egui::RichText::new(text).size(14.0));
+                    ui.add_space(6.0);
+                }
+            } else if trimmed.starts_with("<div") {
+                let text = self.extract_html_text(trimmed);
+                if !text.is_empty() {
+                    // Check if this div has special formatting
+                    if trimmed.contains("class=") {
+                        // Extract class information for better formatting
+                        if trimmed.contains("title") || trimmed.contains("header") {
+                            ui.label(egui::RichText::new(text).size(16.0).strong());
+                        } else if trimmed.contains("subtitle") {
+                            ui.label(egui::RichText::new(text).size(15.0).color(egui::Color32::LIGHT_GRAY));
+                        } else {
+                            ui.label(egui::RichText::new(text).size(14.0));
+                        }
+                    } else {
+                        ui.label(egui::RichText::new(text).size(14.0));
+                    }
+                    ui.add_space(4.0);
+                }
+            } else if trimmed.starts_with("<span") {
+                let text = self.extract_html_text(trimmed);
+                if !text.is_empty() {
+                    // Inline text - check for formatting
+                    if trimmed.contains("bold") || trimmed.contains("strong") {
+                        ui.label(egui::RichText::new(text).strong());
+                    } else if trimmed.contains("italic") || trimmed.contains("emphasis") {
+                        ui.label(egui::RichText::new(text).italics());
+                    } else {
+                        ui.label(egui::RichText::new(text).size(14.0));
+                    }
+                }
+            } else if !trimmed.starts_with('<') && !trimmed.is_empty() {
+                // Plain text content - render with good spacing
+                ui.label(egui::RichText::new(trimmed).size(14.0));
+                ui.add_space(2.0);
+            }
+        }
+    }
+    
+    /// Extract text content from HTML tags
+    fn extract_html_text(&self, html_line: &str) -> String {
+        // Simple regex-free HTML text extraction
+        let mut result = String::new();
+        let mut inside_tag = false;
+        let chars: Vec<char> = html_line.chars().collect();
+        
+        for &ch in &chars {
+            match ch {
+                '<' => inside_tag = true,
+                '>' => inside_tag = false,
+                _ if !inside_tag => result.push(ch),
+                _ => {}
+            }
+        }
+        
+        // Decode common HTML entities
+        result
+            .replace("&amp;", "&")
+            .replace("&lt;", "<")
+            .replace("&gt;", ">")
+            .replace("&quot;", "\"")
+            .replace("&#39;", "'")
+            .replace("&nbsp;", " ")
+            .trim()
+            .to_string()
+    }
+    
+    /// Render HTML table as standalone component  
+    fn render_html_table_standalone(&mut self, ui: &mut egui::Ui, table_html: &str) {
+        let mut headers: Vec<String> = Vec::new();
+        let mut rows: Vec<Vec<String>> = Vec::new();
+        let mut current_row: Vec<String> = Vec::new();
+        let mut in_header = false;
+        
+        // Parse table from HTML
+        for line in table_html.lines() {
+            let trimmed = line.trim();
+            
+            if trimmed.contains("<thead") || trimmed.contains("<th") {
+                in_header = true;
+            } else if trimmed.contains("</thead") {
+                in_header = false;
+                if !current_row.is_empty() {
+                    headers = current_row.clone();
+                    current_row.clear();
+                }
+            } else if trimmed.contains("<tr") {
+                current_row.clear();
+            } else if trimmed.contains("</tr") {
+                if !current_row.is_empty() {
+                    if in_header {
+                        headers = current_row.clone();
+                    } else {
+                        rows.push(current_row.clone());
+                    }
+                    current_row.clear();
+                }
+            } else if trimmed.contains("<td") || trimmed.contains("<th") {
+                let cell_text = self.extract_html_text(trimmed);
+                current_row.push(cell_text);
+            }
+        }
+        
+        // Render the table if we have data
+        if !headers.is_empty() || !rows.is_empty() {
+            ui.add_space(15.0);
+            ui.separator();
+            ui.label(egui::RichText::new("📊 Table Data").strong().size(16.0).color(egui::Color32::LIGHT_BLUE));
+            ui.add_space(8.0);
+            
+            // Use egui Grid for table rendering with better spacing
+            egui::Grid::new("html_table_standalone")
+                .striped(true)
+                .min_col_width(100.0)
+                .max_col_width(300.0)
+                .spacing([12.0, 8.0])
+                .show(ui, |ui| {
+                    // Render headers with enhanced styling
+                    if !headers.is_empty() {
+                        for header in &headers {
+                            ui.label(egui::RichText::new(header)
+                                .strong()
+                                .size(15.0)
+                                .color(egui::Color32::LIGHT_BLUE));
+                        }
+                        ui.end_row();
+                    }
+                    
+                    // Render data rows with better formatting
+                    for row in &rows {
+                        let max_cols = headers.len().max(row.len());
+                        for i in 0..max_cols {
+                            let empty_string = String::new();
+                            let cell_content = row.get(i).unwrap_or(&empty_string);
+                            let display_text = if cell_content.is_empty() { "-" } else { cell_content };
+                            
+                            // Enhanced numeric detection and formatting
+                            let is_numeric = cell_content.chars().all(|c| {
+                                c.is_ascii_digit() || c == ',' || c == '.' || c == '-' || 
+                                c == '%' || c == '$' || c == '(' || c == ')' || c.is_whitespace()
+                            }) && !cell_content.is_empty();
+                            
+                            if is_numeric {
+                                ui.label(egui::RichText::new(display_text)
+                                    .monospace()
+                                    .size(14.0)
+                                    .color(egui::Color32::WHITE));
+                            } else {
+                                ui.label(egui::RichText::new(display_text).size(14.0));
+                            }
+                        }
+                        ui.end_row();
+                    }
+                });
+            
+            ui.add_space(15.0);
+            ui.separator();
+        }
+    }
+    
+    /// Render HTML list as standalone component
+    fn render_html_list_standalone(&mut self, ui: &mut egui::Ui, list_html: &str) {
+        let mut list_items: Vec<String> = Vec::new();
+        let mut is_ordered = false;
+        
+        // Parse list from HTML
+        for line in list_html.lines() {
+            let trimmed = line.trim();
+            
+            if trimmed.contains("<ol") {
+                is_ordered = true;
+            } else if trimmed.contains("<li") {
+                let item_text = self.extract_html_text(trimmed);
+                if !item_text.is_empty() {
+                    list_items.push(item_text);
+                }
+            }
+        }
+        
+        // Render the list
+        if !list_items.is_empty() {
+            ui.add_space(12.0);
+            ui.label(egui::RichText::new("📋 List Items").strong().size(16.0).color(egui::Color32::YELLOW));
+            ui.add_space(6.0);
+            
+            for (i, item) in list_items.iter().enumerate() {
+                ui.horizontal(|ui| {
+                    let bullet = if is_ordered {
+                        format!("{}.", i + 1)
+                    } else {
+                        "•".to_string()
+                    };
+                    ui.label(egui::RichText::new(bullet).color(egui::Color32::GRAY).size(14.0));
+                    ui.label(egui::RichText::new(item).size(14.0));
+                });
+                ui.add_space(3.0);
+            }
+            ui.add_space(12.0);
+        }
+    }
+    
+    /// Render HTML tables with proper formatting (legacy)
+    fn render_html_table(&mut self, ui: &mut egui::Ui, html_content: &str) {
+        let mut headers: Vec<String> = Vec::new();
+        let mut rows: Vec<Vec<String>> = Vec::new();
+        let mut current_row: Vec<String> = Vec::new();
+        let mut in_header = false;
+        
+        // Parse table from HTML
+        for line in html_content.lines() {
+            let trimmed = line.trim();
+            
+            if trimmed.contains("<thead") || trimmed.contains("<th") {
+                in_header = true;
+            } else if trimmed.contains("</thead") {
+                in_header = false;
+                if !current_row.is_empty() {
+                    headers = current_row.clone();
+                    current_row.clear();
+                }
+            } else if trimmed.contains("<tr") {
+                current_row.clear();
+            } else if trimmed.contains("</tr") {
+                if !current_row.is_empty() {
+                    if in_header {
+                        headers = current_row.clone();
+                    } else {
+                        rows.push(current_row.clone());
+                    }
+                    current_row.clear();
+                }
+            } else if trimmed.contains("<td") || trimmed.contains("<th") {
+                let cell_text = self.extract_html_text(trimmed);
+                current_row.push(cell_text);
+            }
+        }
+        
+        // Render the table if we have data
+        if !headers.is_empty() || !rows.is_empty() {
+            ui.add_space(10.0);
+            ui.separator();
+            ui.label(egui::RichText::new("📊 Table").strong().size(16.0));
+            ui.add_space(8.0);
+            
+            // Use egui Grid for table rendering
+            egui::Grid::new("html_table")
+                .striped(true)
+                .min_col_width(80.0)
+                .spacing([10.0, 6.0])
+                .show(ui, |ui| {
+                    // Render headers
+                    if !headers.is_empty() {
+                        for header in &headers {
+                            ui.label(egui::RichText::new(header).strong().color(egui::Color32::LIGHT_BLUE));
+                        }
+                        ui.end_row();
+                    }
+                    
+                    // Render data rows
+                    for row in &rows {
+                        for cell in row {
+                            let display_text = if cell.is_empty() { "-" } else { cell };
+                            
+                            // Use monospace for numeric data
+                            if cell.chars().all(|c| c.is_ascii_digit() || c == ',' || c == '.' || c == '-' || c == '%' || c == '$' || c.is_whitespace()) && !cell.is_empty() {
+                                ui.label(egui::RichText::new(display_text).monospace());
+                            } else {
+                                ui.label(display_text);
+                            }
+                        }
+                        ui.end_row();
+                    }
+                });
+            
+            ui.add_space(10.0);
+            ui.separator();
+        }
+    }
+    
+    /// Render HTML lists with proper formatting
+    fn render_html_list(&mut self, ui: &mut egui::Ui, html_content: &str) {
+        let mut list_items: Vec<String> = Vec::new();
+        let mut is_ordered = false;
+        
+        // Parse list from HTML
+        for line in html_content.lines() {
+            let trimmed = line.trim();
+            
+            if trimmed.contains("<ol") {
+                is_ordered = true;
+            } else if trimmed.contains("<li") {
+                let item_text = self.extract_html_text(trimmed);
+                if !item_text.is_empty() {
+                    list_items.push(item_text);
+                }
+            }
+        }
+        
+        // Render the list
+        if !list_items.is_empty() {
+            ui.add_space(8.0);
+            for (i, item) in list_items.iter().enumerate() {
+                ui.horizontal(|ui| {
+                    let bullet = if is_ordered {
+                        format!("{}.", i + 1)
+                    } else {
+                        "•".to_string()
+                    };
+                    ui.label(egui::RichText::new(bullet).color(egui::Color32::GRAY));
+                    ui.label(egui::RichText::new(item).size(14.0));
+                });
+                ui.add_space(2.0);
+            }
+            ui.add_space(8.0);
+        }
+    }
+    
+    /// Render structured content with maximum data accuracy
+    fn render_structured_content_accurate(&mut self, ui: &mut egui::Ui) {
+        egui::ScrollArea::vertical()
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.heading("📝 Document Content (Structured)");
+                    if let Some(ref file) = self.selected_file {
+                        ui.separator();
+                        ui.label(file.file_name().unwrap_or_default().to_string_lossy());
+                        ui.separator();
+                        ui.label(format!("{} elements", self.chunks.len()));
+                    }
+                });
+                ui.separator();
+                ui.add_space(10.0);
+                
+                // Render each chunk based on its type with full data accuracy
+                let chunks_clone = self.chunks.clone();
+                for chunk in &chunks_clone {
+                    self.render_chunk_by_type(ui, chunk);
+                }
+            });
+    }
+    
+    /// Render individual chunk based on its element type with full accuracy
+    fn render_chunk_by_type(&mut self, ui: &mut egui::Ui, chunk: &DocumentChunk) {
+        // Determine the primary element type
+        let primary_type = chunk.element_types.first().map(|s| s.as_str()).unwrap_or("unknown");
+        
+        match primary_type {
+            "table" => {
+                self.render_table_chunk_accurate(ui, chunk);
+            },
+            heading_type if heading_type.starts_with("heading_level_") => {
+                self.render_heading_chunk_accurate(ui, chunk, heading_type);
+            },
+            "heading" => {
+                self.render_heading_chunk_accurate(ui, chunk, "heading_level_2");
+            },
+            "list" => {
+                self.render_list_chunk_accurate(ui, chunk);
+            },
+            "text" | "paragraph" => {
+                self.render_text_chunk_accurate(ui, chunk);
+            },
+            _ => {
+                // Generic content - render as text with type info
+                ui.label(egui::RichText::new(format!("[{}]", primary_type))
+                    .size(12.0)
+                    .color(egui::Color32::GRAY));
+                ui.label(egui::RichText::new(&chunk.content).size(14.0));
+                ui.add_space(8.0);
+            }
+        }
+    }
+    
+    /// Render table chunk with maximum data accuracy
+    fn render_table_chunk_accurate(&mut self, ui: &mut egui::Ui, chunk: &DocumentChunk) {
+        ui.add_space(15.0);
+        ui.separator();
+        ui.horizontal(|ui| {
+            ui.label(egui::RichText::new("📊 Table Data")
+                .strong()
+                .size(18.0)
+                .color(egui::Color32::LIGHT_BLUE));
+            ui.label(egui::RichText::new(format!("({})", chunk.page_range))
+                .size(12.0)
+                .color(egui::Color32::GRAY));
+        });
+        ui.add_space(8.0);
+        
+        // Check if we have structured table data first
+        if let Some(table_data) = &chunk.table_data {
+            // Render structured table using accurate GridData
+            self.render_structured_table(ui, table_data, chunk.id);
+        } else {
+            // Fallback: Parse markdown table from content
+            let (headers, rows) = self.parse_markdown_table(&chunk.content);
+            
+            if !headers.is_empty() || !rows.is_empty() {
+                self.render_markdown_table(ui, chunk.id, &headers, &rows);
+            } else {
+                // Final fallback: display raw content
+                ui.label(egui::RichText::new("Table content (raw):")
+                    .size(12.0)
+                    .color(egui::Color32::YELLOW));
+                ui.code(&chunk.content);
+            }
+        }
+        
+        ui.add_space(15.0);
+        ui.separator();
+    }
+    
+    /// Render structured table using GridData for maximum accuracy
+    fn render_structured_table(&mut self, ui: &mut egui::Ui, table_data: &GridData, chunk_id: usize) {
+        // Show table dimensions
+        ui.label(egui::RichText::new(format!("Structured Table: {}×{} cells", table_data.num_rows, table_data.num_cols))
+            .size(12.0)
+            .color(egui::Color32::GRAY));
+        ui.add_space(8.0);
+        
+        // Reconstruct the actual table grid accounting for merged cells
+        let reconstructed_grid = self.reconstruct_table_grid(table_data);
+        
+        // Use ScrollArea for large tables
+        egui::ScrollArea::horizontal().show(ui, |ui| {
+            // Create a grid with proper layout
+            egui::Grid::new(format!("structured_table_{}", chunk_id))
+                .num_columns(reconstructed_grid.first().map(|row| row.len()).unwrap_or(0))
+                .spacing([8.0, 4.0])
+                .striped(true)
+                .min_col_width(60.0)
+                .max_col_width(200.0)
+                .show(ui, |ui| {
+                    // Render the reconstructed grid
+                    for (row_idx, row) in reconstructed_grid.iter().enumerate() {
+                        for (col_idx, cell_text) in row.iter().enumerate() {
+                            // Determine if this is a header cell (first row or first column)
+                            let is_header = row_idx == 0 || col_idx == 0;
+                            
+                            // Style the cell appropriately
+                            let rich_text = if is_header && !cell_text.trim().is_empty() {
+                                egui::RichText::new(cell_text)
+                                    .strong()
+                                    .size(12.0)
+                                    .color(egui::Color32::WHITE)
+                            } else if self.is_numeric_data(cell_text) {
+                                egui::RichText::new(cell_text)
+                                    .monospace()
+                                    .size(11.0)
+                                    .color(egui::Color32::LIGHT_GREEN)
+                            } else if cell_text.trim().is_empty() {
+                                egui::RichText::new("-")
+                                    .size(11.0)
+                                    .color(egui::Color32::DARK_GRAY)
+                            } else {
+                                egui::RichText::new(cell_text)
+                                    .size(11.0)
+                                    .color(egui::Color32::LIGHT_GRAY)
+                            };
+                            
+                            // Add the cell to the grid
+                            ui.label(rich_text);
+                        }
+                        
+                        // End the row
+                        ui.end_row();
+                    }
+                });
+        });
+        
+        ui.add_space(8.0);
+    }
+    
+    /// Reconstruct table grid accounting for merged cells
+    fn reconstruct_table_grid(&self, table_data: &GridData) -> Vec<Vec<String>> {
+        let num_rows = table_data.num_rows as usize;
+        let num_cols = table_data.num_cols as usize;
+        
+        // Create a matrix to track which cells are occupied
+        let mut occupied = vec![vec![false; num_cols]; num_rows];
+        let mut result = vec![vec![String::new(); num_cols]; num_rows];
+        
+        // Process each cell in the original grid
+        for (row_idx, row) in table_data.grid.iter().enumerate() {
+            if row_idx >= num_rows { break; }
+            
+            let mut current_col = 0;
+            
+            for cell in row.iter() {
+                // Find the next available column in this row
+                while current_col < num_cols && occupied[row_idx][current_col] {
+                    current_col += 1;
+                }
+                
+                if current_col >= num_cols { break; }
+                
+                let (cell_text, row_span, col_span) = match cell {
+                    GridCell::Complex { text, row_span, col_span } => {
+                        (text.clone(), *row_span as usize, *col_span as usize)
+                    },
+                    GridCell::Simple(text) => (text.clone(), 1, 1),
+                    GridCell::Empty => ("".to_string(), 1, 1),
+                };
+                
+                // Place the cell text in the first position
+                result[row_idx][current_col] = cell_text;
+                
+                // Mark all spanned cells as occupied
+                for r in 0..row_span.min(num_rows - row_idx) {
+                    for c in 0..col_span.min(num_cols - current_col) {
+                        if row_idx + r < num_rows && current_col + c < num_cols {
+                            occupied[row_idx + r][current_col + c] = true;
+                            
+                            // For merged cells beyond the first, use empty string
+                            if r > 0 || c > 0 {
+                                result[row_idx + r][current_col + c] = "".to_string();
+                            }
+                        }
+                    }
+                }
+                
+                current_col += col_span;
+            }
+        }
+        
+        result
+    }
+    
+    /// Render markdown table for fallback compatibility
+    fn render_markdown_table(&mut self, ui: &mut egui::Ui, chunk_id: usize, headers: &[String], rows: &[Vec<String>]) {
+        egui::Grid::new(format!("markdown_table_{}", chunk_id))
+            .striped(true)
+            .min_col_width(120.0)
+            .max_col_width(250.0)
+            .spacing([15.0, 8.0])
+            .show(ui, |ui| {
+                // Render headers
+                if !headers.is_empty() {
+                    for header in headers {
+                        ui.label(egui::RichText::new(header)
+                            .strong()
+                            .size(15.0)
+                            .color(egui::Color32::WHITE));
+                    }
+                    ui.end_row();
+                }
+                
+                // Render data rows
+                for row in rows {
+                    let max_cols = headers.len().max(row.len());
+                    for i in 0..max_cols {
+                        let cell_content = row.get(i).map(|s| s.as_str()).unwrap_or("");
+                        
+                        // Detect and format numeric data
+                        if self.is_numeric_data(cell_content) {
+                            ui.label(egui::RichText::new(cell_content)
+                                .monospace()
+                                .size(14.0)
+                                .color(egui::Color32::LIGHT_GREEN));
+                        } else if cell_content.is_empty() {
+                            ui.label(egui::RichText::new("-")
+                                .color(egui::Color32::DARK_GRAY));
+                        } else {
+                            ui.label(egui::RichText::new(cell_content).size(14.0));
+                        }
+                    }
+                    ui.end_row();
+                }
+            });
+    }
+    
+    /// Render heading chunk with proper hierarchy
+    fn render_heading_chunk_accurate(&mut self, ui: &mut egui::Ui, chunk: &DocumentChunk, heading_type: &str) {
+        let level = if let Some(level_str) = heading_type.strip_prefix("heading_level_") {
+            level_str.parse::<u8>().unwrap_or(2)
+        } else {
+            2
+        };
+        
+        let (size, spacing) = match level {
+            1 => (28.0, 20.0),
+            2 => (24.0, 16.0),
+            3 => (20.0, 12.0),
+            4 => (18.0, 10.0),
+            _ => (16.0, 8.0),
+        };
+        
+        ui.add_space(spacing);
+        ui.label(egui::RichText::new(&chunk.content)
+            .strong()
+            .size(size)
+            .color(egui::Color32::WHITE));
+        ui.add_space(spacing * 0.6);
+    }
+    
+    /// Render list chunk with proper formatting
+    fn render_list_chunk_accurate(&mut self, ui: &mut egui::Ui, chunk: &DocumentChunk) {
+        ui.add_space(12.0);
+        ui.label(egui::RichText::new("📋 List")
+            .strong()
+            .size(16.0)
+            .color(egui::Color32::YELLOW));
+        ui.add_space(6.0);
+        
+        // Render each list item
+        for line in chunk.content.lines() {
+            if !line.trim().is_empty() {
+                ui.horizontal(|ui| {
+                    ui.add_space(10.0); // Indent
+                    ui.label(egui::RichText::new(line).size(14.0));
+                });
+                ui.add_space(2.0);
+            }
+        }
+        
+        ui.add_space(12.0);
+    }
+    
+    /// Render text chunk with formatting detection
+    fn render_text_chunk_accurate(&mut self, ui: &mut egui::Ui, chunk: &DocumentChunk) {
+        // Detect text formatting
+        let content = &chunk.content;
+        
+        if content.contains("**") || content.contains("__") {
+            // Bold text detected
+            let processed = content.replace("**", "").replace("__", "");
+            ui.label(egui::RichText::new(processed).strong().size(14.0));
+        } else if content.contains("*") || content.contains("_") {
+            // Italic text detected
+            let processed = content.replace("*", "").replace("_", "");
+            ui.label(egui::RichText::new(processed).italics().size(14.0));
+        } else {
+            // Regular text
+            ui.label(egui::RichText::new(content).size(14.0));
+        }
+        
+        ui.add_space(8.0);
+    }
+    
+    /// Detect if content is numeric data
+    fn is_numeric_data(&self, content: &str) -> bool {
+        if content.trim().is_empty() {
+            return false;
+        }
+        
+        // More sophisticated numeric detection
+        let cleaned = content.replace(',', "").replace(' ', "");
+        
+        // Check for currency
+        if content.starts_with('$') || content.ends_with('%') {
+            return true;
+        }
+        
+        // Check for decimal numbers
+        if cleaned.chars().all(|c| c.is_ascii_digit() || c == '.' || c == '-' || c == '+') {
+            return cleaned.parse::<f64>().is_ok();
+        }
+        
+        false
+    }
+    
+    /// Parse new structured JSON format from Docling bridge
+    fn parse_structured_json(json_content: &str) -> Result<Vec<DocumentChunk>, String> {
+        let structured_doc: StructuredDocument = serde_json::from_str(json_content)
+            .map_err(|e| format!("Structured JSON parse error: {}", e))?;
+        
+        let mut chunks = Vec::new();
+        let mut chunk_id = 1;
+        
+        println!("📄 Processing {} elements from structured document", structured_doc.elements.len());
+        
+        for element in structured_doc.elements {
+            match element.element_type.as_str() {
+                "table" => {
+                    if let Some(chunk) = Self::convert_table_element_to_chunk(&element, &mut chunk_id) {
+                        chunks.push(chunk);
+                    }
+                }
+                "text" => {
+                    if let Some(chunk) = Self::convert_text_element_to_chunk(&element, &mut chunk_id) {
+                        chunks.push(chunk);
+                    }
+                }
+                "heading" => {
+                    if let Some(chunk) = Self::convert_heading_element_to_chunk(&element, &mut chunk_id) {
+                        chunks.push(chunk);
+                    }
+                }
+                _ => {
+                    // Generic element - try to extract content
+                    if let Some(content) = &element.content {
+                        if !content.trim().is_empty() {
+                            chunks.push(DocumentChunk {
+                                id: chunk_id,
+                                content: content.clone(),
+                                page_range: "page_1".to_string(),
+                                element_types: vec![element.element_type.clone(), "generic".to_string()],
+                                spatial_bounds: Some(element.id.clone()),
+                                char_count: content.len(),
+                                table_data: None,
+                            });
+                            chunk_id += 1;
+                        }
+                    }
+                }
+            }
+        }
+        
+        if chunks.is_empty() {
+            return Err("No processable elements found in structured JSON".to_string());
+        }
+        
+        println!("🔍 Converted {} structured elements to chunks", chunks.len());
+        Ok(chunks)
+    }
+    
+    /// Convert table element to DocumentChunk with accurate table rendering info
+    fn convert_table_element_to_chunk(element: &DocumentElement, chunk_id: &mut usize) -> Option<DocumentChunk> {
+        if let Some(grid_data) = &element.grid_data {
+            println!("📊 Processing table with {}x{} grid", grid_data.num_rows, grid_data.num_cols);
+            
+            let current_id = *chunk_id;
+            *chunk_id += 1;
+            
+            Some(DocumentChunk {
+                id: current_id,
+                content: format!("[TABLE: {}x{} cells]", grid_data.num_rows, grid_data.num_cols),
+                page_range: "page_1".to_string(),
+                element_types: vec!["table".to_string(), "structured_table".to_string()],
+                spatial_bounds: Some(element.id.clone()),
+                char_count: (grid_data.num_rows * grid_data.num_cols) as usize,
+                table_data: Some(grid_data.clone()),
+            })
+        } else {
+            println!("⚠️ Table element {} has no grid data", element.id);
+            None
+        }
+    }
+    
+    /// Convert text element to DocumentChunk
+    fn convert_text_element_to_chunk(element: &DocumentElement, chunk_id: &mut usize) -> Option<DocumentChunk> {
+        if let Some(content) = &element.content {
+            if !content.trim().is_empty() {
+                let current_id = *chunk_id;
+                *chunk_id += 1;
+                
+                Some(DocumentChunk {
+                    id: current_id,
+                    content: content.clone(),
+                    page_range: "page_1".to_string(),
+                    element_types: vec!["text".to_string(), "paragraph".to_string()],
+                    spatial_bounds: Some(element.id.clone()),
+                    char_count: content.len(),
+                    table_data: None,
+                })
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    }
+    
+    /// Convert heading element to DocumentChunk
+    fn convert_heading_element_to_chunk(element: &DocumentElement, chunk_id: &mut usize) -> Option<DocumentChunk> {
+        if let Some(content) = &element.content {
+            if !content.trim().is_empty() {
+                let current_id = *chunk_id;
+                *chunk_id += 1;
+                
+                let level = element.heading_level.unwrap_or(1);
+                Some(DocumentChunk {
+                    id: current_id,
+                    content: content.clone(),
+                    page_range: "page_1".to_string(),
+                    element_types: vec![format!("heading_level_{}", level), "heading".to_string()],
+                    spatial_bounds: Some(element.id.clone()),
+                    char_count: content.len(),
+                    table_data: None,
+                })
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    }
+    
+    /// Parse structured JSON from Docling into DocumentChunks with high accuracy
+    fn parse_docling_json(json_content: &str) -> Result<Vec<DocumentChunk>, String> {
+        let doc_data: serde_json::Value = serde_json::from_str(json_content)
+            .map_err(|e| format!("JSON parse error: {}", e))?;
+        
+        let mut chunks = Vec::new();
+        let mut chunk_id = 1;
+        
+        // Look for elements in the JSON structure
+        if let Some(elements) = doc_data.get("elements").and_then(|e| e.as_array()) {
+            for element in elements {
+                if let Some(chunk) = Self::parse_json_element(element, &mut chunk_id) {
+                    chunks.push(chunk);
+                }
+            }
+        }
+        
+        // If no elements found, try to parse the main body
+        if chunks.is_empty() {
+            if let Some(main_text) = doc_data.get("main_text").and_then(|t| t.as_str()) {
+                chunks.push(DocumentChunk {
+                    id: chunk_id,
+                    content: main_text.to_string(),
+                    page_range: "page_1".to_string(),
+                    element_types: vec!["text".to_string(), "main_content".to_string()],
+                    spatial_bounds: Some("main_body".to_string()),
+                    char_count: main_text.len(),
+                    table_data: None,
+                });
+            }
+        }
+        
+        if chunks.is_empty() {
+            return Err("No content elements found in JSON".to_string());
+        }
+        
+        println!("🔍 Parsed {} elements from structured JSON", chunks.len());
+        Ok(chunks)
+    }
+    
+    /// Parse individual JSON element into DocumentChunk
+    fn parse_json_element(element: &serde_json::Value, chunk_id: &mut usize) -> Option<DocumentChunk> {
+        let element_type = element.get("type").and_then(|t| t.as_str()).unwrap_or("unknown");
+        let enhanced_type = element.get("chonker_enhanced_type").and_then(|t| t.as_str()).unwrap_or(element_type);
+        
+        let page_number = element.get("prov").and_then(|p| p.get("page")).and_then(|pg| pg.as_u64()).unwrap_or(1);
+        let page_range = format!("page_{}", page_number);
+        
+        let current_id = *chunk_id;
+        *chunk_id += 1;
+        
+        match enhanced_type {
+            "table" => {
+                // Parse table data with high accuracy
+                let table_content = Self::parse_table_from_json(element)?;
+                Some(DocumentChunk {
+                    id: current_id,
+                    content: table_content,
+                    page_range,
+                    element_types: vec!["table".to_string(), "structured_data".to_string()],
+                    spatial_bounds: Self::extract_spatial_bounds(element),
+                    char_count: 0, // Will be calculated
+                    table_data: None,
+                })
+            },
+            "heading" => {
+                let text = element.get("text").and_then(|t| t.as_str())?;
+                let level = element.get("level").and_then(|l| l.as_u64()).unwrap_or(1);
+                Some(DocumentChunk {
+                    id: current_id,
+                    content: text.to_string(),
+                    page_range,
+                    element_types: vec![format!("heading_level_{}", level), "heading".to_string()],
+                    spatial_bounds: Self::extract_spatial_bounds(element),
+                    char_count: text.len(),
+                    table_data: None,
+                })
+            },
+            "text" | "paragraph" => {
+                let text = element.get("text").and_then(|t| t.as_str())?;
+                Some(DocumentChunk {
+                    id: current_id,
+                    content: text.to_string(),
+                    page_range,
+                    element_types: vec!["text".to_string(), "paragraph".to_string()],
+                    spatial_bounds: Self::extract_spatial_bounds(element),
+                    char_count: text.len(),
+                    table_data: None,
+                })
+            },
+            "list" => {
+                let list_content = Self::parse_list_from_json(element)?;
+                let list_type = element.get("chonker_list_type").and_then(|t| t.as_str()).unwrap_or("unordered");
+                Some(DocumentChunk {
+                    id: current_id,
+                    content: list_content,
+                    page_range,
+                    element_types: vec!["list".to_string(), list_type.to_string()],
+                    spatial_bounds: Self::extract_spatial_bounds(element),
+                    char_count: 0, // Will be calculated
+                    table_data: None,
+                })
+            },
+            _ => {
+                // Generic element - try to extract text
+                if let Some(text) = element.get("text").and_then(|t| t.as_str()) {
+                    Some(DocumentChunk {
+                        id: current_id,
+                        content: text.to_string(),
+                        page_range,
+                        element_types: vec![element_type.to_string(), "generic".to_string()],
+                        spatial_bounds: Self::extract_spatial_bounds(element),
+                        char_count: text.len(),
+                        table_data: None,
+                    })
+                } else {
+                    None
+                }
+            }
+        }
+    }
+    
+    /// Parse table data from JSON with maximum accuracy
+    fn parse_table_from_json(element: &serde_json::Value) -> Option<String> {
+        let mut table_markdown = String::new();
+        
+        // Try to get table data from various possible fields
+        let table_data = element.get("data")
+            .or_else(|| element.get("table_data"))
+            .or_else(|| element.get("cells"))?;
+        
+        if let Some(data_array) = table_data.as_array() {
+            // Handle array of rows
+            let mut headers: Vec<String> = Vec::new();
+            let mut rows: Vec<Vec<String>> = Vec::new();
+            
+            for (row_idx, row) in data_array.iter().enumerate() {
+                if let Some(row_array) = row.as_array() {
+                    let row_cells: Vec<String> = row_array.iter()
+                        .map(|cell| {
+                            if let Some(cell_obj) = cell.as_object() {
+                                cell_obj.get("text")
+                                    .or_else(|| cell_obj.get("content"))
+                                    .and_then(|t| t.as_str())
+                                    .unwrap_or("")
+                                    .to_string()
+                            } else {
+                                cell.as_str().unwrap_or("").to_string()
+                            }
+                        })
+                        .collect();
+                    
+                    if row_idx == 0 {
+                        // First row might be headers
+                        headers = row_cells;
+                    } else {
+                        rows.push(row_cells);
+                    }
+                }
+            }
+            
+            // Generate markdown table
+            if !headers.is_empty() {
+                table_markdown.push_str(&format!("| {} |\n", headers.join(" | ")));
+                table_markdown.push_str(&format!("|{}|\n", "---|".repeat(headers.len())));
+            }
+            
+            for row in rows {
+                table_markdown.push_str(&format!("| {} |\n", row.join(" | ")));
+            }
+        }
+        
+        if table_markdown.is_empty() {
+            None
+        } else {
+            Some(table_markdown)
+        }
+    }
+    
+    /// Parse list data from JSON
+    fn parse_list_from_json(element: &serde_json::Value) -> Option<String> {
+        let items = element.get("items").and_then(|i| i.as_array())?;
+        let is_ordered = element.get("chonker_list_type")
+            .and_then(|t| t.as_str())
+            .map(|s| s == "ordered")
+            .unwrap_or(false);
+        
+        let mut list_content = String::new();
+        for (idx, item) in items.iter().enumerate() {
+            let item_text = item.as_str().unwrap_or("");
+            if is_ordered {
+                list_content.push_str(&format!("{}. {}\n", idx + 1, item_text));
+            } else {
+                list_content.push_str(&format!("- {}\n", item_text));
+            }
+        }
+        
+        if list_content.is_empty() {
+            None
+        } else {
+            Some(list_content)
+        }
+    }
+    
+    /// Extract spatial bounds from JSON element
+    fn extract_spatial_bounds(element: &serde_json::Value) -> Option<String> {
+        if let Some(bbox) = element.get("bbox") {
+            if let (Some(x), Some(y), Some(w), Some(h)) = (
+                bbox.get("x").and_then(|v| v.as_f64()),
+                bbox.get("y").and_then(|v| v.as_f64()),
+                bbox.get("w").and_then(|v| v.as_f64()),
+                bbox.get("h").and_then(|v| v.as_f64()),
+            ) {
+                return Some(format!("x:{:.1},y:{:.1},w:{:.1},h:{:.1}", x, y, w, h));
+            }
+        }
+        None
     }
     
     fn set_warp_theme(&self, ctx: &egui::Context) {

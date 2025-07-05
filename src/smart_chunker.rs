@@ -797,6 +797,7 @@ impl ChunkBuilder {
             element_types,
             spatial_bounds: None, // TODO: Implement spatial bounds tracking
             char_count: total_chars as i64,
+            table_data: None, // TODO: Add structured table data if needed
         })
     }
 
