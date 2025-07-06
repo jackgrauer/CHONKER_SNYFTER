@@ -125,36 +125,35 @@ impl ChonkerProcessor {
         let now = Utc::now();
         
         for page_extraction in extraction.extractions {
-            // Create text chunk if there's content
+            // Create markdown content chunk - this contains the beautiful formatted table!
             if !page_extraction.text.trim().is_empty() {
+                // Create a table chunk using the markdown text content 
+                // This will display the nicely formatted table in the GUI
+                let table_data = TableData {
+                    num_rows: 1,
+                    num_cols: 1,
+                    data: vec![vec![TableCell {
+                        content: page_extraction.text.clone(),
+                        rowspan: None,
+                        colspan: None,
+                    }]],
+                };
+                
                 chunks.push(DocumentChunk {
                     id: Uuid::new_v4(),
                     document_id,
                     chunk_index,
                     content: page_extraction.text.clone(),
-                    content_type: "text".to_string(),
-                    metadata: Some(format!("page_{}", page_extraction.page_number)),
-                    table_data: None,
-                    created_at: now,
-                });
-                chunk_index += 1;
-            }
-            
-            // Create table chunks
-            for (table_idx, table) in page_extraction.tables.iter().enumerate() {
-                let table_data = self.convert_table_to_table_data(table);
-                chunks.push(DocumentChunk {
-                    id: Uuid::new_v4(),
-                    document_id,
-                    chunk_index,
-                    content: serde_json::to_string_pretty(table).unwrap_or_default(),
-                    content_type: "table".to_string(),
-                    metadata: Some(format!("page_{}_table_{}", page_extraction.page_number, table_idx)),
+                    content_type: "table".to_string(), // Display as table so GUI shows it prominently
+                    metadata: Some(format!("page_{}_markdown_content", page_extraction.page_number)),
                     table_data: Some(table_data),
                     created_at: now,
                 });
                 chunk_index += 1;
             }
+            
+            // Skip legacy table chunks since the extraction bridge leaves tables empty
+            // All the good table data is already in the markdown text above
             
             // Create formula chunks
             for (formula_idx, formula) in page_extraction.formulas.iter().enumerate() {

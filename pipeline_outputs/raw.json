@@ -1,0 +1,2232 @@
+{
+  "metadata": {
+    "source_file": "/Users/jack/Documents/test.pdf",
+    "extraction_tool": "docling_raw",
+    "extraction_time": "2025-07-05T20:39:55.446273",
+    "docling_version": "unknown",
+    "config": {
+      "pipeline_options": "create_legacy_output=True document_timeout=None accelerator_options=AcceleratorOptions(num_threads=4, device='auto', cuda_use_flash_attention2=False) enable_remote_services=False allow_external_plugins=False artifacts_path=None images_scale=1.0 generate_page_images=False generate_picture_images=False do_table_structure=True do_ocr=True do_code_enrichment=False do_formula_enrichment=False do_picture_classification=False do_picture_description=False force_backend_text=False table_structure_options=TableStructureOptions(do_cell_matching=False, mode=<TableFormerMode.ACCURATE: 'accurate'>) ocr_options=EasyOcrOptions(lang=['fr', 'de', 'es', 'en'], force_full_page_ocr=False, bitmap_area_threshold=0.05, use_gpu=None, confidence_threshold=0.5, model_storage_directory=None, recog_network='standard', download_enabled=True) picture_description_options=PictureDescriptionVlmOptions(batch_size=8, scale=2, picture_area_threshold=0.05, repo_id='HuggingFaceTB/SmolVLM-256M-Instruct', prompt='Describe this image in a few sentences.', generation_config={'max_new_tokens': 200, 'do_sample': False}) generate_table_images=False generate_parsed_pages=True",
+      "table_structure_options": "do_cell_matching=False mode=<TableFormerMode.ACCURATE: 'accurate'>",
+      "docling_version": "unknown",
+      "timestamp": "2025-07-05T20:39:48.272712"
+    }
+  },
+  "document": {
+    "markdown": "## Table 6\n\nSummary of Soil Sampling Results- May 30, 2024 Alliance 51st Street LLC 1646 South 51st Street Philadelphia, Pennsylvania\n\n| SAMPLE ID:           |  Pennsylvania Use  Aquifers Non-Residential  Generic Soil to  Groundwater MSCs  Criteria   |  Pennsylvania Non-Use  Aquifers Non-Residential  Generic Soil to  Groundwater MSCs  Criteria   | Pennsylvania Non- Residential Direct  Contact Surface Soil (0- 2') MSCs Criteria    | Pennsylvania Non- Residential Direct  Contact Subsurface  Soil (2-15')    | SB-206 (3-3.5)   | SB-206 (3-3.5)   | SB-206 (3-3.5)   | DUP-1            | DUP-1            | DUP-1       | SB-209 (4.5-5)   | SB-209 (4.5-5)   | SB-209 (4.5-5)   | SB-216 (4.5-5)   | SB-216 (4.5-5)   | SB-216 (4.5-5)   |\n|----------------------|--------------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------|-------------------------------------------------------------------------------------|---------------------------------------------------------------------------|------------------|------------------|------------------|------------------|------------------|-------------|------------------|------------------|------------------|------------------|------------------|------------------|\n| LAB ID:              | Pennsylvania Use  Aquifers Non-Residential  Generic Soil to  Groundwater MSCs  Criteria    | Pennsylvania Non-Use  Aquifers Non-Residential  Generic Soil to  Groundwater MSCs  Criteria    | Pennsylvania Non- Residential Direct  Contact Surface Soil (0- 2') MSCs Criteria    | Pennsylvania Non- Residential Direct  Contact Subsurface  Soil (2-15')    | L2429996-01      | L2429996-01      | L2429996-01      | L2429996-08      | L2429996-08      | L2429996-08 | L2429996-02      | L2429996-02      | L2429996-02      | L2429996-03      | L2429996-03      | L2429996-03      |\n| COLLECTION DATE:     | Pennsylvania Use  Aquifers Non-Residential  Generic Soil to  Groundwater MSCs  Criteria    | Pennsylvania Non-Use  Aquifers Non-Residential  Generic Soil to  Groundwater MSCs  Criteria    | Pennsylvania Non- Residential Direct  Contact Surface Soil (0- 2') MSCs Criteria    | Pennsylvania Non- Residential Direct  Contact Subsurface  Soil (2-15')    | 5/30/2024        | 5/30/2024        | 5/30/2024        | 5/30/2024        | 5/30/2024        | 5/30/2024   | 5/30/2024        | 5/30/2024        | 5/30/2024        | 5/30/2024        | 5/30/2024        | 5/30/2024        |\n| SAMPLE DEPTH:        | Pennsylvania Use  Aquifers Non-Residential  Generic Soil to  Groundwater MSCs  Criteria    | Pennsylvania Non-Use  Aquifers Non-Residential  Generic Soil to  Groundwater MSCs  Criteria    | Pennsylvania Non- Residential Direct  Contact Surface Soil (0- 2') MSCs Criteria    | Pennsylvania Non- Residential Direct  Contact Subsurface  Soil (2-15')    | 3-3.5            | 3-3.5            | 3-3.5            | 3-3.5            | 3-3.5            | 3-3.5       | 4.5-5            | 4.5-5            | 4.5-5            | 4.5-5            | 4.5-5            | 4.5-5            |\n| SAMPLE MATRIX:       | Pennsylvania Use  Aquifers Non-Residential  Generic Soil to  Groundwater MSCs  Criteria    | Pennsylvania Non-Use  Aquifers Non-Residential  Generic Soil to  Groundwater MSCs  Criteria    | Pennsylvania Non- Residential Direct  Contact Surface Soil (0- 2') MSCs Criteria    | Pennsylvania Non- Residential Direct  Contact Subsurface  Soil (2-15')    | SOIL             | SOIL             | SOIL             | SOIL             | SOIL             | SOIL        | SOIL             | SOIL             | SOIL             | SOIL             | SOIL             | SOIL             |\n| ANALYTE              | (mg/kg)                                                                                    | (mg/kg)                                                                                        | (mg/kg)                                                                             | (mg/kg)                                                                   | Conc             | RL               |                  | Conc             | RL               | MDL Conc    | RL               | RL               | MDL Conc         | RL               | RL               | MDL              |\n| TOTAL METALS         |                                                                                            |                                                                                                |                                                                                     |                                                                           |                  |                  |                  |                  |                  |             |                  |                  |                  |                  |                  |                  |\n| Chromium, Trivalent* | 190000                                                                                     | 190000                                                                                         | 190000                                                                              | 190000                                                                    |                  |                  |                  | 18240            | 18240            | 18240       | 8100             | 8100             | 8100             |                  |                  |                  |\n| Chromium, Total      |                                                                                            |                                                                                                |                                                                                     |                                                                           | 27100            | 6.2              | 0.595            | 0.595 27300 6.54 | 0.595 27300 6.54 | 6.54        | 0.628 22700      | 7.5              | 0.72 23100       | 7.03             | 7.03             | 0.675            |\n| GENERAL CHEMISTRY    |                                                                                            |                                                                                                |                                                                                     |                                                                           |                  |                  |                  |                  |                  |             |                  |                  |                  |                  |                  |                  |\n| Chromium, Hexavalent | 190                                                                                        | 190000                                                                                         | 180                                                                                 | 140000                                                                    | 27900            | 1310             | 262              | 9060             | 1320             | 264 11300   |                  | 1540             | 309 15000        | 1440             | 1440             | 288              |\n|                      |                                                                                            |                                                                                                |                                                                                     |                                                                           |                  |                  |                  |                  |                  |             |                  |                  |                  |                  |                  |                  |\n| Solids, Total        |                                                                                            |                                                                                                |                                                                                     |                                                                           | 61               | 0.1              | NA               | 60.6             | 0.1              | NA 51.8     | 0.1              | 0.1              | NA 55.6          |                  | 0.1              | NA               |\n\nSAMPLE ID:\n\nSB-504 (8-8.5)\n\nSB-501 (4.5-5)\n\nSB-502 (4.5-5)\n\nSB-503 (6-6.5)\n\nPennsylvania Use\n\nPennsylvania Non-Use\n\nLAB ID:\n\nPennsylvania Non-\n\nPennsylvania Non-\n\nCOLLECTION DATE:\n\nSAMPLE DEPTH:\n\nSAMPLE MATRIX:\n\nANALYTE\n\nTOTAL METALS\n\nCalc Cr3\n\nChromium, Total\n\nGENERAL CHEMISTRY\n\nChromium, Hexavalent\n\nSolids, Total\n\n## NOTES:\n\nMSC - Medium Specific Concentration\n\nPADEP - Pennsylvania Department of Environmental Protection\n\nQ - Qualifier\n\nConc - Concentration\n\n- RL - Reporting Limit\n- MDL - Minimum Detection Limit\n- GW - Groundwater\n- * calculated based on the difference between detected total chromium and hexavalent chromium concentrations\n- U - Compound was undetected at the listed laboratory method detection limit.\n\nConcentrations reported in miligrams per kilogram (mg/kg)\n\nAquifers Non-Residential\n\nGeneric Soil to\n\nGroundwater MSCs\n\nCriteria\n\n(mg/kg)\n\n190000\n\n190\n\nAquifers Non-Residential\n\nGeneric Soil to\n\nGroundwater MSCs\n\nCriteria\n\n(mg/kg)\n\n190000\n\n190000\n\nResidential Direct\n\nContact Surface Soil (0-\n\n2') MSCs Criteria\n\n(mg/kg)\n\n190000\n\n180\n\nResidential Direct\n\nContact Subsurface\n\nSoil (2-15')\n\n(mg/kg)\n\n190000\n\n140000\n\nL2429996-04\n\n5/30/2024\n\n4.5-5\n\nSOIL\n\nRL\n\n6.9\n\n1410\n\n0.1\n\nL2429996-05\n\n5/30/2024\n\n4.5-5\n\nSOIL\n\nRL\n\n6.89\n\n1380\n\n0.1\n\nL2429996-06\n\n5/30/2024\n\n6-6.5\n\nSOIL\n\nRL\n\n1.05\n\n1.08\n\n0.1\n\nL2429996-07\n\n5/30/2024\n\n8-8.5\n\nSOIL\n\nRL\n\n1.02\n\n1.06\n\n0.1\n\nConc\n\n12490\n\n17500\n\n5010\n\n56.6\n\nQ\n\nMDL\n\n0.662\n\n283\n\nNA\n\nConc\n\n15800\n\n28100\n\n12300\n\n57.8\n\nQ\n\nMDL\n\n0.662\n\n277\n\nNA\n\nConc\n\n229.8\n\n230\n\n0.216\n\n74\n\nQ\n\nU\n\nMDL\n\n0.1\n\n0.22\n\nNA\n\nConc\n\n986.8\n\n987\n\n0.213\n\n75.1\n\nQ\n\nU\n\nMDL\n\n0.098\n\n0.213\n\nNA",
+    "page_count": 1
+  },
+  "tables": [
+    {
+      "table_index": 0,
+      "formats": {
+        "dataframe": {
+          "headers": [
+            "SAMPLE ID: .LAB ID: .COLLECTION DATE: .SAMPLE DEPTH: .SAMPLE MATRIX: ",
+            " Pennsylvania Use  Aquifers Non-Residential  Generic Soil to  Groundwater MSCs  Criteria. Pennsylvania Use  Aquifers Non-Residential  Generic Soil to  Groundwater MSCs  Criteria. Pennsylvania Use  Aquifers Non-Residential  Generic Soil to  Groundwater MSCs  Criteria. Pennsylvania Use  Aquifers Non-Residential  Generic Soil to  Groundwater MSCs  Criteria. Pennsylvania Use  Aquifers Non-Residential  Generic Soil to  Groundwater MSCs  Criteria",
+            " Pennsylvania Non-Use  Aquifers Non-Residential  Generic Soil to  Groundwater MSCs  Criteria. Pennsylvania Non-Use  Aquifers Non-Residential  Generic Soil to  Groundwater MSCs  Criteria. Pennsylvania Non-Use  Aquifers Non-Residential  Generic Soil to  Groundwater MSCs  Criteria. Pennsylvania Non-Use  Aquifers Non-Residential  Generic Soil to  Groundwater MSCs  Criteria. Pennsylvania Non-Use  Aquifers Non-Residential  Generic Soil to  Groundwater MSCs  Criteria",
+            "Pennsylvania Non- Residential Direct  Contact Surface Soil (0- 2') MSCs Criteria .Pennsylvania Non- Residential Direct  Contact Surface Soil (0- 2') MSCs Criteria .Pennsylvania Non- Residential Direct  Contact Surface Soil (0- 2') MSCs Criteria .Pennsylvania Non- Residential Direct  Contact Surface Soil (0- 2') MSCs Criteria .Pennsylvania Non- Residential Direct  Contact Surface Soil (0- 2') MSCs Criteria ",
+            "Pennsylvania Non- Residential Direct  Contact Subsurface  Soil (2-15') .Pennsylvania Non- Residential Direct  Contact Subsurface  Soil (2-15') .Pennsylvania Non- Residential Direct  Contact Subsurface  Soil (2-15') .Pennsylvania Non- Residential Direct  Contact Subsurface  Soil (2-15') .Pennsylvania Non- Residential Direct  Contact Subsurface  Soil (2-15') ",
+            "SB-206 (3-3.5).L2429996-01.5/30/2024.3-3.5.SOIL",
+            "SB-206 (3-3.5).L2429996-01.5/30/2024.3-3.5.SOIL",
+            "SB-206 (3-3.5).L2429996-01.5/30/2024.3-3.5.SOIL",
+            "DUP-1.L2429996-08.5/30/2024.3-3.5.SOIL",
+            "DUP-1.L2429996-08.5/30/2024.3-3.5.SOIL",
+            "DUP-1.L2429996-08.5/30/2024.3-3.5.SOIL",
+            "SB-209 (4.5-5).L2429996-02.5/30/2024.4.5-5.SOIL",
+            "SB-209 (4.5-5).L2429996-02.5/30/2024.4.5-5.SOIL",
+            "SB-209 (4.5-5).L2429996-02.5/30/2024.4.5-5.SOIL",
+            "SB-216 (4.5-5).L2429996-03.5/30/2024.4.5-5.SOIL",
+            "SB-216 (4.5-5).L2429996-03.5/30/2024.4.5-5.SOIL",
+            "SB-216 (4.5-5).L2429996-03.5/30/2024.4.5-5.SOIL"
+          ],
+          "data": [
+            [
+              "ANALYTE",
+              "(mg/kg)",
+              "(mg/kg)",
+              "(mg/kg)",
+              "(mg/kg)",
+              "Conc",
+              "RL",
+              "",
+              "Conc",
+              "RL",
+              "MDL Conc",
+              "RL",
+              "RL",
+              "MDL Conc",
+              "RL",
+              "RL",
+              "MDL"
+            ],
+            [
+              "TOTAL METALS ",
+              "",
+              "",
+              "",
+              "",
+              "",
+              "",
+              "",
+              "",
+              "",
+              "",
+              "",
+              "",
+              "",
+              "",
+              "",
+              ""
+            ],
+            [
+              "Chromium, Trivalent*",
+              "190000",
+              "190000",
+              "190000",
+              "190000",
+              "",
+              "",
+              "",
+              "18240",
+              "18240",
+              "18240",
+              "8100",
+              "8100",
+              "8100",
+              "",
+              "",
+              ""
+            ],
+            [
+              "Chromium, Total",
+              "",
+              "",
+              "",
+              "",
+              "27100",
+              "6.2",
+              "0.595",
+              "0.595 27300 6.54",
+              "0.595 27300 6.54",
+              "6.54",
+              "0.628 22700",
+              "7.5",
+              "0.72 23100",
+              "7.03",
+              "7.03",
+              "0.675"
+            ],
+            [
+              "GENERAL CHEMISTRY",
+              "",
+              "",
+              "",
+              "",
+              "",
+              "",
+              "",
+              "",
+              "",
+              "",
+              "",
+              "",
+              "",
+              "",
+              "",
+              ""
+            ],
+            [
+              "Chromium, Hexavalent",
+              "190",
+              "190000",
+              "180",
+              "140000",
+              "27900",
+              "1310",
+              "262",
+              "9060",
+              "1320",
+              "264 11300",
+              "",
+              "1540",
+              "309 15000",
+              "1440",
+              "1440",
+              "288"
+            ],
+            [
+              "",
+              "",
+              "",
+              "",
+              "",
+              "",
+              "",
+              "",
+              "",
+              "",
+              "",
+              "",
+              "",
+              "",
+              "",
+              "",
+              ""
+            ],
+            [
+              "Solids, Total",
+              "",
+              "",
+              "",
+              "",
+              "61",
+              "0.1",
+              "NA",
+              "60.6",
+              "0.1",
+              "NA 51.8",
+              "0.1",
+              "0.1",
+              "NA 55.6",
+              "",
+              "0.1",
+              "NA"
+            ]
+          ],
+          "shape": [
+            8,
+            17
+          ]
+        }
+      },
+      "raw_structure": {
+        "num_rows": 13,
+        "num_cols": 17,
+        "grid": [
+          [
+            {
+              "text": "SAMPLE ID: ",
+              "row_span": 1,
+              "col_span": 1,
+              "is_header": false,
+              "row_index": 0,
+              "col_index": 0,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": " Pennsylvania Use  Aquifers Non-Residential  Generic Soil to  Groundwater MSCs  Criteria",
+              "row_span": 5,
+              "col_span": 1,
+              "is_header": true,
+              "row_index": 0,
+              "col_index": 1,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": " Pennsylvania Non-Use  Aquifers Non-Residential  Generic Soil to  Groundwater MSCs  Criteria",
+              "row_span": 5,
+              "col_span": 1,
+              "is_header": true,
+              "row_index": 0,
+              "col_index": 2,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "Pennsylvania Non- Residential Direct  Contact Surface Soil (0- 2') MSCs Criteria ",
+              "row_span": 5,
+              "col_span": 1,
+              "is_header": true,
+              "row_index": 0,
+              "col_index": 3,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "Pennsylvania Non- Residential Direct  Contact Subsurface  Soil (2-15') ",
+              "row_span": 5,
+              "col_span": 1,
+              "is_header": true,
+              "row_index": 0,
+              "col_index": 4,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "SB-206 (3-3.5)",
+              "row_span": 1,
+              "col_span": 3,
+              "is_header": true,
+              "row_index": 0,
+              "col_index": 5,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "SB-206 (3-3.5)",
+              "row_span": 1,
+              "col_span": 3,
+              "is_header": true,
+              "row_index": 0,
+              "col_index": 6,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "SB-206 (3-3.5)",
+              "row_span": 1,
+              "col_span": 3,
+              "is_header": true,
+              "row_index": 0,
+              "col_index": 7,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "DUP-1",
+              "row_span": 1,
+              "col_span": 3,
+              "is_header": true,
+              "row_index": 0,
+              "col_index": 8,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "DUP-1",
+              "row_span": 1,
+              "col_span": 3,
+              "is_header": true,
+              "row_index": 0,
+              "col_index": 9,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "DUP-1",
+              "row_span": 1,
+              "col_span": 3,
+              "is_header": true,
+              "row_index": 0,
+              "col_index": 10,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "SB-209 (4.5-5)",
+              "row_span": 1,
+              "col_span": 3,
+              "is_header": true,
+              "row_index": 0,
+              "col_index": 11,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "SB-209 (4.5-5)",
+              "row_span": 1,
+              "col_span": 3,
+              "is_header": true,
+              "row_index": 0,
+              "col_index": 12,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "SB-209 (4.5-5)",
+              "row_span": 1,
+              "col_span": 3,
+              "is_header": true,
+              "row_index": 0,
+              "col_index": 13,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "SB-216 (4.5-5)",
+              "row_span": 1,
+              "col_span": 3,
+              "is_header": true,
+              "row_index": 0,
+              "col_index": 14,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "SB-216 (4.5-5)",
+              "row_span": 1,
+              "col_span": 3,
+              "is_header": true,
+              "row_index": 0,
+              "col_index": 15,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "SB-216 (4.5-5)",
+              "row_span": 1,
+              "col_span": 3,
+              "is_header": true,
+              "row_index": 0,
+              "col_index": 16,
+              "cell_type": "TableCell"
+            }
+          ],
+          [
+            {
+              "text": "LAB ID: ",
+              "row_span": 1,
+              "col_span": 1,
+              "is_header": false,
+              "row_index": 1,
+              "col_index": 0,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": " Pennsylvania Use  Aquifers Non-Residential  Generic Soil to  Groundwater MSCs  Criteria",
+              "row_span": 5,
+              "col_span": 1,
+              "is_header": true,
+              "row_index": 1,
+              "col_index": 1,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": " Pennsylvania Non-Use  Aquifers Non-Residential  Generic Soil to  Groundwater MSCs  Criteria",
+              "row_span": 5,
+              "col_span": 1,
+              "is_header": true,
+              "row_index": 1,
+              "col_index": 2,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "Pennsylvania Non- Residential Direct  Contact Surface Soil (0- 2') MSCs Criteria ",
+              "row_span": 5,
+              "col_span": 1,
+              "is_header": true,
+              "row_index": 1,
+              "col_index": 3,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "Pennsylvania Non- Residential Direct  Contact Subsurface  Soil (2-15') ",
+              "row_span": 5,
+              "col_span": 1,
+              "is_header": true,
+              "row_index": 1,
+              "col_index": 4,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "L2429996-01",
+              "row_span": 1,
+              "col_span": 3,
+              "is_header": true,
+              "row_index": 1,
+              "col_index": 5,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "L2429996-01",
+              "row_span": 1,
+              "col_span": 3,
+              "is_header": true,
+              "row_index": 1,
+              "col_index": 6,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "L2429996-01",
+              "row_span": 1,
+              "col_span": 3,
+              "is_header": true,
+              "row_index": 1,
+              "col_index": 7,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "L2429996-08",
+              "row_span": 1,
+              "col_span": 3,
+              "is_header": false,
+              "row_index": 1,
+              "col_index": 8,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "L2429996-08",
+              "row_span": 1,
+              "col_span": 3,
+              "is_header": false,
+              "row_index": 1,
+              "col_index": 9,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "L2429996-08",
+              "row_span": 1,
+              "col_span": 3,
+              "is_header": false,
+              "row_index": 1,
+              "col_index": 10,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "L2429996-02",
+              "row_span": 1,
+              "col_span": 3,
+              "is_header": true,
+              "row_index": 1,
+              "col_index": 11,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "L2429996-02",
+              "row_span": 1,
+              "col_span": 3,
+              "is_header": true,
+              "row_index": 1,
+              "col_index": 12,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "L2429996-02",
+              "row_span": 1,
+              "col_span": 3,
+              "is_header": true,
+              "row_index": 1,
+              "col_index": 13,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "L2429996-03",
+              "row_span": 1,
+              "col_span": 3,
+              "is_header": true,
+              "row_index": 1,
+              "col_index": 14,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "L2429996-03",
+              "row_span": 1,
+              "col_span": 3,
+              "is_header": true,
+              "row_index": 1,
+              "col_index": 15,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "L2429996-03",
+              "row_span": 1,
+              "col_span": 3,
+              "is_header": true,
+              "row_index": 1,
+              "col_index": 16,
+              "cell_type": "TableCell"
+            }
+          ],
+          [
+            {
+              "text": "COLLECTION DATE: ",
+              "row_span": 1,
+              "col_span": 1,
+              "is_header": false,
+              "row_index": 2,
+              "col_index": 0,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": " Pennsylvania Use  Aquifers Non-Residential  Generic Soil to  Groundwater MSCs  Criteria",
+              "row_span": 5,
+              "col_span": 1,
+              "is_header": true,
+              "row_index": 2,
+              "col_index": 1,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": " Pennsylvania Non-Use  Aquifers Non-Residential  Generic Soil to  Groundwater MSCs  Criteria",
+              "row_span": 5,
+              "col_span": 1,
+              "is_header": true,
+              "row_index": 2,
+              "col_index": 2,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "Pennsylvania Non- Residential Direct  Contact Surface Soil (0- 2') MSCs Criteria ",
+              "row_span": 5,
+              "col_span": 1,
+              "is_header": true,
+              "row_index": 2,
+              "col_index": 3,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "Pennsylvania Non- Residential Direct  Contact Subsurface  Soil (2-15') ",
+              "row_span": 5,
+              "col_span": 1,
+              "is_header": true,
+              "row_index": 2,
+              "col_index": 4,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "5/30/2024",
+              "row_span": 1,
+              "col_span": 3,
+              "is_header": false,
+              "row_index": 2,
+              "col_index": 5,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "5/30/2024",
+              "row_span": 1,
+              "col_span": 3,
+              "is_header": false,
+              "row_index": 2,
+              "col_index": 6,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "5/30/2024",
+              "row_span": 1,
+              "col_span": 3,
+              "is_header": false,
+              "row_index": 2,
+              "col_index": 7,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "5/30/2024",
+              "row_span": 1,
+              "col_span": 3,
+              "is_header": false,
+              "row_index": 2,
+              "col_index": 8,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "5/30/2024",
+              "row_span": 1,
+              "col_span": 3,
+              "is_header": false,
+              "row_index": 2,
+              "col_index": 9,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "5/30/2024",
+              "row_span": 1,
+              "col_span": 3,
+              "is_header": false,
+              "row_index": 2,
+              "col_index": 10,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "5/30/2024",
+              "row_span": 1,
+              "col_span": 3,
+              "is_header": false,
+              "row_index": 2,
+              "col_index": 11,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "5/30/2024",
+              "row_span": 1,
+              "col_span": 3,
+              "is_header": false,
+              "row_index": 2,
+              "col_index": 12,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "5/30/2024",
+              "row_span": 1,
+              "col_span": 3,
+              "is_header": false,
+              "row_index": 2,
+              "col_index": 13,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "5/30/2024",
+              "row_span": 1,
+              "col_span": 3,
+              "is_header": false,
+              "row_index": 2,
+              "col_index": 14,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "5/30/2024",
+              "row_span": 1,
+              "col_span": 3,
+              "is_header": false,
+              "row_index": 2,
+              "col_index": 15,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "5/30/2024",
+              "row_span": 1,
+              "col_span": 3,
+              "is_header": false,
+              "row_index": 2,
+              "col_index": 16,
+              "cell_type": "TableCell"
+            }
+          ],
+          [
+            {
+              "text": "SAMPLE DEPTH: ",
+              "row_span": 1,
+              "col_span": 1,
+              "is_header": false,
+              "row_index": 3,
+              "col_index": 0,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": " Pennsylvania Use  Aquifers Non-Residential  Generic Soil to  Groundwater MSCs  Criteria",
+              "row_span": 5,
+              "col_span": 1,
+              "is_header": true,
+              "row_index": 3,
+              "col_index": 1,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": " Pennsylvania Non-Use  Aquifers Non-Residential  Generic Soil to  Groundwater MSCs  Criteria",
+              "row_span": 5,
+              "col_span": 1,
+              "is_header": true,
+              "row_index": 3,
+              "col_index": 2,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "Pennsylvania Non- Residential Direct  Contact Surface Soil (0- 2') MSCs Criteria ",
+              "row_span": 5,
+              "col_span": 1,
+              "is_header": true,
+              "row_index": 3,
+              "col_index": 3,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "Pennsylvania Non- Residential Direct  Contact Subsurface  Soil (2-15') ",
+              "row_span": 5,
+              "col_span": 1,
+              "is_header": true,
+              "row_index": 3,
+              "col_index": 4,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "3-3.5",
+              "row_span": 1,
+              "col_span": 3,
+              "is_header": false,
+              "row_index": 3,
+              "col_index": 5,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "3-3.5",
+              "row_span": 1,
+              "col_span": 3,
+              "is_header": false,
+              "row_index": 3,
+              "col_index": 6,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "3-3.5",
+              "row_span": 1,
+              "col_span": 3,
+              "is_header": false,
+              "row_index": 3,
+              "col_index": 7,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "3-3.5",
+              "row_span": 1,
+              "col_span": 3,
+              "is_header": false,
+              "row_index": 3,
+              "col_index": 8,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "3-3.5",
+              "row_span": 1,
+              "col_span": 3,
+              "is_header": false,
+              "row_index": 3,
+              "col_index": 9,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "3-3.5",
+              "row_span": 1,
+              "col_span": 3,
+              "is_header": false,
+              "row_index": 3,
+              "col_index": 10,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "4.5-5",
+              "row_span": 1,
+              "col_span": 3,
+              "is_header": false,
+              "row_index": 3,
+              "col_index": 11,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "4.5-5",
+              "row_span": 1,
+              "col_span": 3,
+              "is_header": false,
+              "row_index": 3,
+              "col_index": 12,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "4.5-5",
+              "row_span": 1,
+              "col_span": 3,
+              "is_header": false,
+              "row_index": 3,
+              "col_index": 13,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "4.5-5",
+              "row_span": 1,
+              "col_span": 3,
+              "is_header": false,
+              "row_index": 3,
+              "col_index": 14,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "4.5-5",
+              "row_span": 1,
+              "col_span": 3,
+              "is_header": false,
+              "row_index": 3,
+              "col_index": 15,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "4.5-5",
+              "row_span": 1,
+              "col_span": 3,
+              "is_header": false,
+              "row_index": 3,
+              "col_index": 16,
+              "cell_type": "TableCell"
+            }
+          ],
+          [
+            {
+              "text": "SAMPLE MATRIX: ",
+              "row_span": 1,
+              "col_span": 1,
+              "is_header": false,
+              "row_index": 4,
+              "col_index": 0,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": " Pennsylvania Use  Aquifers Non-Residential  Generic Soil to  Groundwater MSCs  Criteria",
+              "row_span": 5,
+              "col_span": 1,
+              "is_header": true,
+              "row_index": 4,
+              "col_index": 1,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": " Pennsylvania Non-Use  Aquifers Non-Residential  Generic Soil to  Groundwater MSCs  Criteria",
+              "row_span": 5,
+              "col_span": 1,
+              "is_header": true,
+              "row_index": 4,
+              "col_index": 2,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "Pennsylvania Non- Residential Direct  Contact Surface Soil (0- 2') MSCs Criteria ",
+              "row_span": 5,
+              "col_span": 1,
+              "is_header": true,
+              "row_index": 4,
+              "col_index": 3,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "Pennsylvania Non- Residential Direct  Contact Subsurface  Soil (2-15') ",
+              "row_span": 5,
+              "col_span": 1,
+              "is_header": true,
+              "row_index": 4,
+              "col_index": 4,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "SOIL",
+              "row_span": 1,
+              "col_span": 3,
+              "is_header": false,
+              "row_index": 4,
+              "col_index": 5,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "SOIL",
+              "row_span": 1,
+              "col_span": 3,
+              "is_header": false,
+              "row_index": 4,
+              "col_index": 6,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "SOIL",
+              "row_span": 1,
+              "col_span": 3,
+              "is_header": false,
+              "row_index": 4,
+              "col_index": 7,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "SOIL",
+              "row_span": 1,
+              "col_span": 3,
+              "is_header": false,
+              "row_index": 4,
+              "col_index": 8,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "SOIL",
+              "row_span": 1,
+              "col_span": 3,
+              "is_header": false,
+              "row_index": 4,
+              "col_index": 9,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "SOIL",
+              "row_span": 1,
+              "col_span": 3,
+              "is_header": false,
+              "row_index": 4,
+              "col_index": 10,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "SOIL",
+              "row_span": 1,
+              "col_span": 3,
+              "is_header": false,
+              "row_index": 4,
+              "col_index": 11,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "SOIL",
+              "row_span": 1,
+              "col_span": 3,
+              "is_header": false,
+              "row_index": 4,
+              "col_index": 12,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "SOIL",
+              "row_span": 1,
+              "col_span": 3,
+              "is_header": false,
+              "row_index": 4,
+              "col_index": 13,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "SOIL",
+              "row_span": 1,
+              "col_span": 3,
+              "is_header": false,
+              "row_index": 4,
+              "col_index": 14,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "SOIL",
+              "row_span": 1,
+              "col_span": 3,
+              "is_header": false,
+              "row_index": 4,
+              "col_index": 15,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "SOIL",
+              "row_span": 1,
+              "col_span": 3,
+              "is_header": false,
+              "row_index": 4,
+              "col_index": 16,
+              "cell_type": "TableCell"
+            }
+          ],
+          [
+            {
+              "text": "ANALYTE",
+              "row_span": 1,
+              "col_span": 1,
+              "is_header": false,
+              "row_index": 5,
+              "col_index": 0,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "(mg/kg)",
+              "row_span": 1,
+              "col_span": 1,
+              "is_header": false,
+              "row_index": 5,
+              "col_index": 1,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "(mg/kg)",
+              "row_span": 1,
+              "col_span": 1,
+              "is_header": false,
+              "row_index": 5,
+              "col_index": 2,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "(mg/kg)",
+              "row_span": 1,
+              "col_span": 1,
+              "is_header": false,
+              "row_index": 5,
+              "col_index": 3,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "(mg/kg)",
+              "row_span": 1,
+              "col_span": 1,
+              "is_header": false,
+              "row_index": 5,
+              "col_index": 4,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "Conc",
+              "row_span": 1,
+              "col_span": 1,
+              "is_header": false,
+              "row_index": 5,
+              "col_index": 5,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "RL",
+              "row_span": 1,
+              "col_span": 1,
+              "is_header": false,
+              "row_index": 5,
+              "col_index": 6,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "",
+              "row_span": 1,
+              "col_span": 1,
+              "is_header": false,
+              "row_index": 5,
+              "col_index": 7,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "Conc",
+              "row_span": 1,
+              "col_span": 1,
+              "is_header": false,
+              "row_index": 5,
+              "col_index": 8,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "RL",
+              "row_span": 1,
+              "col_span": 1,
+              "is_header": false,
+              "row_index": 5,
+              "col_index": 9,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "MDL Conc",
+              "row_span": 1,
+              "col_span": 1,
+              "is_header": false,
+              "row_index": 5,
+              "col_index": 10,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "RL",
+              "row_span": 1,
+              "col_span": 1,
+              "is_header": false,
+              "row_index": 5,
+              "col_index": 11,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "RL",
+              "row_span": 1,
+              "col_span": 1,
+              "is_header": false,
+              "row_index": 5,
+              "col_index": 12,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "MDL Conc",
+              "row_span": 1,
+              "col_span": 1,
+              "is_header": false,
+              "row_index": 5,
+              "col_index": 13,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "RL",
+              "row_span": 1,
+              "col_span": 1,
+              "is_header": false,
+              "row_index": 5,
+              "col_index": 14,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "RL",
+              "row_span": 1,
+              "col_span": 1,
+              "is_header": false,
+              "row_index": 5,
+              "col_index": 15,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "MDL",
+              "row_span": 1,
+              "col_span": 1,
+              "is_header": false,
+              "row_index": 5,
+              "col_index": 16,
+              "cell_type": "TableCell"
+            }
+          ],
+          [
+            {
+              "text": "TOTAL METALS ",
+              "row_span": 1,
+              "col_span": 1,
+              "is_header": false,
+              "row_index": 6,
+              "col_index": 0,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "",
+              "row_span": 1,
+              "col_span": 1,
+              "is_header": false,
+              "row_index": 6,
+              "col_index": 1,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "",
+              "row_span": 1,
+              "col_span": 1,
+              "is_header": false,
+              "row_index": 6,
+              "col_index": 2,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "",
+              "row_span": 1,
+              "col_span": 1,
+              "is_header": false,
+              "row_index": 6,
+              "col_index": 3,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "",
+              "row_span": 1,
+              "col_span": 1,
+              "is_header": false,
+              "row_index": 6,
+              "col_index": 4,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "",
+              "row_span": 1,
+              "col_span": 1,
+              "is_header": false,
+              "row_index": 6,
+              "col_index": 5,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "",
+              "row_span": 1,
+              "col_span": 1,
+              "is_header": false,
+              "row_index": 6,
+              "col_index": 6,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "",
+              "row_span": 1,
+              "col_span": 1,
+              "is_header": false,
+              "row_index": 6,
+              "col_index": 7,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "",
+              "row_span": 1,
+              "col_span": 1,
+              "is_header": false,
+              "row_index": 6,
+              "col_index": 8,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "",
+              "row_span": 1,
+              "col_span": 1,
+              "is_header": false,
+              "row_index": 6,
+              "col_index": 9,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "",
+              "row_span": 1,
+              "col_span": 1,
+              "is_header": false,
+              "row_index": 6,
+              "col_index": 10,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "",
+              "row_span": 1,
+              "col_span": 1,
+              "is_header": false,
+              "row_index": 6,
+              "col_index": 11,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "",
+              "row_span": 1,
+              "col_span": 1,
+              "is_header": false,
+              "row_index": 6,
+              "col_index": 12,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "",
+              "row_span": 1,
+              "col_span": 1,
+              "is_header": false,
+              "row_index": 6,
+              "col_index": 13,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "",
+              "row_span": 1,
+              "col_span": 1,
+              "is_header": false,
+              "row_index": 6,
+              "col_index": 14,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "",
+              "row_span": 1,
+              "col_span": 1,
+              "is_header": false,
+              "row_index": 6,
+              "col_index": 15,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "",
+              "row_span": 1,
+              "col_span": 1,
+              "is_header": false,
+              "row_index": 6,
+              "col_index": 16,
+              "cell_type": "TableCell"
+            }
+          ],
+          [
+            {
+              "text": "Chromium, Trivalent*",
+              "row_span": 1,
+              "col_span": 1,
+              "is_header": false,
+              "row_index": 7,
+              "col_index": 0,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "190000",
+              "row_span": 1,
+              "col_span": 1,
+              "is_header": false,
+              "row_index": 7,
+              "col_index": 1,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "190000",
+              "row_span": 1,
+              "col_span": 1,
+              "is_header": false,
+              "row_index": 7,
+              "col_index": 2,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "190000",
+              "row_span": 1,
+              "col_span": 1,
+              "is_header": false,
+              "row_index": 7,
+              "col_index": 3,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "190000",
+              "row_span": 1,
+              "col_span": 1,
+              "is_header": false,
+              "row_index": 7,
+              "col_index": 4,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "",
+              "row_span": 1,
+              "col_span": 3,
+              "is_header": false,
+              "row_index": 7,
+              "col_index": 5,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "",
+              "row_span": 1,
+              "col_span": 3,
+              "is_header": false,
+              "row_index": 7,
+              "col_index": 6,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "",
+              "row_span": 1,
+              "col_span": 3,
+              "is_header": false,
+              "row_index": 7,
+              "col_index": 7,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "18240",
+              "row_span": 1,
+              "col_span": 3,
+              "is_header": false,
+              "row_index": 7,
+              "col_index": 8,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "18240",
+              "row_span": 1,
+              "col_span": 3,
+              "is_header": false,
+              "row_index": 7,
+              "col_index": 9,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "18240",
+              "row_span": 1,
+              "col_span": 3,
+              "is_header": false,
+              "row_index": 7,
+              "col_index": 10,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "8100",
+              "row_span": 1,
+              "col_span": 3,
+              "is_header": false,
+              "row_index": 7,
+              "col_index": 11,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "8100",
+              "row_span": 1,
+              "col_span": 3,
+              "is_header": false,
+              "row_index": 7,
+              "col_index": 12,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "8100",
+              "row_span": 1,
+              "col_span": 3,
+              "is_header": false,
+              "row_index": 7,
+              "col_index": 13,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "",
+              "row_span": 1,
+              "col_span": 3,
+              "is_header": false,
+              "row_index": 7,
+              "col_index": 14,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "",
+              "row_span": 1,
+              "col_span": 3,
+              "is_header": false,
+              "row_index": 7,
+              "col_index": 15,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "",
+              "row_span": 1,
+              "col_span": 3,
+              "is_header": false,
+              "row_index": 7,
+              "col_index": 16,
+              "cell_type": "TableCell"
+            }
+          ],
+          [
+            {
+              "text": "Chromium, Total",
+              "row_span": 1,
+              "col_span": 1,
+              "is_header": false,
+              "row_index": 8,
+              "col_index": 0,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "",
+              "row_span": 1,
+              "col_span": 1,
+              "is_header": false,
+              "row_index": 8,
+              "col_index": 1,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "",
+              "row_span": 1,
+              "col_span": 1,
+              "is_header": false,
+              "row_index": 8,
+              "col_index": 2,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "",
+              "row_span": 1,
+              "col_span": 1,
+              "is_header": false,
+              "row_index": 8,
+              "col_index": 3,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "",
+              "row_span": 1,
+              "col_span": 1,
+              "is_header": false,
+              "row_index": 8,
+              "col_index": 4,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "27100",
+              "row_span": 1,
+              "col_span": 1,
+              "is_header": false,
+              "row_index": 8,
+              "col_index": 5,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "6.2",
+              "row_span": 1,
+              "col_span": 1,
+              "is_header": false,
+              "row_index": 8,
+              "col_index": 6,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "0.595",
+              "row_span": 1,
+              "col_span": 1,
+              "is_header": false,
+              "row_index": 8,
+              "col_index": 7,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "0.595 27300 6.54",
+              "row_span": 1,
+              "col_span": 2,
+              "is_header": false,
+              "row_index": 8,
+              "col_index": 8,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "0.595 27300 6.54",
+              "row_span": 1,
+              "col_span": 2,
+              "is_header": false,
+              "row_index": 8,
+              "col_index": 9,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "6.54",
+              "row_span": 1,
+              "col_span": 1,
+              "is_header": false,
+              "row_index": 8,
+              "col_index": 10,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "0.628 22700",
+              "row_span": 1,
+              "col_span": 1,
+              "is_header": false,
+              "row_index": 8,
+              "col_index": 11,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "7.5",
+              "row_span": 1,
+              "col_span": 1,
+              "is_header": false,
+              "row_index": 8,
+              "col_index": 12,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "0.72 23100",
+              "row_span": 1,
+              "col_span": 1,
+              "is_header": false,
+              "row_index": 8,
+              "col_index": 13,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "7.03",
+              "row_span": 1,
+              "col_span": 1,
+              "is_header": false,
+              "row_index": 8,
+              "col_index": 14,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "7.03",
+              "row_span": 1,
+              "col_span": 1,
+              "is_header": false,
+              "row_index": 8,
+              "col_index": 15,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "0.675",
+              "row_span": 1,
+              "col_span": 1,
+              "is_header": false,
+              "row_index": 8,
+              "col_index": 16,
+              "cell_type": "TableCell"
+            }
+          ],
+          [
+            {
+              "text": "GENERAL CHEMISTRY",
+              "row_span": 1,
+              "col_span": 1,
+              "is_header": false,
+              "row_index": 9,
+              "col_index": 0,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "",
+              "row_span": 1,
+              "col_span": 1,
+              "is_header": false,
+              "row_index": 9,
+              "col_index": 1,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "",
+              "row_span": 1,
+              "col_span": 1,
+              "is_header": false,
+              "row_index": 9,
+              "col_index": 2,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "",
+              "row_span": 1,
+              "col_span": 1,
+              "is_header": false,
+              "row_index": 9,
+              "col_index": 3,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "",
+              "row_span": 1,
+              "col_span": 1,
+              "is_header": false,
+              "row_index": 9,
+              "col_index": 4,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "",
+              "row_span": 1,
+              "col_span": 1,
+              "is_header": false,
+              "row_index": 9,
+              "col_index": 5,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "",
+              "row_span": 1,
+              "col_span": 1,
+              "is_header": false,
+              "row_index": 9,
+              "col_index": 6,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "",
+              "row_span": 1,
+              "col_span": 1,
+              "is_header": false,
+              "row_index": 9,
+              "col_index": 7,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "",
+              "row_span": 1,
+              "col_span": 1,
+              "is_header": false,
+              "row_index": 9,
+              "col_index": 8,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "",
+              "row_span": 1,
+              "col_span": 1,
+              "is_header": false,
+              "row_index": 9,
+              "col_index": 9,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "",
+              "row_span": 1,
+              "col_span": 1,
+              "is_header": false,
+              "row_index": 9,
+              "col_index": 10,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "",
+              "row_span": 1,
+              "col_span": 1,
+              "is_header": false,
+              "row_index": 9,
+              "col_index": 11,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "",
+              "row_span": 1,
+              "col_span": 1,
+              "is_header": false,
+              "row_index": 9,
+              "col_index": 12,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "",
+              "row_span": 1,
+              "col_span": 1,
+              "is_header": false,
+              "row_index": 9,
+              "col_index": 13,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "",
+              "row_span": 1,
+              "col_span": 1,
+              "is_header": false,
+              "row_index": 9,
+              "col_index": 14,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "",
+              "row_span": 1,
+              "col_span": 1,
+              "is_header": false,
+              "row_index": 9,
+              "col_index": 15,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "",
+              "row_span": 1,
+              "col_span": 1,
+              "is_header": false,
+              "row_index": 9,
+              "col_index": 16,
+              "cell_type": "TableCell"
+            }
+          ],
+          [
+            {
+              "text": "Chromium, Hexavalent",
+              "row_span": 1,
+              "col_span": 1,
+              "is_header": false,
+              "row_index": 10,
+              "col_index": 0,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "190",
+              "row_span": 1,
+              "col_span": 1,
+              "is_header": false,
+              "row_index": 10,
+              "col_index": 1,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "190000",
+              "row_span": 1,
+              "col_span": 1,
+              "is_header": false,
+              "row_index": 10,
+              "col_index": 2,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "180",
+              "row_span": 1,
+              "col_span": 1,
+              "is_header": false,
+              "row_index": 10,
+              "col_index": 3,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "140000",
+              "row_span": 1,
+              "col_span": 1,
+              "is_header": false,
+              "row_index": 10,
+              "col_index": 4,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "27900",
+              "row_span": 1,
+              "col_span": 1,
+              "is_header": false,
+              "row_index": 10,
+              "col_index": 5,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "1310",
+              "row_span": 1,
+              "col_span": 1,
+              "is_header": false,
+              "row_index": 10,
+              "col_index": 6,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "262",
+              "row_span": 1,
+              "col_span": 1,
+              "is_header": false,
+              "row_index": 10,
+              "col_index": 7,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "9060",
+              "row_span": 1,
+              "col_span": 1,
+              "is_header": false,
+              "row_index": 10,
+              "col_index": 8,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "1320",
+              "row_span": 1,
+              "col_span": 1,
+              "is_header": false,
+              "row_index": 10,
+              "col_index": 9,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "264 11300",
+              "row_span": 1,
+              "col_span": 1,
+              "is_header": false,
+              "row_index": 10,
+              "col_index": 10,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "",
+              "row_span": 1,
+              "col_span": 1,
+              "is_header": false,
+              "row_index": 10,
+              "col_index": 11,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "1540",
+              "row_span": 1,
+              "col_span": 1,
+              "is_header": false,
+              "row_index": 10,
+              "col_index": 12,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "309 15000",
+              "row_span": 1,
+              "col_span": 1,
+              "is_header": false,
+              "row_index": 10,
+              "col_index": 13,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "1440",
+              "row_span": 1,
+              "col_span": 1,
+              "is_header": false,
+              "row_index": 10,
+              "col_index": 14,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "1440",
+              "row_span": 1,
+              "col_span": 1,
+              "is_header": false,
+              "row_index": 10,
+              "col_index": 15,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "288",
+              "row_span": 1,
+              "col_span": 1,
+              "is_header": false,
+              "row_index": 10,
+              "col_index": 16,
+              "cell_type": "TableCell"
+            }
+          ],
+          [
+            {
+              "text": "",
+              "row_span": 1,
+              "col_span": 1,
+              "is_header": false,
+              "row_index": 11,
+              "col_index": 0,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "",
+              "row_span": 1,
+              "col_span": 1,
+              "is_header": false,
+              "row_index": 11,
+              "col_index": 1,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "",
+              "row_span": 1,
+              "col_span": 1,
+              "is_header": false,
+              "row_index": 11,
+              "col_index": 2,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "",
+              "row_span": 1,
+              "col_span": 1,
+              "is_header": false,
+              "row_index": 11,
+              "col_index": 3,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "",
+              "row_span": 1,
+              "col_span": 1,
+              "is_header": false,
+              "row_index": 11,
+              "col_index": 4,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "",
+              "row_span": 1,
+              "col_span": 1,
+              "is_header": false,
+              "row_index": 11,
+              "col_index": 5,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "",
+              "row_span": 1,
+              "col_span": 1,
+              "is_header": false,
+              "row_index": 11,
+              "col_index": 6,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "",
+              "row_span": 1,
+              "col_span": 1,
+              "is_header": false,
+              "row_index": 11,
+              "col_index": 7,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "",
+              "row_span": 1,
+              "col_span": 1,
+              "is_header": false,
+              "row_index": 11,
+              "col_index": 8,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "",
+              "row_span": 1,
+              "col_span": 1,
+              "is_header": false,
+              "row_index": 11,
+              "col_index": 9,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "",
+              "row_span": 1,
+              "col_span": 1,
+              "is_header": false,
+              "row_index": 11,
+              "col_index": 10,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "",
+              "row_span": 1,
+              "col_span": 1,
+              "is_header": false,
+              "row_index": 11,
+              "col_index": 11,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "",
+              "row_span": 1,
+              "col_span": 1,
+              "is_header": false,
+              "row_index": 11,
+              "col_index": 12,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "",
+              "row_span": 1,
+              "col_span": 1,
+              "is_header": false,
+              "row_index": 11,
+              "col_index": 13,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "",
+              "row_span": 1,
+              "col_span": 1,
+              "is_header": false,
+              "row_index": 11,
+              "col_index": 14,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "",
+              "row_span": 1,
+              "col_span": 1,
+              "is_header": false,
+              "row_index": 11,
+              "col_index": 15,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "",
+              "row_span": 1,
+              "col_span": 1,
+              "is_header": false,
+              "row_index": 11,
+              "col_index": 16,
+              "cell_type": "TableCell"
+            }
+          ],
+          [
+            {
+              "text": "Solids, Total",
+              "row_span": 1,
+              "col_span": 1,
+              "is_header": false,
+              "row_index": 12,
+              "col_index": 0,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "",
+              "row_span": 1,
+              "col_span": 1,
+              "is_header": false,
+              "row_index": 12,
+              "col_index": 1,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "",
+              "row_span": 1,
+              "col_span": 1,
+              "is_header": false,
+              "row_index": 12,
+              "col_index": 2,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "",
+              "row_span": 1,
+              "col_span": 1,
+              "is_header": false,
+              "row_index": 12,
+              "col_index": 3,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "",
+              "row_span": 1,
+              "col_span": 1,
+              "is_header": false,
+              "row_index": 12,
+              "col_index": 4,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "61",
+              "row_span": 1,
+              "col_span": 1,
+              "is_header": false,
+              "row_index": 12,
+              "col_index": 5,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "0.1",
+              "row_span": 1,
+              "col_span": 1,
+              "is_header": false,
+              "row_index": 12,
+              "col_index": 6,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "NA",
+              "row_span": 1,
+              "col_span": 1,
+              "is_header": false,
+              "row_index": 12,
+              "col_index": 7,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "60.6",
+              "row_span": 1,
+              "col_span": 1,
+              "is_header": false,
+              "row_index": 12,
+              "col_index": 8,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "0.1",
+              "row_span": 1,
+              "col_span": 1,
+              "is_header": false,
+              "row_index": 12,
+              "col_index": 9,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "NA 51.8",
+              "row_span": 1,
+              "col_span": 1,
+              "is_header": false,
+              "row_index": 12,
+              "col_index": 10,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "0.1",
+              "row_span": 1,
+              "col_span": 1,
+              "is_header": false,
+              "row_index": 12,
+              "col_index": 11,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "0.1",
+              "row_span": 1,
+              "col_span": 1,
+              "is_header": false,
+              "row_index": 12,
+              "col_index": 12,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "NA 55.6",
+              "row_span": 1,
+              "col_span": 1,
+              "is_header": false,
+              "row_index": 12,
+              "col_index": 13,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "",
+              "row_span": 1,
+              "col_span": 1,
+              "is_header": false,
+              "row_index": 12,
+              "col_index": 14,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "0.1",
+              "row_span": 1,
+              "col_span": 1,
+              "is_header": false,
+              "row_index": 12,
+              "col_index": 15,
+              "cell_type": "TableCell"
+            },
+            {
+              "text": "NA",
+              "row_span": 1,
+              "col_span": 1,
+              "is_header": false,
+              "row_index": 12,
+              "col_index": 16,
+              "cell_type": "TableCell"
+            }
+          ]
+        ]
+      },
+      "context": {
+        "text_before": "## Table 6\nSummary of Soil Sampling Results- May 30, 2024 Alliance 51st Street LLC 1646 South 51st Street Philadelphia, Pennsylvania",
+        "text_after": "SAMPLE ID:\nSB-504 (8-8.5)\nSB-501 (4.5-5)\nSB-502 (4.5-5)\nSB-503 (6-6.5)",
+        "table_title": "Summary of Soil Sampling Results- May 30, 2024 Alliance 51st Street LLC 1646 South 51st Street Philadelphia, Pennsylvania",
+        "table_notes": ""
+      }
+    }
+  ],
+  "stage": "raw"
+}
