@@ -1,0 +1,70 @@
+{
+  "default_engine": "enhanced",
+  "available_engines": {
+    "legacy": {
+      "name": "legacy",
+      "script_path": "/Users/jack/CHONKER_SNYFTER/python/extraction_bridge.py",
+      "description": "Original environmental lab extraction bridge with domain-specific logic",
+      "available": true
+    },
+    "enhanced": {
+      "name": "enhanced",
+      "script_path": "/Users/jack/CHONKER_SNYFTER/python/enhanced_extraction_bridge.py",
+      "description": "Enhanced extraction bridge with improved header recognition and hierarchical structure",
+      "available": true
+    },
+    "pipeline": {
+      "name": "pipeline",
+      "script_path": "/Users/jack/CHONKER_SNYFTER/python/extraction_pipeline.py",
+      "description": "Domain-agnostic 3-stage pipeline with full traceability and debugging",
+      "available": true
+    }
+  },
+  "paths": {
+    "root_dir": "/Users/jack/CHONKER_SNYFTER",
+    "python_dir": "/Users/jack/CHONKER_SNYFTER/python",
+    "venv_python": "/Users/jack/CHONKER_SNYFTER/venv/bin/python"
+  },
+  "engine_selection": {
+    "tauri_app": "enhanced",
+    "web_server": "enhanced",
+    "cli_tools": "enhanced",
+    "test_scripts": "enhanced"
+  },
+  "compatibility": {
+    "api_version": "2.0",
+    "output_format": "tauri_compatible",
+    "features": {
+      "legacy": {
+        "environmental_lab_logic": true,
+        "mlx_optimization": true,
+        "otsl_format": true,
+        "doctags_format": true,
+        "hierarchical_headers": false,
+        "column_grouping": false,
+        "smart_data_types": false,
+        "pipeline_traceability": false
+      },
+      "enhanced": {
+        "environmental_lab_logic": false,
+        "mlx_optimization": false,
+        "otsl_format": false,
+        "doctags_format": false,
+        "hierarchical_headers": true,
+        "column_grouping": true,
+        "smart_data_types": true,
+        "pipeline_traceability": true
+      },
+      "pipeline": {
+        "environmental_lab_logic": false,
+        "mlx_optimization": false,
+        "otsl_format": false,
+        "doctags_format": false,
+        "hierarchical_headers": true,
+        "column_grouping": true,
+        "smart_data_types": true,
+        "pipeline_traceability": true
+      }
+    }
+  }
+}
