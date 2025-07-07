@@ -59,6 +59,10 @@ enum Commands {
         /// Extract specific page only (1-indexed)
         #[arg(short = 'p', long)]
         page: Option<usize>,
+        
+        /// Use SmolDocling VLM for enhanced document understanding
+        #[arg(long)]
+        vlm: bool,
     },
     
     
@@ -130,8 +134,8 @@ async fn main() -> Result<()> {
     info!("Database initialized: {:?}", cli.database);
     
     match cli.command {
-        Commands::Extract { pdf, output, tool, store, page } => {
-            cli::extract_command(pdf, output, tool, store, page, database).await?
+        Commands::Extract { pdf, output, tool, store, page, vlm } => {
+            cli::extract_command(pdf, output, tool, store, page, vlm, database).await?
         },
         
         Commands::Export { format, output, doc_id } => {

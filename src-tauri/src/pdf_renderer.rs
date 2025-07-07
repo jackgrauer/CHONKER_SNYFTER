@@ -25,6 +25,7 @@ impl PdfRenderer {
         }
     }
     
+    #[allow(dead_code)]
     pub fn render_page_to_base64(&self, pdf_path: &str, page_num: i32, zoom: f32) -> Result<String> {
         unsafe {
             // Open document
@@ -133,6 +134,7 @@ impl PdfRenderer {
         }
     }
     
+    #[allow(dead_code)]
     pub fn get_page_count(&self, pdf_path: &str) -> Result<i32> {
         unsafe {
             let path_c = CString::new(pdf_path)?;

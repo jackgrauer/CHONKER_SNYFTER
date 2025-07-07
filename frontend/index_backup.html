@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
+    <title>🐹 CHONKER - Working Version</title>
+    
+    <!-- Quill.js Rich Text Editor -->
+    <link href="https://cdn.jsdelivr.net/npm/quill@2.0.2/dist/quill.snow.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/quill@2.0.2/dist/quill.js"></script>
+    
+    <script>
+        window.addEventListener('DOMContentLoaded', () => {
+            console.log('DOM loaded, checking for Tauri...');
+            
+            const checkTauri = () => {
+                if (typeof window.__TAURI__ !== 'undefined') {
+                    console.log('Found __TAURI__:', window.__TAURI__);
+                    if (window.__TAURI__.invoke) {
+                        window.invoke = window.__TAURI__.invoke;
+                        console.log('Set window.invoke from __TAURI__.invoke');
+                    } else if (window.__TAURI__.core && window.__TAURI__.core.invoke) {
+                        window.invoke = window.__TAURI__.core.invoke;
+                        console.log('Set window.invoke from __TAURI__.core.invoke');
+                    }
+                } else {
+                    console.log('__TAURI__ not found, retrying...');
+                    setTimeout(checkTauri, 100);
+                }
+            };
+            
+            checkTauri();
+        });
+    </script>
+    
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', Consolas, 'Courier New', monospace;
+            margin: 0;
+            padding: 0;
+            background-color: #1a1a1a;
+            color: #ffffff;
+            height: 100vh;
+            overflow: hidden;
+        }
+        
+        .app-container {
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            background: #1a1a1a;
+        }
+        
+        /* Header */
+        .header {
+            background: #2a2a2a;
+            padding: 15px 20px;
+            text-align: center;
+            border-bottom: 1px solid #444;
+        }
+        
+        .app-title {
+            font-size: 20px;
+            font-weight: 600;
+            color: #ffffff;
+        }
+        
+        /* Main Content */
+        .main-content {
+            display: flex;
+            flex: 1;
+            height: calc(100vh - 60px);
+        }
+        
+        .pane-a {
+            width: 50%;
+            background: #2a2a2a;
+            border-right: 1px solid #444;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .pane-b {
+            width: 50%;
+            background: #2a2a2a;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .pdf-viewer {
+            flex: 1;
+            background: #333;
+            margin: 10px;
+            border-radius: 4px;
+            display: flex;
+            flex-direction: column;
+            overflow: auto;
+        }
+        
+        .pdf-placeholder {
+            text-align: center;
+            padding: 40px;
+            color: #ffffff;
+            background: #333;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+        }
+        
+        .converted-output {
+            flex: 1;
+            padding: 10px;
+            overflow: auto;
+            background: #2a2a2a;
+            color: #ffffff;
+        }
+        
+        .btn {
+            background: #ff1493;
+            color: #ffffff;
+            border: none;
+            padding: 12px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            margin: 5px;
+        }
+        
+        .btn:hover {
+            background: #e6127a;
+        }
+        
+        .btn-secondary {
+            background: #666;
+        }
+        
+        .btn-secondary:hover {
+            background: #777;
+        }
+        
+        #tables-content {
+            background: #333;
+            color: #ffffff;
+            padding: 20px;
+            margin: 10px;
+            border-radius: 4px;
+            min-height: 300px;
+        }
+        
+        .hidden {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="app-container">
+        <!-- Header -->
+        <div class="header">
+            <div class="app-title">🐹 CHONKER</div>
+        </div>
+        
+        <!-- Main Content -->
+        <div class="main-content">
+            <!-- Pane A: PDF Viewer -->
+            <div class="pane-a">
+                <div class="pdf-viewer">
+                    <div class="pdf-placeholder" id="pdf-placeholder">
+                        <button class="btn" onclick="selectFile()">Load Document</button>
+                        <div id="selected-file-display" class="hidden"></div>
+                        <button id="process-btn" class="btn btn-secondary" onclick="processDocument()" style="display: none;">
+                            🐹 Process Document (Ctrl+P)
+                        </button>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Pane B: Converted Output -->
+            <div class="pane-b">
+                <div class="converted-output" id="converted-output">
+                    <div id="tables-content">Ready for content...</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Global state
+        let currentMode = 'chonker';
+        let selectedFile = null;
+        let processedData = null;
+        let editorInstance = null;
+        let currentChunks = [];
+        
+        // File selection
+        async function selectFile() {
+            try {
+                console.log('Opening file dialog...');
+                if (!window.invoke) {
+                    console.error('Tauri API not ready');
+                    return;
+                }
+                
+                const result = await window.invoke('select_pdf_file');
+                console.log('File dialog result:', result);
+                
+                if (result && result.path) {
+                    selectedFile = result.path;
+                    console.log('Selected file:', selectedFile);
+                    
+                    const fileDisplay = document.getElementById('selected-file-display');
+                    fileDisplay.textContent = selectedFile.split('/').pop();
+                    fileDisplay.classList.remove('hidden');
+                    
+                    const processBtn = document.getElementById('process-btn');
+                    if (processBtn) {
+                        processBtn.style.display = 'block';
+                    }
+                    
+                    await displayPDF(selectedFile);
+                }
+            } catch (error) {
+                console.error('Error selecting file:', error);
+            }
+        }
+        
+        // Display PDF
+        async function displayPDF(pdfPath) {
+            try {
+                console.log('🐹 Attempting to display PDF:', pdfPath);
+                
+                const placeholder = document.getElementById('pdf-placeholder');
+                if (placeholder) {
+                    placeholder.innerHTML = '<div style="color: #00ff00;">Loading PDF...</div>';
+                }
+                
+                const renderResult = await window.invoke('render_pdf_page', {
+                    pdfPath: pdfPath,
+                    pageNum: 0,
+                    zoom: 1.0
+                });
+                
+                if (renderResult.success) {
+                    if (placeholder) placeholder.style.display = 'none';
+                    
+                    const pdfViewer = document.createElement('iframe');
+                    pdfViewer.id = 'pdf-viewer';
+                    pdfViewer.src = renderResult.pdf_url;
+                    pdfViewer.style.cssText = `
+                        width: 100%;
+                        height: 100%;
+                        border: none;
+                        background: #ffffff;
+                    `;
+                    
+                    const existingViewer = document.getElementById('pdf-viewer');
+                    if (existingViewer) {
+                        existingViewer.remove();
+                    }
+                    
+                    const pdfContainer = document.querySelector('.pdf-viewer');
+                    if (pdfContainer) {
+                        pdfContainer.appendChild(pdfViewer);
+                    }
+                    
+                    console.log('🐹 PDF loaded successfully');
+                } else {
+                    console.error('🐹 Failed to get PDF URL:', renderResult.error);
+                }
+            } catch (error) {
+                console.error('🐹 Error displaying PDF:', error);
+            }
+        }
+        
+        // Document processing
+        async function processDocument() {
+            if (!selectedFile) {
+                console.log('No file selected');
+                return;
+            }
+            
+            console.log('🐹 Starting document processing...');
+            
+            const outputDiv = document.getElementById('tables-content');
+            if (outputDiv) {
+                outputDiv.innerHTML = '<div style="color: #ff1493;">Processing document... 🐹</div>';
+            }
+            
+            try {
+                const options = {
+                    ocr_enabled: true,
+                    formula_recognition: true,
+                    table_detection: true,
+                    language: 'English'
+                };
+                
+                const result = await window.invoke('process_document', {
+                    filePath: selectedFile,
+                    options: options
+                });
+                
+                if (result && result.success) {
+                    processedData = result.data;
+                    displayProcessingResults(result.data);
+                    console.log('✅ Processing completed successfully');
+                } else {
+                    const errorMsg = result ? result.error : 'Unknown error';
+                    console.error('❌ Processing failed:', errorMsg);
+                    if (outputDiv) {
+                        outputDiv.innerHTML = `<div style="color: #ff1493;">Processing failed: ${errorMsg}</div>`;
+                    }
+                }
+            } catch (error) {
+                console.error('❌ Error processing document:', error);
+                const errorMsg = error ? (error.message || error.toString()) : 'Unknown error';
+                if (outputDiv) {
+                    outputDiv.innerHTML = `<div style="color: #ff1493;">Error: ${errorMsg}</div>`;
+                }
+            }
+        }
+        
+        // Display processing results
+        function displayProcessingResults(data) {
+            console.log('🐹 displayProcessingResults called with data:', data);
+            
+            if (data.chunks) {
+                currentChunks = data.chunks;
+                console.log('🐹 Stored', currentChunks.length, 'chunks');
+            }
+            
+            const tablesContent = document.getElementById('tables-content');
+            if (!tablesContent) {
+                console.error('tables-content element not found');
+                return;
+            }
+            
+            tablesContent.innerHTML = '';
+            
+            if (data.formatted_html) {
+                console.log('🐹 Using formatted HTML output');
+                tablesContent.innerHTML = data.formatted_html;
+            } else {
+                console.log('🐹 Creating basic display');
+                tablesContent.innerHTML = '<h2>Processing Complete</h2><p>Content processed successfully!</p>';
+            }
+        }
+        
+        // Initialize
+        document.addEventListener('DOMContentLoaded', () => {
+            console.log('🐹 CHONKER initialized');
+        });
+    </script>
+</body>
+</html>

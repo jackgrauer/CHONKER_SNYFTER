@@ -46,6 +46,19 @@ pub enum ChonkerError {
         source: Box<dyn std::error::Error + Send + Sync>,
     },
     
+    #[error("Extraction failed: {tool} - {details}")]
+    ExtractionFailed {
+        tool: String,
+        details: String,
+    },
+    
+    #[error("Parse error in {content}")]
+    ParseError {
+        content: String,
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
+    
     #[error("General error: {0}")]
     General(#[from] anyhow::Error),
 }

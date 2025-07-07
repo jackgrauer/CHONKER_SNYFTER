@@ -1,106 +1,137 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>CHONKER Extraction Results</title>
-    <style>
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            line-height: 1.6;
-            max-width: 1200px;
-            margin: 0 auto;
-            padding: 20px;
-            background-color: #ffffff;
-        }
-        h1, h2, h3 {
-            color: #2c3e50;
-            border-bottom: 2px solid #3498db;
-            padding-bottom: 10px;
-        }
-        table {
-            width: 100%;
-            border-collapse: collapse;
-            margin: 20px 0;
-            background-color: #ffffff;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        }
-        th, td {
-            border: 1px solid #ddd;
-            padding: 12px;
-            text-align: left;
-        }
-        th {
-            background-color: #f8f9fa;
-            font-weight: bold;
-            color: #2c3e50;
-        }
-        tr:nth-child(even) {
-            background-color: #f8f9fa;
-        }
-        tr:hover {
-            background-color: #e8f4fd;
-        }
-        .metadata {
-            background-color: #f8f9fa;
-            padding: 15px;
-            border-radius: 5px;
-            margin-bottom: 20px;
-        }
-        .chunk {
-            margin-bottom: 30px;
-            padding: 20px;
-            border-left: 4px solid #3498db;
-            background-color: #fafafa;
-        }
-        hr {
-            border: none;
-            height: 2px;
-            background: linear-gradient(to right, #3498db, #2ecc71);
-            margin: 30px 0;
-        }
-        strong {
-            color: #2c3e50;
-        }
-        .notes {
-            background-color: #fff3cd;
-            border: 1px solid #ffeaa7;
-            border-radius: 5px;
-            padding: 15px;
-            margin: 15px 0;
-        }
-    </style>
+<meta charset="UTF-8">
+<title>test</title>
+<meta name="generator" content="Docling HTML Serializer">
+<style>
+    html {
+        background-color: #f5f5f5;
+        font-family: Arial, sans-serif;
+        line-height: 1.6;
+    }
+    body {
+        max-width: 800px;
+        margin: 0 auto;
+        padding: 2rem;
+        background-color: white;
+        box-shadow: 0 0 10px rgba(0,0,0,0.1);
+    }
+    h1, h2, h3, h4, h5, h6 {
+        color: #333;
+        margin-top: 1.5em;
+        margin-bottom: 0.5em;
+    }
+    h1 {
+        font-size: 2em;
+        border-bottom: 1px solid #eee;
+        padding-bottom: 0.3em;
+    }
+    table {
+        border-collapse: collapse;
+        margin: 1em 0;
+        width: 100%;
+    }
+    th, td {
+        border: 1px solid #ddd;
+        padding: 8px;
+        text-align: left;
+    }
+    th {
+        background-color: #f2f2f2;
+        font-weight: bold;
+    }
+    figure {
+        margin: 1.5em 0;
+        text-align: center;
+    }
+    figcaption {
+        color: #666;
+        font-style: italic;
+        margin-top: 0.5em;
+    }
+    img {
+        max-width: 100%;
+        height: auto;
+    }
+    pre {
+        background-color: #f6f8fa;
+        border-radius: 3px;
+        padding: 1em;
+        overflow: auto;
+    }
+    code {
+        font-family: monospace;
+        background-color: #f6f8fa;
+        padding: 0.2em 0.4em;
+        border-radius: 3px;
+    }
+    pre code {
+        background-color: transparent;
+        padding: 0;
+    }
+    .formula {
+        text-align: center;
+        padding: 0.5em;
+        margin: 1em 0;
+        background-color: #f9f9f9;
+    }
+    .formula-not-decoded {
+        text-align: center;
+        padding: 0.5em;
+        margin: 1em 0;
+        background: repeating-linear-gradient(
+            45deg,
+            #f0f0f0,
+            #f0f0f0 10px,
+            #f9f9f9 10px,
+            #f9f9f9 20px
+        );
+    }
+    .page-break {
+        page-break-after: always;
+        border-top: 1px dashed #ccc;
+        margin: 2em 0;
+    }
+    .key-value-region {
+        background-color: #f9f9f9;
+        padding: 1em;
+        border-radius: 4px;
+        margin: 1em 0;
+    }
+    .key-value-region dt {
+        font-weight: bold;
+    }
+    .key-value-region dd {
+        margin-left: 1em;
+        margin-bottom: 0.5em;
+    }
+    .form-container {
+        border: 1px solid #ddd;
+        padding: 1em;
+        border-radius: 4px;
+        margin: 1em 0;
+    }
+    .form-item {
+        margin-bottom: 0.5em;
+    }
+    .image-classification {
+        font-size: 0.9em;
+        color: #666;
+        margin-top: 0.5em;
+    }
+</style>
 </head>
 <body>
-<h1>Document Processing</h1>
-<p><strong>Tool:</strong> python_ml
-<strong>Total Pages:</strong> 1
-<strong>Processing Time:</strong> 9404ms
-<strong>Complexity Score:</strong> 0.00
-<strong>Processing Path:</strong> ComplexPath</p>
-<h2>Chunk 1 (Page 1)</h2>
-<p><strong>Elements:</strong> heading, table, text</p>
+<div class='page'>
 <h2>Table 6</h2>
 <p>Summary of Soil Sampling Results- May 30, 2024 Alliance 51st Street LLC 1646 South 51st Street Philadelphia, Pennsylvania</p>
-<table><thead><tr><th>SAMPLE ID:</th><th>Pennsylvania Use  Aquifers Non-Residential  Generic Soil to  Groundwater MSCs  Criteria</th><th>Pennsylvania Non-Use  Aquifers Non-Residential  Generic Soil to  Groundwater MSCs  Criteria</th><th>Pennsylvania Non- Residential Direct  Contact Surface Soil (0- 2') MSCs Criteria</th><th>Pennsylvania Non- Residential Direct  Contact Subsurface  Soil (2-15')</th><th>SB-206 (3-3.5)</th><th>SB-206 (3-3.5)</th><th>SB-206 (3-3.5)</th><th>DUP-1</th><th>DUP-1</th><th>DUP-1</th><th>SB-209 (4.5-5)</th><th>SB-209 (4.5-5)</th><th>SB-209 (4.5-5)</th><th>SB-216 (4.5-5)</th><th>SB-216 (4.5-5)</th><th>SB-216 (4.5-5)</th></tr></thead><tbody>
-<tr><td>LAB ID:</td><td>Pennsylvania Use  Aquifers Non-Residential  Generic Soil to  Groundwater MSCs  Criteria</td><td>Pennsylvania Non-Use  Aquifers Non-Residential  Generic Soil to  Groundwater MSCs  Criteria</td><td>Pennsylvania Non- Residential Direct  Contact Surface Soil (0- 2') MSCs Criteria</td><td>Pennsylvania Non- Residential Direct  Contact Subsurface  Soil (2-15')</td><td>L2429996-01</td><td>L2429996-01</td><td>L2429996-01</td><td>L2429996-08</td><td>L2429996-08</td><td>L2429996-08</td><td>L2429996-02</td><td>L2429996-02</td><td>L2429996-02</td><td>L2429996-03</td><td>L2429996-03</td><td>L2429996-03</td></tr>
-<tr><td>COLLECTION DATE:</td><td>Pennsylvania Use  Aquifers Non-Residential  Generic Soil to  Groundwater MSCs  Criteria</td><td>Pennsylvania Non-Use  Aquifers Non-Residential  Generic Soil to  Groundwater MSCs  Criteria</td><td>Pennsylvania Non- Residential Direct  Contact Surface Soil (0- 2') MSCs Criteria</td><td>Pennsylvania Non- Residential Direct  Contact Subsurface  Soil (2-15')</td><td>5/30/2024</td><td>5/30/2024</td><td>5/30/2024</td><td>5/30/2024</td><td>5/30/2024</td><td>5/30/2024</td><td>5/30/2024</td><td>5/30/2024</td><td>5/30/2024</td><td>5/30/2024</td><td>5/30/2024</td><td>5/30/2024</td></tr>
-<tr><td>SAMPLE DEPTH:</td><td>Pennsylvania Use  Aquifers Non-Residential  Generic Soil to  Groundwater MSCs  Criteria</td><td>Pennsylvania Non-Use  Aquifers Non-Residential  Generic Soil to  Groundwater MSCs  Criteria</td><td>Pennsylvania Non- Residential Direct  Contact Surface Soil (0- 2') MSCs Criteria</td><td>Pennsylvania Non- Residential Direct  Contact Subsurface  Soil (2-15')</td><td>3-3.5</td><td>3-3.5</td><td>3-3.5</td><td>3-3.5</td><td>3-3.5</td><td>3-3.5</td><td>4.5-5</td><td>4.5-5</td><td>4.5-5</td><td>4.5-5</td><td>4.5-5</td><td>4.5-5</td></tr>
-<tr><td>SAMPLE MATRIX:</td><td>Pennsylvania Use  Aquifers Non-Residential  Generic Soil to  Groundwater MSCs  Criteria</td><td>Pennsylvania Non-Use  Aquifers Non-Residential  Generic Soil to  Groundwater MSCs  Criteria</td><td>Pennsylvania Non- Residential Direct  Contact Surface Soil (0- 2') MSCs Criteria</td><td>Pennsylvania Non- Residential Direct  Contact Subsurface  Soil (2-15')</td><td>SOIL</td><td>SOIL</td><td>SOIL</td><td>SOIL</td><td>SOIL</td><td>SOIL</td><td>SOIL</td><td>SOIL</td><td>SOIL</td><td>SOIL</td><td>SOIL</td><td>SOIL</td></tr>
-<tr><td>ANALYTE</td><td>(mg/kg)</td><td>(mg/kg)</td><td>(mg/kg)</td><td>(mg/kg)</td><td>Conc</td><td>RL</td><td></td><td>Conc</td><td>RL</td><td>MDL Conc</td><td>RL</td><td>RL</td><td>MDL Conc</td><td>RL</td><td>RL</td><td>MDL</td></tr>
-<tr><td>TOTAL METALS</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr>
-<tr><td>Chromium, Trivalent*</td><td>190000</td><td>190000</td><td>190000</td><td>190000</td><td></td><td></td><td></td><td>18240</td><td>18240</td><td>18240</td><td>8100</td><td>8100</td><td>8100</td><td></td><td></td><td></td></tr>
-<tr><td>Chromium, Total</td><td></td><td></td><td></td><td></td><td>27100</td><td>6.2</td><td>0.595</td><td>0.595 27300 6.54</td><td>0.595 27300 6.54</td><td>6.54</td><td>0.628 22700</td><td>7.5</td><td>0.72 23100</td><td>7.03</td><td>7.03</td><td>0.675</td></tr>
-<tr><td>GENERAL CHEMISTRY</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr>
-<tr><td>Chromium, Hexavalent</td><td>190</td><td>190000</td><td>180</td><td>140000</td><td>27900</td><td>1310</td><td>262</td><td>9060</td><td>1320</td><td>264 11300</td><td></td><td>1540</td><td>309 15000</td><td>1440</td><td>1440</td><td>288</td></tr>
-<tr><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr>
-<tr><td>Solids, Total</td><td></td><td></td><td></td><td></td><td>61</td><td>0.1</td><td>NA</td><td>60.6</td><td>0.1</td><td>NA 51.8</td><td>0.1</td><td>0.1</td><td>NA 55.6</td><td></td><td>0.1</td><td>NA</td></tr>
-</tbody></table>
+<table><tbody><tr><td>SAMPLE ID:</td><th rowspan="5">Pennsylvania Use  Aquifers Non-Residential  Generic Soil to  Groundwater MSCs  Criteria</th><th rowspan="5">Pennsylvania Non-Use  Aquifers Non-Residential  Generic Soil to  Groundwater MSCs  Criteria</th><th rowspan="5">Pennsylvania Non Residential Direct  Contact Surface Soil (0- 2&#x27;) MSCs Criteria</th><th rowspan="5">Pennsylvania Non Residential Direct  Contact Subsurface  Soil (2-15&#x27;)</th><th colspan="3">SB-206 (3-3.5)</th><th colspan="3">DUP-1</th><th colspan="3">SB-209 (4.5-5)</th><th colspan="3">SB-216 (4.5-5)</th></tr><tr><td>LAB ID:</td><th colspan="3">L2429996-01</th><td colspan="3">L2429996-08</td><th colspan="3">L2429996-02</th><th colspan="3">L2429996-03</th></tr><tr><td>COLLECTION DATE:</td><td colspan="3">5/30/2024</td><td colspan="3">5/30/2024</td><td colspan="3">5/30/2024</td><td colspan="3">5/30/2024</td></tr><tr><td>SAMPLE DEPTH:</td><td colspan="3">3-3.5</td><td colspan="3">3-3.5</td><td colspan="3">4.5-5</td><td colspan="3">4.5-5</td></tr><tr><td>SAMPLE MATRIX:</td><td colspan="3">SOIL</td><td colspan="3">SOIL</td><td colspan="3">SOIL</td><td colspan="3">SOIL</td></tr><tr><td>ANALYTE</td><td>(mg/kg)</td><td>(mg/kg)</td><td>(mg/kg)</td><td>(mg/kg)</td><td>Conc Q</td><td>RL</td><td>MDL Conc Q</td><td>RL</td><td>MDL Conc Q</td><td></td><td>RL</td><td>MDL Conc Q</td><td>RL</td><td>MDL</td><td></td></tr><tr><th>TOTAL METALS</th><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr><tr><td>Chromium, Trivalent*</td><td>190000</td><td>190000</td><td>190000</td><td>190000</td><td colspan="3">U</td><td colspan="3">18240</td><td colspan="3">11400  8100</td><td></td><td></td><td></td></tr><tr><td>Chromium, Total</td><td></td><td></td><td></td><td></td><td>27100</td><td>6.2</td><td colspan="2">0.595 27300</td><td>6.54</td><td>0.628 22700</td><td>7.5</td><td>0.72 23100</td><td>7.03</td><td>0.675</td><td></td></tr><tr><th>GENERAL CHEMISTRY</th><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr><tr><td>Chromium, Hexavalent</td><td>190</td><td>190000</td><td>180</td><td>140000</td><td>27900</td><td>1310</td><td>262 9060</td><td>1320</td><td>264 11300</td><td></td><td>1540</td><td>309 15000</td><td>1440</td><td>288</td><td></td></tr><tr><td>Solids, Total</td><td></td><td></td><td></td><td></td><td>61</td><td>0.1</td><td>NA  60.6</td><td>0.1</td><td>NA  51.8</td><td></td><td>0.1</td><td>NA  55.6</td><td>0.1</td><td>NA</td><td></td></tr></tbody></table>
 <p>SAMPLE ID:</p>
-<p>SB-504 (8-8.5)</p>
-<p>SB-501 (4.5-5)</p>
 <p>SB-502 (4.5-5)</p>
 <p>SB-503 (6-6.5)</p>
+<p>SB-501 (4.5-5)</p>
+<p>SB-504 (8-8.5)</p>
 <p>Pennsylvania Use</p>
 <p>Pennsylvania Non-Use</p>
 <p>LAB ID:</p>
@@ -125,16 +156,96 @@
 <li>RL - Reporting Limit</li>
 <li>MDL - Minimum Detection Limit</li>
 <li>GW - Groundwater</li>
-</ul>
-<ul>
-<li>calculated based on the difference between detected total chromium and hexavalent chromium concentrations</li>
-</ul>
-<ul>
+<li style="list-style-type: '* ';">calculated based on the difference between detected total chromium and hexavalent chromium concentrations</li>
 <li>U - Compound was undetected at the listed laboratory method detection limit.</li>
 </ul>
 <p>Concentrations reported in miligrams per kilogram (mg/kg)</p>
-<p><strong>Character Count:</strong> 9319</p>
-<hr />
-
+<p>Aquifers Non-Residential</p>
+<p>Generic Soil to</p>
+<p>Groundwater MSCs</p>
+<p>Criteria</p>
+<p>(mg/kg)</p>
+<p>190000</p>
+<p>190</p>
+<p>Aquifers Non-Residential</p>
+<p>Generic Soil to</p>
+<p>Groundwater MSCs</p>
+<p>Criteria</p>
+<p>(mg/kg)</p>
+<p>190000</p>
+<p>190000</p>
+<p>Residential Direct</p>
+<p>Contact Surface Soil (0-</p>
+<p>2') MSCs Criteria</p>
+<p>(mg/kg)</p>
+<p>190000</p>
+<p>180</p>
+<p>Residential Direct</p>
+<p>Contact Subsurface</p>
+<p>Soil (2-15')</p>
+<p>(mg/kg)</p>
+<p>190000</p>
+<p>140000</p>
+<p>L2429996-04</p>
+<p>5/30/2024</p>
+<p>4.5-5</p>
+<p>SOIL</p>
+<p>RL</p>
+<p>6.9</p>
+<p>1410</p>
+<p>0.1</p>
+<p>L2429996-05</p>
+<p>5/30/2024</p>
+<p>4.5-5</p>
+<p>SOIL</p>
+<p>RL</p>
+<p>6.89</p>
+<p>1380</p>
+<p>0.1</p>
+<p>L2429996-06</p>
+<p>5/30/2024</p>
+<p>6-6.5</p>
+<p>SOIL</p>
+<p>RL</p>
+<p>1.05</p>
+<p>1.08</p>
+<p>0.1</p>
+<p>L2429996-07</p>
+<p>5/30/2024</p>
+<p>8-8.5</p>
+<p>SOIL</p>
+<p>RL</p>
+<p>1.02</p>
+<p>1.06</p>
+<p>0.1</p>
+<p>Conc Q</p>
+<p>12490</p>
+<p>17500</p>
+<p>5010</p>
+<p>56.6</p>
+<p>MDL Conc Q</p>
+<p>15800</p>
+<p>0.662 28100</p>
+<p>283 12300</p>
+<p>NA</p>
+<p>57.8</p>
+<p>MDL Conc Q</p>
+<p>229.8</p>
+<p>0.662 230</p>
+<p>277 0.216 U</p>
+<p>NA</p>
+<p>74</p>
+<p>MDL Conc Q</p>
+<p>986.8</p>
+<p>0.1</p>
+<p>987</p>
+<p>0.22 0.213 U</p>
+<p>NA</p>
+<p>75.1</p>
+<p>MDL</p>
+<p>0.098</p>
+<p>0.213</p>
+<p>NA</p>
+</div>
 </body>
 </html>
