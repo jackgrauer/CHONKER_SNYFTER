@@ -1,0 +1,2571 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
+    <meta name="cache-buster" content="v1.8-bidirectional-2025-07-07-19-32">
+    <title>🐹🐭 CHONKER - v1.8 Bidirectional</title>
+    <!-- Quill.js Rich Text Editor (Free & Open Source) -->
+    <link href="https://cdn.jsdelivr.net/npm/quill@2.0.2/dist/quill.snow.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/quill@2.0.2/dist/quill.js"></script>
+    
+    <!-- PDF.js for better PDF rendering and selection detection -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <script>
+        // Simple approach - the global Tauri object should be available
+        window.addEventListener('DOMContentLoaded', () => {
+            console.log('DOM loaded, checking for Tauri...');
+            
+            // Check for global __TAURI__ object
+            const checkTauri = () => {
+                if (typeof window.__TAURI__ !== 'undefined') {
+                    console.log('Found __TAURI__:', window.__TAURI__);
+                    if (window.__TAURI__.invoke) {
+                        window.invoke = window.__TAURI__.invoke;
+                        console.log('Set window.invoke from __TAURI__.invoke');
+                    } else if (window.__TAURI__.core && window.__TAURI__.core.invoke) {
+                        window.invoke = window.__TAURI__.core.invoke;
+                        console.log('Set window.invoke from __TAURI__.core.invoke');
+                    }
+                } else {
+                    console.log('__TAURI__ not found, retrying...');
+                    setTimeout(checkTauri, 100);
+                }
+            };
+            
+            checkTauri();
+        });
+    </script>
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+        
+        @import url('https://fonts.googleapis.com/css2?family=Hack:wght@400;700&display=swap');
+        
+        /* Temporarily disabled to fix black screen
+        @font-face {
+            font-family: 'NotoColorEmojiLocal';
+            src: url('./NotoColorEmoji.ttf') format('truetype');
+            font-display: swap;
+        }
+        */
+        
+        body {
+            font-family: 'Hack', 'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', Consolas, 'Courier New', monospace;
+            margin: 0;
+            padding: 0;
+            background-color: #111111;
+            color: #e0e0e0;
+            height: 100vh;
+            overflow: hidden;
+        }
+        
+        .app-container {
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            background: #111111;
+        }
+        
+        /* Top Panel - Header (Auto-hiding) */
+        .top-panel {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            z-index: 1000;
+            background: rgba(10, 10, 10, 0.95);
+            backdrop-filter: blur(10px);
+            color: #e0e0e0;
+            padding: 12px 20px;
+            transform: translateY(-100%);
+            transition: transform 0.3s ease;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        
+        .top-panel:hover,
+        .top-panel.show {
+            transform: translateY(0);
+        }
+        
+        .header-content {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        
+        .app-title {
+            font-size: 20px;
+            font-weight: 600;
+            margin: 0;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .hamster-emoji {
+            font-size: 24px;
+            font-family: 'Apple Color Emoji', 'Segoe UI Emoji', sans-serif;
+            font-variation-settings: normal;
+            font-feature-settings: normal;
+        }
+        
+        /* 
+        FOR EXACT ANDROID 7.0 NOTO COLOR EMOJI:
+        
+        1. Download the Android 7.0 Noto Color Emoji font from:
+           https://github.com/googlefonts/noto-emoji/releases/tag/v2017-09-13-android-oreo
+           
+        2. Place NotoColorEmoji.ttf in your frontend/ folder
+        
+        3. Replace the font-family above with:
+           font-family: 'NotoColorEmojiLocal', 'Noto Color Emoji', 'Apple Color Emoji', sans-serif;
+           
+        4. Add this @font-face rule below:
+        
+        @font-face {
+            font-family: 'NotoColorEmojiLocal';
+            src: url('./NotoColorEmoji.ttf') format('truetype');
+            font-display: swap;
+        }
+        
+        This will give you the exact Android 7.0 hamster style!
+        */
+        
+        /* Mode toggle removed for minimal UI */
+        
+        /* Status Bar - Hidden by default */
+        .status-bar {
+            display: none;
+        }
+        
+        .status-message {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .progress-bar {
+            width: 200px;
+            height: 6px;
+            background: #333333;
+            border-radius: 3px;
+            overflow: hidden;
+            display: none;
+            border: 1px solid #00ff00;
+        }
+        
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #00ff00 0%, #ff1493 100%);
+            width: 0%;
+            transition: width 0.3s ease;
+            box-shadow: 0 0 10px rgba(0,255,0,0.5);
+        }
+        
+        /* Main Content Area */
+        .main-content {
+            display: flex;
+            flex: 1;
+            overflow: hidden;
+            height: 100vh;
+            width: 100vw;
+        }
+        
+        /* Screen 1 - CHONKER Mode: Vertical Split (PDF Viewer | Converted Output) */
+        .chonker-screen {
+            display: flex;
+            width: 100%;
+            height: 100%;
+        }
+        
+        .chonker-pane-a {
+            width: 50%;
+            background: #222222;
+            border-right: 1px solid #444444;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            min-height: 100vh;
+        }
+        
+        .chonker-pane-b {
+            width: 50%;
+            background: #222222;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            min-height: 100vh;
+        }
+        
+        /* Screen 2 - SNYFTER Mode: Vertical Split (Converted Output | Export/Database) */
+        .snyfter-screen {
+            display: flex;
+            width: 100%;
+            height: 100%;
+        }
+        
+        .snyfter-pane-a {
+            width: 60%;
+            background: #111111;
+            border-right: 1px solid #00ff00;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        
+        .snyfter-pane-b {
+            width: 40%;
+            background: #111111;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        
+        /* Left Panel */
+        .left-panel {
+            width: 400px;
+            background: #111111;
+            border-right: 1px solid #00ff00;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        
+        .panel-header {
+            display: none;
+        }
+        
+        .panel-content {
+            flex: 1;
+            padding: 20px;
+            overflow-y: auto;
+        }
+        
+        .form-group {
+            margin-bottom: 20px;
+            padding: 15px;
+            background: #222222;
+            border-radius: 8px;
+            border: 1px solid #00ff00;
+        }
+        
+        .form-group h3 {
+            margin: 0 0 15px 0;
+            font-size: 16px;
+            color: #ff1493;
+        }
+        
+        .file-selection {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        
+        .selected-file {
+            padding: 10px;
+            background: #333333;
+            border-radius: 4px;
+            font-family: 'Hack', monospace;
+            font-size: 14px;
+            word-break: break-all;
+            color: #00ff00;
+            border: 1px solid #00ff00;
+        }
+        
+        .processing-options {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        
+        .checkbox-group {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .checkbox-group label {
+            color: #00ff00;
+        }
+        
+        .checkbox-group input[type="checkbox"] {
+            accent-color: #ff1493;
+        }
+        
+        select {
+            background: #333333;
+            color: #00ff00;
+            border: 1px solid #00ff00;
+            padding: 8px;
+            border-radius: 4px;
+        }
+        
+        select:focus {
+            outline: none;
+            box-shadow: 0 0 10px rgba(0,255,0,0.5);
+        }
+        
+        .action-buttons {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        
+        .btn {
+            padding: 12px 20px;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+        }
+        
+        .btn-primary {
+            background: #00ff00;
+            color: #000000;
+            border: 1px solid #00ff00;
+        }
+        
+        .btn-primary:hover {
+            background: #00cc00;
+            box-shadow: 0 0 15px rgba(0,255,0,0.5);
+        }
+        
+        .btn-primary:disabled {
+            background: #444444;
+            color: #666666;
+            cursor: not-allowed;
+            border-color: #444444;
+        }
+        
+        .btn-secondary {
+            background: #ff1493;
+            color: #000000;
+            border: 1px solid #ff1493;
+        }
+        
+        .btn-secondary:hover {
+            background: #e6127a;
+            box-shadow: 0 0 15px rgba(255,20,147,0.5);
+        }
+        
+        .btn-success {
+            background: #00ff00;
+            color: #000000;
+            border: 1px solid #00ff00;
+        }
+        
+        .btn-success:hover {
+            background: #00cc00;
+            box-shadow: 0 0 15px rgba(0,255,0,0.5);
+        }
+        
+        .btn-warning {
+            background: #ff1493;
+            color: #000000;
+            border: 1px solid #ff1493;
+        }
+        
+        .btn-warning:hover {
+            background: #e6127a;
+            box-shadow: 0 0 15px rgba(255,20,147,0.5);
+        }
+        
+        /* Right Panel */
+        .right-panel {
+            flex: 1;
+            background: #111111;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        
+        .results-summary {
+            padding: 20px;
+            background: #000000;
+            border-bottom: 1px solid #00ff00;
+        }
+        
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-top: 15px;
+        }
+        
+        .stat-card {
+            background: #222222;
+            padding: 15px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,255,0,0.3);
+            text-align: center;
+            border: 1px solid #00ff00;
+        }
+        
+        .stat-value {
+            font-size: 24px;
+            font-weight: bold;
+            color: #ff1493;
+        }
+        
+        .stat-label {
+            font-size: 14px;
+            color: #00ff00;
+            margin-top: 5px;
+        }
+        
+        /* Table Display */
+        .table-container {
+            flex: 1;
+            padding: 20px;
+            overflow: auto;
+        }
+        
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+            background: #222222;
+            box-shadow: 0 2px 4px rgba(0,255,0,0.3);
+            border: 1px solid #00ff00;
+        }
+        
+        th, td {
+            border: 1px solid #00ff00;
+            padding: 12px 8px;
+            text-align: left;
+            color: #00ff00;
+        }
+        
+        th {
+            background: linear-gradient(135deg, #000000 0%, #ff1493 100%);
+            color: #00ff00;
+            font-weight: 600;
+            position: sticky;
+            top: 0;
+            z-index: 10;
+        }
+        
+        tr:nth-child(even) {
+            background-color: #333333;
+        }
+        
+        tr:hover {
+            background-color: #444444;
+            box-shadow: 0 0 10px rgba(0,255,0,0.3);
+        }
+        
+        .numeric {
+            text-align: right;
+            font-family: 'Hack', monospace;
+            font-weight: 500;
+            color: #ff1493;
+        }
+        
+        .table-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+        
+        .table-controls {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+        
+        /* Responsive */
+        @media (max-width: 768px) {
+            .main-content {
+                flex-direction: column;
+            }
+            
+            .left-panel {
+                width: 100%;
+                height: 300px;
+            }
+            
+            .stats-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+        
+        /* Hidden class */
+        .hidden {
+            display: none;
+        }
+        
+        /* Adversarial content warning */
+        .adversarial-warning {
+            background: #330000;
+            border: 1px solid #ff1493;
+            border-radius: 4px;
+            padding: 10px;
+            margin: 10px 0;
+            color: #ff1493;
+        }
+        
+        /* Loading animation */
+        .loading {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid #333333;
+            border-top: 3px solid #00ff00;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        @keyframes pulse {
+            0% { 
+                transform: scale(1);
+                box-shadow: 0 0 0 0 rgba(0, 255, 255, 0.7);
+            }
+            70% {
+                transform: scale(1.05);
+                box-shadow: 0 0 0 10px rgba(0, 255, 255, 0);
+            }
+            100% {
+                transform: scale(1);
+                box-shadow: 0 0 0 0 rgba(0, 255, 255, 0);
+            }
+        }
+        
+        /* PDF Viewer Styles - Dark Mode */
+        .pdf-viewer {
+            flex: 1;
+            background: #333333;
+            border: 1px solid #666666;
+            margin: 10px;
+            border-radius: 4px;
+            display: flex;
+            flex-direction: column;
+            overflow: auto;
+            position: relative;
+            min-height: 400px;
+            width: calc(100% - 20px);
+        }
+        
+        .pdf-click-zone {
+            transition: all 0.2s ease;
+            border-radius: 3px;
+            background: transparent !important;
+            border: none !important;
+            pointer-events: none;
+        }
+        
+        .pdf-click-zone:hover {
+            background: transparent !important;
+            border: none !important;
+        }
+        
+        .pdf-placeholder {
+            text-align: center;
+            padding: 40px;
+            color: #ffffff;
+            background: #333333;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 200px;
+        }
+        
+        /* Converted Output Display - Dark Mode */
+        .converted-output {
+            flex: 1;
+            padding: 15px;
+            overflow: auto;
+            background: #222222;
+            min-height: 400px;
+            width: 100%;
+            color: #ffffff;
+        }
+        
+        /* Export Controls */
+        .export-controls {
+            padding: 20px;
+            background: #111111;
+            overflow-y: auto;
+        }
+        
+        /* Glow effects - Subtle dark mode */
+        .app-title {
+            text-shadow: 0 0 10px rgba(255, 255, 255, 0.3);
+        }
+        
+        /* Scrollbar styling - Dark mode */
+        ::-webkit-scrollbar {
+            width: 6px;
+        }
+        
+        ::-webkit-scrollbar-track {
+            background: #1a1a1a;
+        }
+        
+        ::-webkit-scrollbar-thumb {
+            background: #404040;
+            border-radius: 3px;
+        }
+        
+        ::-webkit-scrollbar-thumb:hover {
+            background: #505050;
+        }
+        
+        /* Dark mode Quill editor styles */
+        .ql-toolbar {
+            background-color: #0f0f0f !important;
+            border: none !important;
+        }
+        
+        .ql-toolbar .ql-stroke {
+            stroke: #e0e0e0 !important;
+        }
+        
+        .ql-toolbar .ql-fill {
+            fill: #e0e0e0 !important;
+        }
+        
+        .ql-toolbar .ql-picker-label {
+            color: #e0e0e0 !important;
+        }
+        
+        .ql-editor {
+            background-color: #0f0f0f !important;
+            color: #e0e0e0 !important;
+            border: none !important;
+            padding: 12px !important;
+        }
+        
+        .ql-editor h1, .ql-editor h2, .ql-editor h3, .ql-editor h4, .ql-editor h5, .ql-editor h6 {
+            color: #f0f0f0 !important;
+        }
+        
+        .ql-editor table {
+            border-collapse: collapse;
+        }
+        
+        .ql-editor table td, .ql-editor table th {
+            border: 1px solid #404040 !important;
+            padding: 8px;
+            background-color: #0f0f0f !important;
+            color: #e0e0e0 !important;
+        }
+        
+        .ql-editor table th {
+            background-color: #1a1a1a !important;
+            font-weight: bold;
+        }
+        
+        /* Dark mode button styles */
+        .btn {
+            background: #333333;
+            color: #e0e0e0;
+            border: 1px solid #555555;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        
+        .btn:hover {
+            background: #444444;
+            border-color: #666666;
+        }
+        
+        .btn-primary {
+            background: #ff1493;
+            color: #ffffff;
+            border-color: #ff1493;
+        }
+        
+        .btn-primary:hover {
+            background: #e6127a;
+            border-color: #e6127a;
+        }
+        
+        .btn-secondary {
+            background: #666666;
+            color: #ffffff;
+            border-color: #666666;
+        }
+        
+        .btn-secondary:hover {
+            background: #777777;
+            border-color: #777777;
+        }
+        
+        /* Pink tab improvements */
+        .chunk-click-tab {
+            box-shadow: 0 2px 8px rgba(255, 20, 147, 0.4) !important;
+        }
+        
+        .html-chunk-indicator, .pdf-chunk-indicator {
+            box-shadow: 0 4px 15px rgba(255, 20, 147, 0.6) !important;
+        }
+    </style>
+</head>
+<body>
+    <div class="app-container">
+        <!-- Top Panel - Auto-hiding -->
+        <div class="top-panel" id="top-panel">
+            <div class="header-content">
+                <div class="app-title">
+                    <span class="hamster-emoji">🐹</span>
+                    <span>CHONKER</span>
+                </div>
+                <!-- 
+                EMOJI CUSTOMIZATION GUIDE:
+                Replace the emoji in the span above with any emoji you want:
+                
+                Animals: 🐹 🐭 🐰 🐻 🦔 🦫 🐿️ 🦘 🐺 🦝 🐾
+                Food: 🧀 🥜 🍄 🥕 🍞 🥨 🥐 🥖 🧈 🍯
+                Objects: 📄 📋 📊 💾 🔍 ⚙️ 🔧 ⚡ 💡 🚀
+                Symbols: ⭐ ✨ 💫 🔥 ⚡ 💎 🎯 🎪 🎨 🌟
+                
+                Just copy and paste any emoji between the span tags!
+                Example: <span class="hamster-emoji">🦔</span> for hedgehog
+                -->
+            </div>
+            </div>
+        </div>
+        
+        <!-- Main Content -->
+        <div class="main-content">
+            <!-- Screen 1: CHONKER Mode (PDF Viewer | Converted Output) -->
+            <div id="screen-1" class="chonker-screen">
+                <!-- Pane A: PDF Viewer -->
+                <div class="chonker-pane-a">
+                    <div class="pdf-viewer">
+                        <div class="pdf-placeholder" id="pdf-placeholder">
+                            <button class="btn btn-primary" onclick="selectFile()">Load Document</button>
+                            <div id="selected-file-display" class="selected-file hidden"></div>
+                            <button id="process-btn" class="btn btn-secondary" onclick="processDocument()" style="margin-top: 10px; display: none;">
+                                🐹 Process Document (Ctrl+P)
+                            </button>
+                        </div>
+                        <canvas id="pdf-canvas" style="display: none;"></canvas>
+                    </div>
+                </div>
+                
+                <!-- Pane B: Converted Output -->
+                <div class="chonker-pane-b">
+                    <div class="converted-output" id="converted-output">
+                        <div id="tables-content" style="color: #ffffff; background: #222222; min-height: 400px; padding: 20px; border: 1px solid #666666; border-radius: 4px; margin: 10px;">Ready for content...</div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Screen 2: SNYFTER Mode (Output | Export) -->
+            <div id="screen-2" class="snyfter-screen hidden">
+                <!-- Pane A: Converted Output -->
+                <div class="snyfter-pane-a">
+                    <div class="panel-header">OUTPUT</div>
+                    <div class="converted-output" id="snyfter-converted-output">
+                        <div id="snyfter-tables-content"></div>
+                    </div>
+                </div>
+                
+                <!-- Pane B: Export Controls -->
+                <div class="snyfter-pane-b">
+                    <div class="panel-header">EXPORT</div>
+                    <div class="export-controls">
+                        <!-- No buttons in SNYFTER mode -->
+                        <div style="padding: 20px; text-align: center; color: #888888;">
+                            <p>🐭 SNYFTER Export Area</p>
+                            <p style="font-size: 14px;">Export functionality will be available here</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Global state
+        let currentMode = 'chonker';
+        let selectedFile = null;
+        let processedData = null;
+        let exportBin = [];
+        
+        // Initialize keyboard shortcuts
+        document.addEventListener('keydown', function(e) {
+            // Tab key switches between screens
+            if (e.key === 'Tab') {
+                e.preventDefault();
+                switchScreen();
+                return;
+            }
+            
+            // Arrow keys for chunk navigation
+            if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+                if (currentChunks.length > 0) {
+                    e.preventDefault();
+                    navigateChunks(e.key === 'ArrowUp' ? -1 : 1);
+                    return;
+                }
+            }
+            
+            
+            if (e.ctrlKey || e.metaKey) {
+                switch(e.key) {
+                    case 'o':
+                        e.preventDefault();
+                        selectFile();
+                        break;
+                    case 'p':
+                        e.preventDefault();
+                        processDocument();
+                        break;
+                    case 's':
+                        e.preventDefault();
+                        saveToDatabase();
+                        break;
+                    case 'q':
+                        e.preventDefault();
+                        generateQCReport();
+                        break;
+                    case '1':
+                        e.preventDefault();
+                        switchMode('chonker');
+                        break;
+                    case '2':
+                        e.preventDefault();
+                        switchMode('snyfter');
+                        break;
+                    case 'h':
+                        e.preventDefault();
+                        clearAllHighlights();
+                        break;
+                }
+            }
+        });
+        
+        // Screen/Mode switching
+        function switchMode(mode) {
+            currentMode = mode;
+            switchToScreen(mode);
+            
+            // Update mode buttons
+            const chonkerBtn = document.querySelector('.mode-btn:first-child');
+            const snyfterBtn = document.querySelector('.mode-btn:last-child');
+            
+            if (mode === 'chonker') {
+                chonkerBtn.classList.add('active');
+                snyfterBtn.classList.remove('active');
+            } else {
+                chonkerBtn.classList.remove('active');
+                snyfterBtn.classList.add('active');
+            }
+        }
+        
+        // Switch between screens using Tab key
+        function switchScreen() {
+            if (currentMode === 'chonker') {
+                switchMode('snyfter');
+            } else {
+                switchMode('chonker');
+            }
+        }
+        
+        // Show the appropriate screen
+        function switchToScreen(mode) {
+            const screen1 = document.getElementById('screen-1');
+            const screen2 = document.getElementById('screen-2');
+            
+            if (mode === 'chonker') {
+                screen1.classList.remove('hidden');
+                screen2.classList.add('hidden');
+            } else {
+                screen1.classList.add('hidden');
+                screen2.classList.remove('hidden');
+                // Sync converted output from screen 1 to screen 2
+                syncConvertedOutput();
+            }
+        }
+        
+        // Sync converted output from Screen 1 Pane B to Screen 2 Pane A
+        function syncConvertedOutput() {
+            const chonkerOutput = document.getElementById('tables-content');
+            const snyfterOutput = document.getElementById('snyfter-tables-content');
+            
+            if (chonkerOutput && snyfterOutput) {
+                snyfterOutput.innerHTML = chonkerOutput.innerHTML;
+            }
+            
+            // Note: Stats are now integrated into the tables-content, so no separate sync needed
+            
+            // Update button states in SNYFTER mode (if elements exist)
+            const saveBtn = document.getElementById('save-db-btn-snyfter');
+            const qcBtn = document.getElementById('qc-btn-snyfter');
+            const originalSaveBtn = document.getElementById('save-db-btn');
+            const originalQcBtn = document.getElementById('qc-btn');
+            
+            if (saveBtn && originalSaveBtn) {
+                saveBtn.disabled = originalSaveBtn.disabled;
+            }
+            if (qcBtn && originalQcBtn) {
+                qcBtn.disabled = originalQcBtn.disabled;
+            }
+        }
+        
+        // Status and progress management
+        function updateStatus(message, type = 'info') {
+            const statusText = document.getElementById('status-text');
+            const loadingSpinner = document.getElementById('loading-spinner');
+            
+            statusText.textContent = message;
+            
+            if (type === 'loading') {
+                loadingSpinner.classList.remove('hidden');
+            } else {
+                loadingSpinner.classList.add('hidden');
+            }
+        }
+        
+        function showProgress(percentage) {
+            const progressBar = document.getElementById('progress-bar');
+            const progressFill = document.getElementById('progress-fill');
+            
+            if (percentage > 0) {
+                progressBar.style.display = 'block';
+                progressFill.style.width = percentage + '%';
+            } else {
+                progressBar.style.display = 'none';
+                progressFill.style.width = '0%';
+            }
+        }
+        
+        // File selection
+        async function selectFile() {
+            try {
+                console.log('Opening file dialog...');
+                if (!window.invoke) {
+                    console.error('Tauri API not ready');
+                    return;
+                }
+                
+                const result = await window.invoke('select_pdf_file');
+                console.log('File dialog result:', result);
+                
+                if (result && result.path) {
+                    selectedFile = result.path;
+                    console.log('Selected file:', selectedFile);
+                    
+                    const fileDisplay = document.getElementById('selected-file-display');
+                    fileDisplay.textContent = selectedFile.split('/').pop();
+                    fileDisplay.classList.remove('hidden');
+                    
+                    // Show the process button
+                    const processBtn = document.getElementById('process-btn');
+                    if (processBtn) {
+                        processBtn.style.display = 'block';
+                    }
+                    
+                    // Display the PDF
+                    await displayPDF(selectedFile);
+                } else {
+                    console.log('No file selected or invalid result:', result);
+                }
+            } catch (error) {
+                console.error('Error selecting file:', error);
+            }
+        }
+        
+        // Display PDF using native browser viewer with bidirectional selection
+        async function displayPDF(pdfPath) {
+            try {
+                console.log('🐹 Attempting to display PDF:', pdfPath);
+                
+                // Show loading message
+                const placeholder = document.getElementById('pdf-placeholder');
+                if (placeholder) {
+                    placeholder.innerHTML = '<div style="text-align: center; color: #00ff00;">Loading PDF...</div>';
+                }
+                
+                // Get the PDF URL from backend
+                const renderResult = await window.invoke('render_pdf_page', {
+                    pdfPath: pdfPath,
+                    pageNum: 0,
+                    zoom: 1.0
+                });
+                console.log('🐹 PDF render result:', renderResult);
+                
+                if (renderResult.success) {
+                    // Hide placeholder and canvas
+                    const canvas = document.getElementById('pdf-canvas');
+                    if (placeholder) placeholder.style.display = 'none';
+                    if (canvas) canvas.style.display = 'none';
+                    
+                    // Create iframe for PDF viewing with text selection
+                    const pdfViewer = document.createElement('iframe');
+                    pdfViewer.id = 'pdf-viewer';
+                    pdfViewer.src = renderResult.pdf_url;
+                    pdfViewer.style.cssText = `
+                        width: 100%;
+                        height: 100%;
+                        border: none;
+                        background: #ffffff;
+                    `;
+                    
+                    // Clear any existing PDF viewer
+                    const existingViewer = document.getElementById('pdf-viewer');
+                    if (existingViewer) {
+                        existingViewer.remove();
+                    }
+                    
+                    // Add the PDF viewer to the container
+                    const pdfContainer = document.querySelector('.pdf-viewer');
+                    if (pdfContainer) {
+                        pdfContainer.appendChild(pdfViewer);
+                        
+                        // Setup click zones for chunk highlighting
+                        setupPDFClickZones(pdfContainer);
+                    }
+                    
+                    pdfViewerReady = true;
+                    console.log('🐹 PDF loaded using browser viewer with selection support');
+                } else {
+                    console.error('🐹 Failed to get PDF URL:', renderResult.error);
+                    if (placeholder) {
+                        placeholder.style.display = 'block';
+                        placeholder.innerHTML = `<div style="text-align: center; color: #ff1493;">Failed to load PDF: ${renderResult.error}</div>`;
+                    }
+                }
+            } catch (error) {
+                console.error('🐹 Error displaying PDF:', error);
+                const placeholder = document.getElementById('pdf-placeholder');
+                if (placeholder) {
+                    placeholder.style.display = 'block';
+                    placeholder.innerHTML = `<div style="text-align: center; color: #ff1493;">Error: ${error.message || error.toString()}</div>`;
+                }
+            }
+        }
+        
+        // Setup PDF click zones for chunk navigation
+        function setupPDFClickZones(pdfContainer) {
+            console.log('🐹 Setting up PDF click zones for', currentChunks.length, 'chunks');
+            
+            // Create invisible click zones based on document height
+            const numChunks = currentChunks.length;
+            if (numChunks === 0) return;
+            
+            // Remove existing zones
+            document.querySelectorAll('.pdf-click-zone').forEach(el => el.remove());
+            
+            // Create zones for each chunk
+            currentChunks.forEach((chunk, index) => {
+                const zone = document.createElement('div');
+                zone.className = 'pdf-click-zone';
+                zone.dataset.chunkId = chunk.id;
+                zone.dataset.chunkIndex = chunk.index;
+                
+                // Use bounding box if available, otherwise divide by chunks
+                let zoneTop, zoneHeight;
+                if (chunk.bbox && chunk.bbox.top !== undefined) {
+                    // Use actual bounding box coordinates (normalized 0-1)
+                    zoneTop = chunk.bbox.top * 100;
+                    zoneHeight = (chunk.bbox.bottom - chunk.bbox.top) * 100;
+                } else {
+                    // Fallback: divide PDF height by number of chunks
+                    zoneHeight = 100 / numChunks;
+                    zoneTop = (index / numChunks) * 100;
+                }
+                
+                zone.style.cssText = `
+                    position: absolute;
+                    left: 5px;
+                    top: ${zoneTop}%;
+                    width: calc(100% - 10px);
+                    height: ${Math.max(zoneHeight, 8)}%;
+                    background: transparent;
+                    pointer-events: none;
+                    z-index: 5;
+                    border: none;
+                    border-radius: 4px;
+                    transition: all 0.3s ease;
+                `;
+                
+                // Create a small pink clickable tab
+                const clickTab = document.createElement('div');
+                clickTab.className = 'chunk-click-tab';
+                clickTab.style.cssText = `
+                    position: absolute;
+                    left: -2px;
+                    top: 50%;
+                    transform: translateY(-50%);
+                    width: 20px;
+                    height: 30px;
+                    background: rgba(255, 20, 147, 0.7);
+                    border-radius: 3px 8px 8px 3px;
+                    cursor: pointer;
+                    z-index: 15;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    font-size: 10px;
+                    font-weight: bold;
+                    color: black;
+                    transition: all 0.2s ease;
+                    box-shadow: 2px 0 5px rgba(255, 20, 147, 0.3);
+                `;
+                clickTab.textContent = chunk.index;
+                
+                // Add hover effects (simplified)
+                clickTab.addEventListener('mouseenter', () => {
+                    clickTab.style.background = 'rgba(255, 20, 147, 0.9)';
+                    clickTab.style.transform = 'translateY(-50%) scale(1.1)';
+                });
+                
+                clickTab.addEventListener('mouseleave', () => {
+                    clickTab.style.background = 'rgba(255, 20, 147, 0.7)';
+                    clickTab.style.transform = 'translateY(-50%) scale(1)';
+                });
+                
+                // Add click handler
+                clickTab.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    console.log('🐹 Clicked PDF tab for chunk:', chunk.id);
+                    console.log('🐹 Current chunks available:', currentChunks.length);
+                    console.log('🐹 Looking for HTML element with selector:', `[data-chunk-id="${chunk.id}"]`);
+                    
+                    // Check if HTML content is ready
+                    const htmlElement = document.querySelector(`[data-chunk-id="${chunk.id}"]`);
+                    if (htmlElement) {
+                        console.log('🐹 Found HTML element, highlighting...');
+                        highlightChunk(chunk.id);
+                        showHTMLChunkIndicator(chunk);
+                    } else {
+                        console.warn('🐹 HTML element not found for chunk:', chunk.id);
+                        console.log('🐹 Available HTML chunks:', 
+                            Array.from(document.querySelectorAll('[data-chunk-id]')).map(el => el.getAttribute('data-chunk-id')));
+                        
+                        // Try to highlight anyway
+                        highlightChunk(chunk.id);
+                    }
+                });
+                
+                zone.appendChild(clickTab);
+                pdfContainer.appendChild(zone);
+            });
+            
+            console.log('🐹 Created', numChunks, 'PDF click zones with tabs');
+        }
+        
+        // Tooltips removed - keeping interface clean
+        
+        // Show HTML chunk indicator in Pane B
+        function showHTMLChunkIndicator(chunk) {
+            console.log('🐹 Showing HTML pink indicator for chunk:', chunk.id);
+            
+            // Remove existing indicators
+            document.querySelectorAll('.html-chunk-indicator').forEach(el => el.remove());
+            
+            // Find the corresponding HTML element
+            const htmlChunkElement = document.querySelector(`[data-chunk-id="${chunk.id}"]`);
+            if (!htmlChunkElement) {
+                console.warn('🐹 HTML chunk element not found for:', chunk.id);
+                return;
+            }
+            
+            // Create floating pink indicator
+            const indicator = document.createElement('div');
+            indicator.className = 'html-chunk-indicator';
+            indicator.style.cssText = `
+                position: absolute;
+                left: -15px;
+                top: 10px;
+                width: 30px;
+                height: 30px;
+                background: rgba(255, 20, 147, 0.9);
+                border: 2px solid #ff1493;
+                border-radius: 50%;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                font-size: 12px;
+                font-weight: bold;
+                color: white;
+                z-index: 1000;
+                box-shadow: 0 4px 15px rgba(255, 20, 147, 0.5);
+                animation: pulse 2s infinite;
+            `;
+            indicator.textContent = chunk.index;
+            
+            // Position relative to the chunk element
+            htmlChunkElement.style.position = 'relative';
+            htmlChunkElement.appendChild(indicator);
+            
+            // Auto-remove after 5 seconds
+            setTimeout(() => {
+                indicator.remove();
+            }, 5000);
+        }
+        
+        // Show PDF chunk indicator when clicking HTML elements
+        function showPDFChunkIndicator(chunk) {
+            console.log('🐹 Showing PDF pink indicator for chunk:', chunk.id);
+            
+            // Remove existing PDF indicators
+            document.querySelectorAll('.pdf-chunk-indicator').forEach(el => el.remove());
+            
+            // Find the corresponding PDF zone or tab
+            const pdfZone = document.querySelector(`[data-chunk-id="${chunk.id}"]`);
+            if (!pdfZone) {
+                console.warn('🐹 PDF zone not found for chunk:', chunk.id);
+                return;
+            }
+            
+            // Create floating indicator on the PDF (right side)
+            const indicator = document.createElement('div');
+            indicator.className = 'pdf-chunk-indicator';
+            indicator.style.cssText = `
+                position: absolute;
+                right: -15px;
+                top: 10px;
+                width: 30px;
+                height: 30px;
+                background: rgba(255, 20, 147, 0.9);
+                border: 2px solid #ff1493;
+                border-radius: 50%;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                font-size: 12px;
+                font-weight: bold;
+                color: white;
+                z-index: 1000;
+                box-shadow: 0 4px 15px rgba(255, 20, 147, 0.5);
+                animation: pulse 2s infinite;
+            `;
+            indicator.textContent = chunk.index;
+            
+            pdfZone.appendChild(indicator);
+            
+            // Auto-remove after 5 seconds
+            setTimeout(() => {
+                indicator.remove();
+            }, 5000);
+        }
+        
+        // Document processing
+        async function processDocument() {
+            if (!selectedFile) {
+                console.log('No file selected');
+                const outputDiv = document.getElementById('tables-content');
+                if (outputDiv) {
+                    outputDiv.innerHTML = '<div style="padding: 20px; text-align: center; color: #ff1493;">No file selected. Please select a PDF first.</div>';
+                }
+                return;
+            }
+            
+            console.log('🐹 Starting document processing...');
+            console.log('Selected file:', selectedFile);
+            
+            // Show processing feedback
+            const outputDiv = document.getElementById('tables-content');
+            if (outputDiv) {
+                outputDiv.innerHTML = '<div style="padding: 20px; text-align: center; color: #ff1493;">Processing document... 🐹</div>';
+            }
+            
+            try {
+                if (!window.invoke) {
+                    throw new Error('Tauri API not available');
+                }
+                
+                const options = {
+                    ocr_enabled: true,
+                    formula_recognition: true,
+                    table_detection: true,
+                    language: 'English'
+                };
+                
+                console.log('Invoking process_document with:', { filePath: selectedFile, options });
+                
+                const result = await window.invoke('process_document', {
+                    filePath: selectedFile,
+                    options: options
+                });
+                
+                console.log('Processing result:', result);
+                
+                if (result && result.success) {
+                    processedData = result.data;
+                    displayProcessingResults(result.data);
+                    syncConvertedOutput();
+                    console.log('✅ Processing completed successfully');
+                } else {
+                    const errorMsg = result ? result.error : 'Unknown error';
+                    console.error('❌ Processing failed:', errorMsg);
+                    if (outputDiv) {
+                        outputDiv.innerHTML = `<div style="padding: 20px; text-align: center; color: #ff1493;">Processing failed: ${errorMsg}</div>`;
+                    }
+                }
+            } catch (error) {
+                console.error('❌ Error processing document:', error);
+                console.error('Error details:', {
+                    message: error.message,
+                    stack: error.stack,
+                    name: error.name,
+                    type: typeof error
+                });
+                const errorMsg = error ? (error.message || error.toString()) : 'Unknown error';
+                if (outputDiv) {
+                    outputDiv.innerHTML = `<div style="padding: 20px; text-align: center; color: #ff1493;">Error: ${errorMsg}</div>`;
+                }
+            }
+        }
+        
+        // Global variable to store editor instance
+        let editorInstance = null;
+        
+        // Global variables for bidirectional selection
+        let currentChunks = [];
+        let selectedChunkId = null;
+        let pdfViewerReady = false;
+        let pdfDocument = null;
+        let currentPdfPage = 1;
+        let pdfCanvas = null;
+        let pdfCanvasContext = null;
+        let isSelecting = false;
+        let selectionStart = null;
+        let selectionEnd = null;
+        
+        // Display processing results with Quill.js integration
+        function displayProcessingResults(data) {
+            console.log('🐹 displayProcessingResults called with data:', data);
+            console.log('🐹 Frontend version: v1.8 - Bidirectional Selection with Debug');
+            
+            // Store chunks data for bidirectional selection
+            if (data.chunks) {
+                currentChunks = data.chunks;
+                console.log('🐹 Stored', currentChunks.length, 'chunks for bidirectional selection');
+            }
+            
+            const tablesContent = document.getElementById('tables-content');
+            if (!tablesContent) {
+                console.error('tables-content element not found');
+                return;
+            }
+            
+            // Destroy existing Quill instance if it exists
+            if (editorInstance) {
+                try {
+                    editorInstance = null;
+                } catch (error) {
+                    console.log('Error removing existing editor:', error);
+                }
+            }
+            
+            // Clear the container and set it up for Quill
+            tablesContent.innerHTML = '';
+            
+            // Create editor container - maximized
+            const editorContainer = document.createElement('div');
+            editorContainer.style.cssText = `
+                width: 100%;
+                height: calc(100vh - 20px);
+                background: #0f0f0f;
+                margin: 0;
+                border: none;
+                border-radius: 0;
+                padding: 0;
+            `;
+            
+            // Create Quill editor container - maximized
+            const quillContainer = document.createElement('div');
+            quillContainer.id = 'quill-editor';
+            quillContainer.style.cssText = 'width: 100%; height: calc(100vh - 60px); background: #0f0f0f; color: #e0e0e0; border: none;';
+            
+            // Set initial content based on processed data
+            let initialContent = '';
+            if (data.formatted_html) {
+                console.log('🐹 Using Rust-powered HTML renderer output');
+                console.log('🐹 formatted_html length:', data.formatted_html.length);
+                console.log('🐹 formatted_html preview:', data.formatted_html.substring(0, 200) + '...');
+                initialContent = data.formatted_html;
+            } else {
+                console.log('🐹 Creating basic table display for editor');
+                initialContent = createBasicHTMLFromData(data);
+            }
+            
+            console.log('🐹 Initial content length:', initialContent.length);
+            console.log('🐹 Initial content preview:', initialContent.substring(0, 200) + '...');
+            
+            editorContainer.appendChild(quillContainer);
+            tablesContent.appendChild(editorContainer);
+            
+            // Initialize Quill.js editor
+            try {
+                // Check if Quill is available
+                if (typeof Quill === 'undefined') {
+                    throw new Error('Quill.js not loaded');
+                }
+                
+                // Initialize Quill with rich editing features and custom formats
+                const Inline = Quill.import('blots/inline');
+                const Block = Quill.import('blots/block');
+                
+                // Create custom blot that preserves data-chunk-id
+                class ChunkBlot extends Block {
+                    static create(chunkId) {
+                        let node = super.create();
+                        node.setAttribute('data-chunk-id', chunkId);
+                        node.setAttribute('class', 'chunk-content');
+                        return node;
+                    }
+                    
+                    static formats(node) {
+                        return node.getAttribute('data-chunk-id');
+                    }
+                }
+                ChunkBlot.blotName = 'chunk';
+                ChunkBlot.tagName = 'div';
+                Quill.register(ChunkBlot);
+                
+                const quillEditor = new Quill('#quill-editor', {
+                    theme: 'snow',
+                    modules: {
+                        toolbar: [
+                            [{ 'header': [1, 2, 3, 4, 5, 6, false] }],
+                            ['bold', 'italic', 'underline', 'strike'],
+                            [{ 'color': [] }, { 'background': [] }],
+                            [{ 'font': [] }],
+                            [{ 'align': [] }],
+                            ['blockquote', 'code-block'],
+                            [{ 'list': 'ordered'}, { 'list': 'bullet' }],
+                            [{ 'indent': '-1'}, { 'indent': '+1' }],
+                            ['link', 'image', 'video'],
+                            ['clean']
+                        ]
+                    },
+                    placeholder: 'Edit your processed document content here...',
+                    readOnly: false
+                });
+                
+                // Apply dark mode styles to Quill
+                const quillRoot = quillEditor.root;
+                quillRoot.style.backgroundColor = '#0f0f0f';
+                quillRoot.style.color = '#e0e0e0';
+                quillRoot.style.border = 'none';
+                
+                // Style the toolbar
+                const toolbar = document.querySelector('.ql-toolbar');
+                if (toolbar) {
+                    toolbar.style.backgroundColor = '#0f0f0f';
+                    toolbar.style.border = 'none';
+                    toolbar.style.color = '#e0e0e0';
+                }
+                
+                // Set initial content using Quill's clipboard API for HTML
+                console.log('🐹 Setting Quill editor content...');
+                
+                // Method 1: Try using clipboard.dangerouslyPasteHTML
+                try {
+                    quillEditor.clipboard.dangerouslyPasteHTML(initialContent);
+                    console.log('🐹 Content set using dangerouslyPasteHTML');
+                } catch (error) {
+                    console.log('🐹 dangerouslyPasteHTML failed, trying root.innerHTML:', error);
+                    // Fallback to direct innerHTML setting
+                    quillEditor.root.innerHTML = initialContent;
+                }
+                
+                // Verify content was set
+                console.log('🐹 Editor content after setting:', quillEditor.root.innerHTML.substring(0, 200) + '...');
+                console.log('🐹 Editor text length:', quillEditor.getText().length);
+                
+                // Manually add chunk IDs to content after Quill processes it
+                setTimeout(() => {
+                    addChunkIdsToQuillContent(quillEditor);
+                }, 100);
+                
+                // Store editor instance
+                editorInstance = quillEditor;
+                
+                console.log('🐹 Quill.js editor initialized successfully');
+                
+                // Setup bidirectional selection after editor is ready
+                setTimeout(() => {
+                    setupBidirectionalSelection();
+                    
+                    // Setup PDF click zones after HTML content is rendered
+                    setTimeout(() => {
+                        const pdfContainer = document.querySelector('.pdf-viewer');
+                        if (pdfContainer && currentChunks.length > 0) {
+                            console.log('🐹 Setting up PDF click zones after HTML is ready');
+                            setupPDFClickZones(pdfContainer);
+                        }
+                    }, 200);
+                }, 500);
+                
+            } catch (error) {
+                console.error('🐹 Quill.js initialization failed:', error);
+                
+                // Show fallback with content preview
+                editorContainer.innerHTML = `
+                    <div style="
+                        padding: 20px;
+                        background: linear-gradient(135deg, #00ff00 0%, #008800 100%);
+                        color: black;
+                        border-radius: 6px;
+                        text-align: center;
+                        font-family: 'Hack', monospace;
+                    ">
+                        <h3>⚠️ Editor Loading Issue</h3>
+                        <p>Rich text editor failed to load. Showing content preview:</p>
+                        
+                        <div style="margin-top: 20px; padding: 15px; background: rgba(255,255,255,0.9); border-radius: 4px;">
+                            <h4>📊 Processed Content (Read-Only)</h4>
+                            <div style="background: white; color: black; padding: 15px; border-radius: 4px; max-height: 300px; overflow-y: auto; text-align: left;">
+                                ${initialContent}
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }
+            
+            // Add control buttons for the editor - compact
+            const controlsDiv = document.createElement('div');
+            controlsDiv.style.cssText = `
+                position: fixed;
+                bottom: 10px;
+                right: 10px;
+                z-index: 100;
+                background: rgba(10, 10, 10, 0.9);
+                backdrop-filter: blur(10px);
+                border: 1px solid rgba(255, 255, 255, 0.1);
+                border-radius: 6px;
+                padding: 8px;
+                display: flex;
+                gap: 8px;
+                flex-wrap: wrap;
+                opacity: 0.7;
+                transition: opacity 0.3s ease;
+            `;
+            
+            // Show on hover
+            controlsDiv.addEventListener('mouseenter', () => {
+                controlsDiv.style.opacity = '1';
+            });
+            controlsDiv.addEventListener('mouseleave', () => {
+                controlsDiv.style.opacity = '0.7';
+            });
+            
+            const buttonSection = document.createElement('div');
+            buttonSection.style.cssText = 'display: flex; gap: 8px; flex-wrap: wrap;';
+            
+            // Create compact control buttons
+            const buttons = [
+                { id: 'export-html-btn', text: '📤', title: 'Export HTML', action: exportEditedHTML },
+                { id: 'save-content-btn', text: '💾', title: 'Save', action: saveEditedContent },
+                { id: 'reset-content-btn', text: '🔄', title: 'Reset', action: resetEditorContent, class: 'btn-warning' },
+                { id: 'clear-highlights-btn', text: '🎯', title: 'Clear Highlights', action: clearAllHighlights }
+            ];
+            
+            buttons.forEach(btnConfig => {
+                const button = document.createElement('button');
+                button.id = btnConfig.id;
+                button.className = `btn ${btnConfig.class || 'btn-secondary'}`;
+                button.style.cssText = 'padding: 6px 10px; font-size: 14px; min-width: 32px;';
+                button.textContent = btnConfig.text;
+                button.title = btnConfig.title;
+                button.addEventListener('click', btnConfig.action);
+                buttonSection.appendChild(button);
+            });
+            
+            controlsDiv.appendChild(buttonSection);
+            document.body.appendChild(controlsDiv);
+            
+            // Store original data for reset functionality
+            window.originalProcessedData = data;
+            
+            // Sync to SNYFTER screen
+            syncConvertedOutput();
+        }
+        
+        // Helper function to create basic HTML from processed data
+        function createBasicHTMLFromData(data) {
+            let html = '<h2>Processed Document Content</h2>';
+            
+            if (data.tables && data.tables.length > 0) {
+                html += '<h3>Extracted Tables</h3>';
+                data.tables.forEach((table, index) => {
+                    const headers = table.headers || [];
+                    const rows = table.rows || [];
+                    
+                    html += `
+                        <h4>Table ${index + 1}</h4>
+                        <table border="1" style="border-collapse: collapse; width: 100%; margin-bottom: 20px;">
+                            <thead>
+                                <tr>
+                                    ${headers.map(header => `<th style="background: #f0f0f0; padding: 8px;">${header}</th>`).join('')}
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${rows.map(row => `
+                                    <tr>
+                                        ${row.map(cell => `<td style="padding: 8px; border: 1px solid #ccc;">${cell}</td>`).join('')}
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    `;
+                });
+            } else {
+                html += '<p>No tables found in the processed document.</p>';
+            }
+            
+            // Add processing stats
+            html += `
+                <h3>Processing Summary</h3>
+                <ul>
+                    <li>Tables Found: ${data.tables_found || 0}</li>
+                    <li>Chunks Extracted: ${data.chunks_extracted || 0}</li>
+                    <li>Formulas Detected: ${data.formulas_detected || 0}</li>
+                    <li>Pages Processed: ${data.pages_processed || 0}</li>
+                    <li>Processing Time: ${data.processing_time_ms || 0}ms</li>
+                </ul>
+            `;
+            
+            return html;
+        }
+        
+        // Get content from Quill editor
+        function getEditorContent() {
+            if (editorInstance) {
+                const content = editorInstance.root.innerHTML;
+                console.log('🐹 Editor content retrieved:', content);
+                alert('Editor content logged to console. Check browser developer tools.');
+                return content;
+            } else {
+                alert('Editor not initialized');
+                return null;
+            }
+        }
+        
+        // Save edited content
+        function saveEditedContent() {
+            if (editorInstance) {
+                const editedContent = editorInstance.root.innerHTML;
+                console.log('🐹 Saving edited content...');
+                
+                // Update the processed data with edited content
+                if (window.originalProcessedData) {
+                    window.originalProcessedData.formatted_html = editedContent;
+                    window.originalProcessedData.edited = true;
+                    window.originalProcessedData.edit_timestamp = new Date().toISOString();
+                }
+                
+                alert('Edited content saved to memory. Use "Save Edited Version" to persist to database.');
+            } else {
+                alert('Editor not initialized');
+            }
+        }
+        
+        // Export edited HTML
+        function exportEditedHTML() {
+            if (editorInstance) {
+                const editedContent = editorInstance.root.innerHTML;
+                
+                const completeHTML = `<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>🐹 CHONKER Edited Document</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 40px; }
+        table { border-collapse: collapse; width: 100%; margin: 20px 0; }
+        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+        th { background-color: #f2f2f2; }
+    </style>
+</head>
+<body>
+${editedContent}
+<hr>
+<p><em>Edited with CHONKER Quill.js Editor on ${new Date().toLocaleString()}</em></p>
+</body>
+</html>`;
+                
+                const blob = new Blob([completeHTML], { type: 'text/html' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `chonker-edited-${Date.now()}.html`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+                
+                console.log('🐹 Exported edited HTML content');
+                alert('Edited HTML exported successfully!');
+            } else {
+                alert('Editor not initialized');
+            }
+        }
+        
+        // Manually add chunk IDs to Quill content
+        function addChunkIdsToQuillContent(quillEditor) {
+            console.log('🐹 Adding chunk IDs to Quill content...');
+            
+            if (!currentChunks || currentChunks.length === 0) {
+                console.log('🐹 No chunks available to add IDs');
+                return;
+            }
+            
+            const editorRoot = quillEditor.root;
+            
+            // Look for specific patterns that correspond to our chunks
+            const paragraphs = editorRoot.querySelectorAll('p, h1, h2, h3, h4, h5, h6, table, div');
+            
+            console.log('🐹 Found', paragraphs.length, 'potential chunk elements in Quill');
+            
+            // Simple approach: assign chunk IDs to major content blocks
+            let chunkIndex = 0;
+            paragraphs.forEach((element, index) => {
+                const text = element.textContent.trim();
+                
+                // Skip empty elements
+                if (text.length < 10) return;
+                
+                // Assign chunk ID if we haven't exceeded our chunks
+                if (chunkIndex < currentChunks.length) {
+                    const chunkId = currentChunks[chunkIndex].id;
+                    element.setAttribute('data-chunk-id', chunkId);
+                    element.classList.add('chunk-content');
+                    console.log(`🐹 Assigned ${chunkId} to element:`, text.substring(0, 50) + '...');
+                    
+                    // Move to next chunk for substantial content
+                    if (text.length > 50 || element.tagName === 'TABLE') {
+                        chunkIndex++;
+                    }
+                }
+            });
+            
+            console.log('🐹 Finished adding chunk IDs. Assigned', chunkIndex, 'chunks');
+        }
+        
+        // Setup bidirectional selection between PDF and HTML content
+        function setupBidirectionalSelection() {
+            console.log('🐹 Setting up bidirectional selection...');
+            
+            // Setup click handlers for HTML content chunks
+            const chunkElements = document.querySelectorAll('[data-chunk-id]');
+            console.log('🐹 Found', chunkElements.length, 'chunk elements');
+            
+            chunkElements.forEach(element => {
+                element.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    const chunkId = this.getAttribute('data-chunk-id');
+                    console.log('🐹 Clicked HTML chunk:', chunkId);
+                    highlightChunk(chunkId);
+                    
+                    // Find corresponding chunk data
+                    const chunkData = currentChunks.find(chunk => chunk.id === chunkId);
+                    if (chunkData) {
+                        console.log('🐹 Chunk data:', chunkData);
+                        // Show PDF indicator for corresponding chunk
+                        showPDFChunkIndicator(chunkData);
+                    }
+                });
+                
+                element.addEventListener('mouseenter', function() {
+                    if (this.getAttribute('data-chunk-id') !== selectedChunkId) {
+                        this.style.background = 'rgba(0, 255, 0, 0.1)';
+                    }
+                });
+                
+                element.addEventListener('mouseleave', function() {
+                    if (this.getAttribute('data-chunk-id') !== selectedChunkId) {
+                        this.style.background = '';
+                    }
+                });
+            });
+        }
+        
+        // Highlight a chunk in the HTML content
+        function highlightChunk(chunkId) {
+            console.log('🐹 Highlighting chunk:', chunkId);
+            
+            // Clear previous highlights
+            document.querySelectorAll('.chunk-highlighted').forEach(el => {
+                el.classList.remove('chunk-highlighted');
+            });
+            
+            // First try to find the chunk in the Quill editor content
+            const chunkElement = document.querySelector(`[data-chunk-id="${chunkId}"]`);
+            if (chunkElement) {
+                chunkElement.classList.add('chunk-highlighted');
+                selectedChunkId = chunkId;
+                
+                // Scroll to chunk if needed
+                chunkElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                
+                console.log('🐹 Successfully highlighted chunk:', chunkId);
+                return true;
+            } else {
+                console.warn('🐹 Chunk element not found:', chunkId);
+                console.log('🐹 Available chunk elements:', 
+                    Array.from(document.querySelectorAll('[data-chunk-id]')).map(el => el.getAttribute('data-chunk-id')));
+                
+                // Still set as selected for other functions
+                selectedChunkId = chunkId;
+                return false;
+            }
+        }
+        
+        // Highlight corresponding area in PDF
+        function highlightPDFChunk(chunkData) {
+            console.log('🐹 Highlighting PDF chunk:', chunkData);
+            
+            // This is a placeholder - in a real implementation, you would:
+            // 1. Use the bbox (bounding box) data to highlight the PDF area
+            // 2. Navigate to the correct page if needed
+            // 3. Draw an overlay or highlight on the PDF viewer
+            
+            const pdfViewer = document.getElementById('pdf-viewer');
+            if (pdfViewer && chunkData.bbox) {
+                console.log('🐹 PDF bbox data:', chunkData.bbox);
+                // TODO: Implement PDF highlighting using bbox coordinates
+                showPDFHighlightOverlay(chunkData);
+            }
+        }
+        
+        
+        
+        // Show PDF highlight overlay (placeholder)
+        function showPDFHighlightOverlay(chunkData) {
+            console.log('🐹 Showing PDF highlight overlay for chunk:', chunkData.id);
+            
+            // Remove existing overlays
+            document.querySelectorAll('.pdf-highlight-overlay').forEach(el => el.remove());
+            
+            // Create overlay (this is a simplified visual indication)
+            const pdfContainer = document.querySelector('.pdf-viewer');
+            if (pdfContainer && chunkData.bbox) {
+                const overlay = document.createElement('div');
+                overlay.className = 'pdf-highlight-overlay';
+                overlay.style.cssText = `
+                    position: absolute;
+                    top: 10px;
+                    right: 10px;
+                    background: rgba(0, 255, 255, 0.8);
+                    color: black;
+                    padding: 5px 10px;
+                    border-radius: 4px;
+                    font-size: 12px;
+                    z-index: 1000;
+                    pointer-events: none;
+                `;
+                overlay.textContent = `Chunk ${chunkData.index}: ${chunkData.content_type}`;
+                
+                pdfContainer.style.position = 'relative';
+                pdfContainer.appendChild(overlay);
+                
+                // Auto-remove after 3 seconds
+                setTimeout(() => {
+                    overlay.remove();
+                }, 3000);
+            }
+        }
+        
+        // Navigate through chunks with arrow keys
+        function navigateChunks(direction) {
+            if (currentChunks.length === 0) {
+                console.log('🐹 No chunks available for navigation');
+                return;
+            }
+            
+            let currentIndex = -1;
+            if (selectedChunkId) {
+                currentIndex = currentChunks.findIndex(chunk => chunk.id === selectedChunkId);
+            }
+            
+            let newIndex = currentIndex + direction;
+            
+            // Wrap around
+            if (newIndex >= currentChunks.length) {
+                newIndex = 0;
+            } else if (newIndex < 0) {
+                newIndex = currentChunks.length - 1;
+            }
+            
+            const newChunk = currentChunks[newIndex];
+            console.log('🐹 Navigating to chunk:', newChunk.id, 'direction:', direction);
+            highlightChunk(newChunk.id);
+            highlightPDFChunk(newChunk);
+        }
+        
+        // Clear all highlights
+        function clearAllHighlights() {
+            document.querySelectorAll('.chunk-highlighted').forEach(el => {
+                el.classList.remove('chunk-highlighted');
+            });
+            document.querySelectorAll('.pdf-highlight-overlay').forEach(el => el.remove());
+            document.querySelectorAll('.html-chunk-indicator').forEach(el => el.remove());
+            document.querySelectorAll('.pdf-chunk-indicator').forEach(el => el.remove());
+            // No tooltips to hide
+            
+            // Reset PDF zones to default state
+            document.querySelectorAll('.pdf-click-zone').forEach(zone => {
+                zone.style.background = 'transparent';
+                zone.style.border = 'none';
+            });
+            
+            selectedChunkId = null;
+            console.log('🐹 Cleared all highlights and indicators');
+        }
+        
+        // Debug function to check chunk availability - GLOBAL SCOPE
+        window.debugChunks = function() {
+            console.log('🔍 ========== DEBUG CHUNKS START ==========');
+            console.log('🔍 Current chunks array:', currentChunks);
+            console.log('🔍 Number of chunks:', currentChunks ? currentChunks.length : 'undefined');
+            
+            try {
+                const allDataChunkElements = document.querySelectorAll('[data-chunk-id]');
+                console.log('🔍 Found HTML elements with data-chunk-id:', allDataChunkElements.length);
+                
+                allDataChunkElements.forEach((el, index) => {
+                    const chunkId = el.getAttribute('data-chunk-id');
+                    console.log(`🔍 Element ${index + 1}: ${chunkId}`, el);
+                });
+                
+                const quillContent = document.querySelector('#quill-editor .ql-editor');
+                if (quillContent) {
+                    const quillChunkElements = quillContent.querySelectorAll('[data-chunk-id]');
+                    console.log('🔍 Chunk elements inside Quill editor:', quillChunkElements.length);
+                } else {
+                    console.log('🔍 Quill editor content not found');
+                }
+                
+                console.log('🔍 ========== DEBUG CHUNKS END ==========');
+                alert(`Debug completed! Check console for details.\nChunks: ${currentChunks ? currentChunks.length : 0}\nHTML elements: ${allDataChunkElements.length}`);
+            } catch (error) {
+                console.error('🔍 Debug error:', error);
+                alert('Debug function error: ' + error.message);
+            }
+        };
+        
+        // Reset editor to original content
+        function resetEditorContent() {
+            if (editorInstance && window.originalProcessedData) {
+                let originalContent = '';
+                if (window.originalProcessedData.formatted_html) {
+                    originalContent = window.originalProcessedData.formatted_html;
+                } else {
+                    originalContent = createBasicHTMLFromData(window.originalProcessedData);
+                }
+                
+                editorInstance.root.innerHTML = originalContent;
+                console.log('🐹 Editor content reset to original');
+                alert('Editor content reset to original processed output.');
+            } else {
+                alert('Cannot reset - no original data available or editor not initialized');
+            }
+        }
+        
+        
+        // Helper function to detect numeric values
+        function isNumeric(value) {
+            return !isNaN(parseFloat(value)) && isFinite(value);
+        }
+        
+        // Save to database
+        async function saveToDatabase() {
+            if (!processedData) {
+                updateStatus('No processed data to save.');
+                return;
+            }
+            
+            try {
+                updateStatus('🐹 Saving to database...', 'loading');
+                
+                const result = await window.invoke('save_to_database', {
+                    data: processedData
+                });
+                
+                if (result.success) {
+                    updateStatus('Data saved to database successfully!');
+                } else {
+                    updateStatus('Save failed: ' + result.error);
+                }
+            } catch (error) {
+                console.error('Error saving to database:', error);
+                updateStatus('Save error: ' + error.message);
+            }
+        }
+        
+        // Generate QC Report
+        async function generateQCReport() {
+            if (!processedData) {
+                updateStatus('No processed data for QC report.');
+                return;
+            }
+            
+            try {
+                updateStatus('🐹 Generating QC report with Qwen cleaning... (This may take 30+ seconds)', 'loading');
+                showProgress(20);
+                
+                const result = await window.invoke('generate_qc_report', {
+                    data: processedData
+                });
+                
+                showProgress(80);
+                
+                if (result.success) {
+                    updateStatus('QC report generated successfully!');
+                    
+                    // Display adversarial content warnings if any
+                    if (result.adversarial_content) {
+                        displayAdversarialWarnings(result.adversarial_content);
+                    }
+                } else {
+                    updateStatus('QC report generation failed: ' + result.error);
+                }
+                
+                showProgress(100);
+                setTimeout(() => showProgress(0), 2000);
+                
+            } catch (error) {
+                console.error('Error generating QC report:', error);
+                updateStatus('QC report error: ' + error.message);
+                showProgress(0);
+            }
+        }
+        
+        // Display adversarial content warnings
+        function displayAdversarialWarnings(adversarialContent) {
+            const tablesContent = document.getElementById('tables-content');
+            const warningDiv = document.createElement('div');
+            warningDiv.className = 'adversarial-warning';
+            warningDiv.innerHTML = `
+                <h4>Adversarial Content Detected</h4>
+                <p>The following content has been flagged as potentially adversarial:</p>
+                <ul>
+                    ${adversarialContent.map(item => `<li>${item}</li>`).join('')}
+                </ul>
+                <p>Please review these items carefully before proceeding.</p>
+            `;
+            tablesContent.insertBefore(warningDiv, tablesContent.firstChild);
+        }
+        
+        // Export bin management
+        function addToExportBin(tableIndex, rowIndex) {
+            if (!processedData || !processedData.tables) return;
+            
+            const table = processedData.tables[tableIndex];
+            const row = table.rows[rowIndex];
+            
+            const exportItem = {
+                id: Date.now() + Math.random(),
+                tableIndex: tableIndex,
+                rowIndex: rowIndex,
+                data: row,
+                headers: table.headers
+            };
+            
+            exportBin.push(exportItem);
+            updateExportBinDisplay();
+            updateStatus(`🐭 Added row ${rowIndex + 1} from table ${tableIndex + 1} to export bin`);
+        }
+        
+        function removeFromExportBin(id) {
+            exportBin = exportBin.filter(item => item.id !== id);
+            updateExportBinDisplay();
+            updateStatus('🐭 Removed item from export bin');
+        }
+        
+        function updateExportBinDisplay() {
+            const exportBinContent = document.getElementById('export-bin-content');
+            
+            if (exportBin.length === 0) {
+                exportBinContent.innerHTML = '<p>Export bin is empty</p>';
+                return;
+            }
+            
+            exportBinContent.innerHTML = `
+                <p>Export bin contains ${exportBin.length} items:</p>
+                <div style="max-height: 300px; overflow-y: auto;">
+                    ${exportBin.map(item => `
+                        <div style="background: #f8f9fa; padding: 10px; margin: 5px 0; border-radius: 4px; font-size: 12px;">
+                            <strong>Table ${item.tableIndex + 1}, Row ${item.rowIndex + 1}:</strong>
+                            <br>
+                            ${item.data.slice(0, 3).join(', ')}${item.data.length > 3 ? '...' : ''}
+                            <button onclick="removeFromExportBin('${item.id}')" style="float: right; background: #dc3545; color: white; border: none; padding: 2px 6px; border-radius: 3px; cursor: pointer; font-size: 10px;">
+                                ❌
+                            </button>
+                        </div>
+                    `).join('')}
+                </div>
+            `;
+        }
+        
+        // Export selected items
+        async function exportSelected() {
+            if (exportBin.length === 0) {
+                updateStatus('Export bin is empty.');
+                return;
+            }
+            
+            try {
+                const format = document.getElementById('export-format').value;
+                updateStatus('🐭 Exporting selected items...', 'loading');
+                
+                const result = await window.invoke('export_data', {
+                    items: exportBin,
+                    format: format
+                });
+                
+                if (result.success) {
+                    updateStatus(`Exported ${exportBin.length} items to ${format.toUpperCase()} format!`);
+                } else {
+                    updateStatus('Export failed: ' + result.error);
+                }
+            } catch (error) {
+                console.error('Error exporting data:', error);
+                updateStatus('Export error: ' + error.message);
+            }
+        }
+        
+        // Clear export bin
+        function clearExportBin() {
+            exportBin = [];
+            updateExportBinDisplay();
+            updateStatus('🐭 Export bin cleared');
+        }
+        
+        // Original functions for backward compatibility
+        async function loadRealTables() {
+            try {
+                if (!window.invoke) {
+                    updateStatus('Tauri API not ready yet. Please wait a moment and try again.');
+                    return;
+                }
+                
+                const statusDiv = document.querySelector('.status');
+                if (statusDiv) statusDiv.innerHTML = '<strong>🐹 Status:</strong> Loading tables from database... 🐭';
+                
+                // Get table chunks from CHONKER database
+                const tableChunks = await window.invoke('get_table_chunks');
+                
+                if (tableChunks.length === 0) {
+                    updateStatus('No table chunks found in database.');
+                    document.getElementById('tables-content').innerHTML = '<p>No tables found in the CHONKER database.</p>';
+                    return;
+                }
+                
+                updateStatus(`🐹 Found ${tableChunks.length} table chunks in database! 🐭`);
+                
+                // Convert chunks to table format
+                const tables = convertChunksToTables(tableChunks);
+                displayTables(tables);
+                
+            } catch (error) {
+                console.error('Error loading tables:', error);
+                updateStatus('Error loading tables: ' + error.message);
+            }
+        }
+        
+        // Convert database chunks to table format
+        function convertChunksToTables(chunks) {
+            return chunks.map((chunk, index) => {
+                try {
+                    // Try to parse JSON content
+                    const content = JSON.parse(chunk.content);
+                    
+                    if (content.headers && content.rows) {
+                        return {
+                            headers: content.headers,
+                            rows: content.rows,
+                            source: chunk.file_name || 'Unknown',
+                            page: chunk.page_number || 'Unknown'
+                        };
+                    } else {
+                        // Fallback for non-structured content
+                        return {
+                            headers: ['Content', 'Source', 'Page', 'Type'],
+                            rows: [[
+                                chunk.content.substring(0, 100) + (chunk.content.length > 100 ? '...' : ''),
+                                chunk.file_name || 'Unknown',
+                                chunk.page_number || 'Unknown',
+                                chunk.chunk_type || 'text'
+                            ]],
+                            source: chunk.file_name || 'Unknown',
+                            page: chunk.page_number || 'Unknown'
+                        };
+                    }
+                } catch (e) {
+                    // Fallback for non-JSON content
+                    return {
+                        headers: ['Content', 'Source', 'Page', 'Type'],
+                        rows: [[
+                            chunk.content.substring(0, 100) + (chunk.content.length > 100 ? '...' : ''),
+                            chunk.file_name || 'Unknown',
+                            chunk.page_number || 'Unknown',
+                            chunk.chunk_type || 'text'
+                        ]],
+                        source: chunk.file_name || 'Unknown',
+                        page: chunk.page_number || 'Unknown'
+                    };
+                }
+            });
+        }
+        
+        async function debugTauriAPI() {
+            try {
+                updateStatus('Testing Tauri API...', 'loading');
+                
+                if (!window.invoke) {
+                    updateStatus('Tauri API not available');
+                    return;
+                }
+                
+                console.log('Tauri API available:', !!window.invoke);
+                console.log('Global __TAURI__ object:', window.__TAURI__);
+                
+                // Test a simple command
+                const response = await window.invoke('test_command');
+                console.log('Test command response:', response);
+                
+                updateStatus('Tauri API test completed - check console for details');
+                
+            } catch (error) {
+                console.error('Tauri API test error:', error);
+                updateStatus('Tauri API test failed: ' + error.message);
+            }
+        }
+        
+        // Extract tables to HTML
+        async function extractToHTML() {
+            if (!selectedFile) {
+                updateStatus('No file selected. Please select a PDF first.');
+                return;
+            }
+            
+            console.log('🐹 Starting HTML table extraction...');
+            console.log('Selected file:', selectedFile);
+            
+            try {
+                updateStatus('🐹 Extracting tables to HTML...', 'loading');
+                showProgress(20);
+                
+                if (!window.invoke) {
+                    throw new Error('Tauri API not available');
+                }
+                
+                const result = await window.invoke('extract_tables_to_html', {
+                    file_path: selectedFile,
+                    output_format: 'html'
+                });
+                
+                console.log('HTML extraction result:', result);
+                showProgress(60);
+                
+                if (result && result.success) {
+                    const data = result.data;
+                    
+                    // Display the extracted HTML in the output area
+                    displayHTMLContent(data);
+                    
+                    // Enable buttons
+                    const saveBtn = document.querySelector('button[onclick="saveToDatabase()"]');
+                    if (saveBtn) saveBtn.disabled = false;
+                    
+                    showProgress(100);
+                    updateStatus(`🐹 Successfully extracted ${data.tables_found} tables to HTML! 🐭`);
+                    
+                    // Auto-switch to SNYFTER mode to show results
+                    setTimeout(() => {
+                        switchMode('snyfter');
+                        showProgress(0);
+                    }, 1000);
+                    
+                } else {
+                    const errorMsg = result ? result.error : 'Unknown error';
+                    console.error('❌ HTML extraction failed:', errorMsg);
+                    updateStatus(`HTML extraction failed: ${errorMsg}`);
+                    showProgress(0);
+                }
+            } catch (error) {
+                console.error('❌ Error during HTML extraction:', error);
+                updateStatus(`HTML extraction error: ${error.message || error.toString()}`);
+                showProgress(0);
+            }
+        }
+        
+        // Display HTML content in the output areas
+        function displayHTMLContent(data) {
+            console.log('🐹 Displaying HTML content:', data);
+            
+            const tablesContent = document.getElementById('tables-content');
+            if (!tablesContent) {
+                console.error('tables-content element not found');
+                return;
+            }
+            
+            // Create stats section
+            const statsHtml = `
+                <div class="stats-grid" style="margin-bottom: 20px;">
+                    <div class="stat-card">
+                        <div class="stat-value">${data.tables_found || 0}</div>
+                        <div class="stat-label">Tables Extracted</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value">${data.processing_time_ms || 0}ms</div>
+                        <div class="stat-label">Processing Time</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value">HTML</div>
+                        <div class="stat-label">Output Format</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value">🐹🐭</div>
+                        <div class="stat-label">CHONKER</div>
+                    </div>
+                </div>
+            `;
+            
+            // Create HTML preview section
+            const htmlPreviewSection = `
+                <div style="margin-bottom: 30px;">
+                    <h3 style="color: #ff1493; margin-bottom: 15px;">📊 HTML Table Preview</h3>
+                    <div style="background: rgba(17, 17, 17, 0.9); border: 1px solid #00ff00; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
+                        <iframe id="html-preview" 
+                                style="width: 100%; height: 400px; border: none; background: white;" 
+                                srcdoc="${data.html_content ? data.html_content.replace(/"/g, '&quot;') : 'No HTML content available'}"
+                                sandbox="allow-same-origin">
+                        </iframe>
+                    </div>
+                    
+                    <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+                        <button class="btn btn-primary" onclick="openHTMLInNewWindow()" style="background: #00ff00; color: #000;">
+                            🔗 Open in New Window
+                        </button>
+                        <button class="btn btn-secondary" onclick="copyHTMLToClipboard()" style="background: #ff1493; color: #fff;">
+                            📋 Copy HTML
+                        </button>
+                        <button class="btn btn-secondary" onclick="downloadHTML()" style="background: #00ffff; color: #000;">
+                            💾 Download HTML
+                        </button>
+                    </div>
+                </div>
+            `;
+            
+            // Set the content
+            tablesContent.innerHTML = statsHtml + htmlPreviewSection;
+            
+            // Store HTML content globally for other functions
+            window.currentHTMLContent = data.html_content;
+            
+            // Sync to SNYFTER screen
+            syncConvertedOutput();
+        }
+        
+        // Open HTML in new window
+        function openHTMLInNewWindow() {
+            if (window.currentHTMLContent) {
+                const newWindow = window.open('', '_blank');
+                newWindow.document.write(window.currentHTMLContent);
+                newWindow.document.close();
+            } else {
+                updateStatus('No HTML content available to open.');
+            }
+        }
+        
+        // Copy HTML to clipboard
+        async function copyHTMLToClipboard() {
+            if (window.currentHTMLContent) {
+                try {
+                    await navigator.clipboard.writeText(window.currentHTMLContent);
+                    updateStatus('📚 HTML copied to clipboard!');
+                } catch (error) {
+                    console.error('Failed to copy to clipboard:', error);
+                    updateStatus('Failed to copy HTML to clipboard.');
+                }
+            } else {
+                updateStatus('No HTML content available to copy.');
+            }
+        }
+        
+        // Download HTML file
+        function downloadHTML() {
+            if (window.currentHTMLContent) {
+                const blob = new Blob([window.currentHTMLContent], { type: 'text/html' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `chonker-tables-${Date.now()}.html`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+                updateStatus('💾 HTML file downloaded!');
+            } else {
+                updateStatus('No HTML content available to download.');
+            }
+        }
+        
+        // Export formatted HTML from the Rust renderer
+        function exportFormattedHTML() {
+            if (!processedData || !processedData.formatted_html) {
+                updateStatus('No formatted HTML content available to export.');
+                return;
+            }
+            
+            try {
+                // Create a complete HTML document with the formatted content
+                const completeHTML = `<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>🐹 CHONKER Processed Tables</title>
+    <meta name="generator" content="CHONKER v1.4 - Rust-powered Table Extractor">
+</head>
+<body>
+${processedData.formatted_html}
+</body>
+</html>`;
+                
+                // Create and download the file
+                const blob = new Blob([completeHTML], { type: 'text/html' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `chonker-formatted-tables-${Date.now()}.html`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+                
+                updateStatus('📤 Formatted HTML exported successfully!');
+                console.log('🐹 Exported formatted HTML with Rust renderer styling');
+                
+            } catch (error) {
+                console.error('Error exporting formatted HTML:', error);
+                updateStatus('Failed to export formatted HTML: ' + error.message);
+            }
+        }
+        
+        // Help modal functionality
+        function showHelpModal() {
+            const modal = document.createElement('div');
+            modal.style.cssText = `
+                position: fixed;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                background: rgba(0,0,0,0.5);
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                z-index: 1000;
+            `;
+            
+            modal.innerHTML = `
+                <div style="background: white; padding: 30px; border-radius: 10px; max-width: 600px; max-height: 80vh; overflow-y: auto;">
+                    <h2>🐹🐭 CHONKER Help</h2>
+                    <h3>Keyboard Shortcuts:</h3>
+                    <ul>
+                        <li><strong>Ctrl/Cmd + O:</strong> Select PDF file</li>
+                        <li><strong>Ctrl/Cmd + P:</strong> Process document</li>
+                        <li><strong>Tab:</strong> Switch between 🐹/🐭 modes</li>
+                        <li><strong>Ctrl/Cmd + S:</strong> Save to database</li>
+                        <li><strong>Ctrl/Cmd + Q:</strong> Generate QC report</li>
+                        <li><strong>Ctrl/Cmd + H:</strong> Clear highlights</li>
+                        <li><strong>Arrow Up/Down:</strong> Navigate chunks</li>
+                        <li><strong>Ctrl/Cmd + 1:</strong> Switch to CHONKER mode</li>
+                        <li><strong>Ctrl/Cmd + 2:</strong> Switch to SNYFTER mode</li>
+                    </ul>
+                    <h3>Features:</h3>
+                    <ul>
+                        <li><strong>CHONKER Mode:</strong> Process PDF documents and extract tables</li>
+                        <li><strong>SNYFTER Mode:</strong> Export and manage processed data</li>
+                        <li><strong>Bidirectional Selection:</strong> Click chunks in HTML to highlight PDF areas</li>
+                        <li><strong>Export Bin:</strong> Collect specific rows for export</li>
+                        <li><strong>QC Reports:</strong> Generate quality control reports with AI cleaning</li>
+                    </ul>
+                    <button onclick="this.parentElement.parentElement.remove()" style="background: #007bff; color: white; border: none; padding: 10px 20px; border-radius: 5px; cursor: pointer; margin-top: 20px;">
+                        Close Help
+                    </button>
+                </div>
+            `;
+            
+            document.body.appendChild(modal);
+            
+            // Close on background click
+            modal.addEventListener('click', (e) => {
+                if (e.target === modal) {
+                    modal.remove();
+                }
+            });
+        }
+        
+        // Add help button to header
+        document.addEventListener('DOMContentLoaded', () => {
+            const headerContent = document.querySelector('.header-content');
+            const helpButton = document.createElement('button');
+            helpButton.className = 'mode-btn';
+            helpButton.onclick = showHelpModal;
+            helpButton.innerHTML = 'Help';
+            headerContent.appendChild(helpButton);
+        });
+        
+        // Auto-hiding header functionality
+        document.addEventListener('DOMContentLoaded', () => {
+            const topPanel = document.getElementById('top-panel');
+            let headerTimeout;
+            
+            // Show header on mouse move near top
+            document.addEventListener('mousemove', (e) => {
+                if (e.clientY < 50) {
+                    topPanel.classList.add('show');
+                    clearTimeout(headerTimeout);
+                } else if (e.clientY > 100) {
+                    clearTimeout(headerTimeout);
+                    headerTimeout = setTimeout(() => {
+                        topPanel.classList.remove('show');
+                    }, 1000);
+                }
+            });
+            
+            // Keep header visible when hovering over it
+            topPanel.addEventListener('mouseenter', () => {
+                clearTimeout(headerTimeout);
+                topPanel.classList.add('show');
+            });
+            
+            topPanel.addEventListener('mouseleave', () => {
+                headerTimeout = setTimeout(() => {
+                    topPanel.classList.remove('show');
+                }, 1000);
+            });
+            
+            console.log('🐹 CHONKER v1.8 Dark Mode frontend initialized');
+            console.log('🐹 JavaScript is working!');
+            
+            // Add global debugging function immediately
+            window.testDebug = function() {
+                console.log('🐹 Test debug called successfully');
+            };
+            
+            console.log('🐹 Global test function added to window object');
+        });
+    </script>
+</body>
+</html>

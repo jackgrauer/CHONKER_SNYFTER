@@ -67,10 +67,12 @@ impl Extractor {
         Self::default()
     }
     
+    #[allow(dead_code)]
     pub fn set_python_script_path(&mut self, path: PathBuf) {
         self.python_script_path = path;
     }
     
+    #[allow(dead_code)]
     pub fn set_preferred_tool(&mut self, tool: String) {
         // Always use consensus for best results
         self.preferred_tool = if tool == "auto" || tool == "consensus" {
@@ -96,6 +98,7 @@ impl Extractor {
         Ok(result)
     }
     
+    #[allow(dead_code)]
     pub async fn extract_page(&mut self, pdf_path: &PathBuf, page_num: usize) -> Result<ExtractionResult> {
         let cache_key = format!("{}:{}:{}", pdf_path.to_string_lossy(), page_num, self.preferred_tool);
         if let Some(cached_result) = self.extraction_cache.get(&cache_key) {
@@ -140,10 +143,12 @@ impl Extractor {
         Ok(result)
     }
     
+    #[allow(dead_code)]
     pub fn clear_cache(&mut self) {
         self.extraction_cache.clear();
     }
     
+    #[allow(dead_code)]
     pub fn get_cache_stats(&self) -> (usize, usize) {
         let entries = self.extraction_cache.len();
         let memory_estimate = self.extraction_cache.iter()

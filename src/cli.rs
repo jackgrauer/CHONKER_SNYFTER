@@ -15,6 +15,7 @@ pub async fn extract_command(
     tool: String,
     store: bool,
     _page: Option<usize>,
+    vlm: bool,
     database: ChonkerDatabase,
 ) -> Result<()> {
     info!("🔍 Extracting PDF: {:?}", pdf_path);
@@ -26,6 +27,12 @@ pub async fn extract_command(
     // Load configuration
     let config = ChonkerConfig::load_from_env();
     let tool_preference = ToolPreference::from(tool.as_str());
+    
+    // Check VLM mode
+    if vlm {
+        info!("🤖 SmolDocling VLM mode enabled - using enhanced document understanding");
+        return extract_with_vlm(pdf_path, output, store, database).await;
+    }
     
     // Analyze document complexity
     let complexity_score = analyze_document_complexity(&pdf_path, &config).await?;
@@ -103,6 +110,178 @@ pub async fn extract_command(
     Ok(())
 }
 
+/// Extract PDF using SmolDocling VLM for enhanced understanding
+async fn extract_with_vlm(
+    pdf_path: PathBuf,
+    output: Option<PathBuf>,
+    store: bool,
+    database: ChonkerDatabase,
+) -> Result<()> {
+    info!("🤖 Starting SmolDocling VLM extraction...");
+    
+    // Initialize processor with VLM mode
+    let mut processor = ChonkerProcessor::new();
+    
+    // Enable VLM mode on the Python bridge
+    if let Some(ref mut bridge) = processor.python_bridge {
+        bridge.set_vlm_mode(true);
+    }
+    
+    let processing_options = ProcessingOptions {
+        tool: "smoldocling_vlm".to_string(),
+        extract_tables: true,
+        extract_formulas: true,
+    };
+    
+    // Process with VLM
+    let start_time = std::time::Instant::now();
+    let processing_result = processor.process_document(&pdf_path, &processing_options).await
+        .map_err(|e| anyhow::anyhow!("SmolDocling VLM processing failed: {:?}", e))?;
+    
+    let processing_time = start_time.elapsed();
+    
+    info!("✅ SmolDocling VLM processing successful!");
+    info!("📄 Generated {} chunks with enhanced understanding", processing_result.chunks.len());
+    info!("⚡ Processing time: {:.1}s", processing_time.as_secs_f64());
+    
+    // Convert chunks to markdown with VLM enhancements
+    let markdown_content = convert_vlm_chunks_to_markdown(&processing_result);
+    
+    // Determine output path
+    let output_path = output.unwrap_or_else(|| {
+        let mut path = pdf_path.clone();
+        path.set_extension("md");
+        path
+    });
+    
+    // Write markdown file
+    std::fs::write(&output_path, &markdown_content)?;
+    info!("📝 Enhanced markdown saved to: {:?}", output_path);
+    
+    // Store in database if requested
+    if store {
+        let processing_opts = ProcessingOptions {
+            tool: "smoldocling_vlm".to_string(),
+            extract_tables: true,
+            extract_formulas: true,
+        };
+        
+        let doc_id = database.save_document(
+            &pdf_path.file_name().unwrap().to_string_lossy(),
+            &pdf_path,
+            &processing_result.chunks,
+            &processing_opts,
+            processing_time.as_millis() as u64,
+        ).await?;
+        info!("💾 Stored in database with ID: {}", doc_id);
+    }
+    
+    // Print VLM-specific summary
+    println!("  \\___/>");
+    println!("  [o-·-o]");
+    println!("  (\")~(\")  🤖 SmolDocling VLM Extraction Complete!");
+    println!("          Model: SmolDocling Vision-Language Model");
+    println!("          Enhanced chunks: {}", processing_result.chunks.len());
+    println!("          Processing time: {:.1}s", processing_time.as_secs_f64());
+    println!("          Output file: {:?}", output_path);
+    if store {
+        println!("          Stored in database: ✅");
+    }
+    println!("          VLM Features: Enhanced table detection, figure understanding, layout analysis");
+    
+    Ok(())
+}
+
+/// Convert VLM processing result chunks to enhanced markdown format
+fn convert_vlm_chunks_to_markdown(result: &ProcessingResult) -> String {
+    let mut markdown = String::new();
+    
+    // Add enhanced metadata header
+    markdown.push_str(&format!("# SmolDocling VLM Document Processing\n\n"));
+    markdown.push_str(&format!("**Model:** SmolDocling Vision-Language Model\n"));
+    markdown.push_str(&format!("**Tool:** {}\n", result.metadata.tool_used));
+    markdown.push_str(&format!("**Total Pages:** {}\n", result.metadata.total_pages));
+    markdown.push_str(&format!("**Processing Time:** {}ms\n", result.metadata.processing_time_ms));
+    markdown.push_str(&format!("**Processing Path:** {:?}\n", result.processing_path));
+    markdown.push_str(&format!("**Enhanced Features:** Vision-Language understanding, improved table detection, figure analysis\n\n"));
+    
+    // Group chunks by element type
+    let mut text_chunks = Vec::new();
+    let mut table_chunks = Vec::new();
+    let mut figure_chunks = Vec::new();
+    let mut other_chunks = Vec::new();
+    
+    for chunk in &result.chunks {
+        if chunk.element_types.contains(&"table".to_string()) {
+            table_chunks.push(chunk);
+        } else if chunk.element_types.contains(&"figure".to_string()) {
+            figure_chunks.push(chunk);
+        } else if chunk.element_types.contains(&"text".to_string()) {
+            text_chunks.push(chunk);
+        } else {
+            other_chunks.push(chunk);
+        }
+    }
+    
+    // Add text content
+    if !text_chunks.is_empty() {
+        markdown.push_str("## Text Content\n\n");
+        for chunk in text_chunks {
+            markdown.push_str(&format!("### Chunk {} (Page {})\n\n", chunk.id, chunk.page_range));
+            if !chunk.content.trim().is_empty() {
+                markdown.push_str(&chunk.content);
+                markdown.push_str("\n\n");
+            }
+        }
+    }
+    
+    // Add table content with enhanced formatting
+    if !table_chunks.is_empty() {
+        markdown.push_str("## Tables (Enhanced VLM Detection)\n\n");
+        for chunk in table_chunks {
+            markdown.push_str(&format!("### Table {} (Page {})\n\n", chunk.id, chunk.page_range));
+            markdown.push_str("> **VLM Enhancement:** This table was detected and structured using vision-language understanding\n\n");
+            if !chunk.content.trim().is_empty() {
+                markdown.push_str(&chunk.content);
+                markdown.push_str("\n\n");
+            }
+            if let Some(table_data) = &chunk.table_data {
+                markdown.push_str(&format!("**Structured Data:** `{}`\n\n", table_data));
+            }
+        }
+    }
+    
+    // Add figure content
+    if !figure_chunks.is_empty() {
+        markdown.push_str("## Figures & Images (VLM Descriptions)\n\n");
+        for chunk in figure_chunks {
+            markdown.push_str(&format!("### Figure {} (Page {})\n\n", chunk.id, chunk.page_range));
+            markdown.push_str("> **VLM Enhancement:** This figure description was generated using vision-language understanding\n\n");
+            if !chunk.content.trim().is_empty() {
+                markdown.push_str(&chunk.content);
+                markdown.push_str("\n\n");
+            }
+        }
+    }
+    
+    // Add other content
+    if !other_chunks.is_empty() {
+        markdown.push_str("## Other Elements\n\n");
+        for chunk in other_chunks {
+            markdown.push_str(&format!("### Element {} (Page {})\n\n", chunk.id, chunk.page_range));
+            markdown.push_str(&format!("**Type:** {}\n\n", chunk.element_types.join(", ")));
+            if !chunk.content.trim().is_empty() {
+                markdown.push_str(&chunk.content);
+                markdown.push_str("\n\n");
+            }
+        }
+    }
+    
+    markdown.push_str("---\n\n");
+    markdown.push_str("*Generated with SmolDocling Vision-Language Model for enhanced document understanding*\n");
+    
+    markdown
+}
 
 /// Export data to DataFrame formats
 pub async fn export_command(

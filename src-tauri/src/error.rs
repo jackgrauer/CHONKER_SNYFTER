@@ -2,6 +2,7 @@ use thiserror::Error;
 
 /// Main error type for the CHONKER application
 #[derive(Error, Debug)]
+#[allow(dead_code)]
 pub enum ChonkerError {
     #[error("PDF processing failed: {message}")]
     PdfProcessing { 
@@ -52,6 +53,7 @@ pub enum ChonkerError {
 
 impl ChonkerError {
     /// Create a PDF processing error with context
+    #[allow(dead_code)]
     pub fn pdf_processing(message: impl Into<String>) -> Self {
         Self::PdfProcessing {
             message: message.into(),
@@ -60,6 +62,7 @@ impl ChonkerError {
     }
     
     /// Create a PDF processing error with source
+    #[allow(dead_code)]
     pub fn pdf_processing_with_source(
         message: impl Into<String>, 
         source: impl std::error::Error + Send + Sync + 'static
@@ -71,6 +74,7 @@ impl ChonkerError {
     }
     
     /// Create a database error
+    #[allow(dead_code)]
     pub fn database(operation: impl Into<String>, source: sqlx::Error) -> Self {
         Self::Database {
             operation: operation.into(),
@@ -79,6 +83,7 @@ impl ChonkerError {
     }
     
     /// Create a file I/O error
+    #[allow(dead_code)]
     pub fn file_io(path: impl Into<String>, source: std::io::Error) -> Self {
         Self::FileIO {
             path: path.into(),
@@ -87,6 +92,7 @@ impl ChonkerError {
     }
     
     /// Create a configuration error
+    #[allow(dead_code)]
     pub fn configuration(message: impl Into<String>) -> Self {
         Self::Configuration {
             message: message.into(),
@@ -94,6 +100,7 @@ impl ChonkerError {
     }
     
     /// Check if error is recoverable (can continue operation)
+    #[allow(dead_code)]
     pub fn is_recoverable(&self) -> bool {
         match self {
             ChonkerError::ProcessingTimeout { .. } => true,
@@ -107,6 +114,7 @@ impl ChonkerError {
     }
     
     /// Get user-friendly error message
+    #[allow(dead_code)]
     pub fn user_message(&self) -> String {
         match self {
             ChonkerError::PdfProcessing { .. } => {
@@ -136,6 +144,7 @@ impl ChonkerError {
 pub type ChonkerResult<T> = Result<T, ChonkerError>;
 
 /// Error context for adding additional information
+#[allow(dead_code)]
 pub trait ErrorContext<T> {
     fn with_context(self, context: &str) -> ChonkerResult<T>;
 }

@@ -632,7 +632,7 @@ impl Default for HtmlExtractor {
 
 /// Convert HtmlDocument to the existing DocumentChunk format for compatibility
 impl HtmlDocument {
-    pub fn to_document_chunks(&self) -> Vec<crate::app::DocumentChunk> {
+    pub fn to_document_chunks(&self) -> Vec<crate::database::DocumentChunk> {
         let mut chunks = Vec::new();
         let mut chunk_id = 1;
         
@@ -643,7 +643,7 @@ impl HtmlDocument {
         chunks
     }
     
-    fn element_to_chunks(&self, element: &HtmlElement, chunks: &mut Vec<crate::app::DocumentChunk>, chunk_id: &mut usize) {
+    fn element_to_chunks(&self, element: &HtmlElement, chunks: &mut Vec<crate::database::DocumentChunk>, chunk_id: &mut usize) {
         let (content, element_types) = match &element.element_type {
             ElementType::Heading { level } => {
                 (element.content.clone(), vec![format!("heading_level_{}", level), "heading".to_string()])
@@ -763,8 +763,8 @@ impl HtmlDocument {
                 .map(|p| format!("page_{}", p))
                 .unwrap_or_else(|| format!("element_{}", chunk_id));
             
-            chunks.push(crate::app::DocumentChunk {
-                id: *chunk_id,
+            chunks.push(crate::database::DocumentChunk {
+                id: *chunk_id as i64,
                 content,
                 page_range,
                 element_types,
@@ -775,7 +775,7 @@ impl HtmlDocument {
                     element.position.width,
                     element.position.height
                 )),
-                char_count: element.content.len(),
+                char_count: element.content.len() as i64,
                 table_data: None,
             });
             

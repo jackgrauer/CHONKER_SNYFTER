@@ -84,6 +84,7 @@ pub struct RustExtractor {
 /// Python bridge for complex processing
 pub struct PythonBridge {
     pub script_path: std::path::PathBuf,
+    pub vlm_mode: bool,  // Whether to use VLM mode
 }
 
 impl Default for ChonkerProcessor {
@@ -481,31 +482,51 @@ impl RustExtractor {
 
 impl PythonBridge {
     pub fn new() -> Self {
-        // Use the unified environmental lab extraction bridge
+        // Use the SmolDocling VLM bridge by default, with fallback to environmental lab bridge
         let script_path = if let Ok(current_dir) = std::env::current_dir() {
-            let extraction_bridge = current_dir.join("python/extraction_bridge.py");
-            if extraction_bridge.exists() {
-                info!("🧪 Using Docling v2 environmental lab extraction bridge");
-                extraction_bridge
-            } else if let Ok(exe_path) = std::env::current_exe() {
-                let exe_dir = exe_path.parent().unwrap_or_else(|| std::path::Path::new("."));
-                let script_from_exe = exe_dir.join("../../../python/extraction_bridge.py");
-                if script_from_exe.exists() {
-                    info!("🧪 Using extraction bridge from exe path");
-                    script_from_exe
+            let smoldocling_bridge = current_dir.join("python/smoldocling_bridge.py");
+            if smoldocling_bridge.exists() {
+                info!("🤖 Using SmolDocling VLM extraction bridge");
+                smoldocling_bridge
+            } else {
+                let extraction_bridge = current_dir.join("python/extraction_bridge.py");
+                if extraction_bridge.exists() {
+                    info!("🧪 Using Docling v2 environmental lab extraction bridge");
+                    extraction_bridge
+                } else if let Ok(exe_path) = std::env::current_exe() {
+                    let exe_dir = exe_path.parent().unwrap_or_else(|| std::path::Path::new("."));
+                    let script_from_exe = exe_dir.join("../../../python/extraction_bridge.py");
+                    if script_from_exe.exists() {
+                        info!("🧪 Using extraction bridge from exe path");
+                        script_from_exe
+                    } else {
+                        // Fallback to relative path
+                        std::path::PathBuf::from("python/extraction_bridge.py")
+                    }
                 } else {
-                    // Fallback to relative path
                     std::path::PathBuf::from("python/extraction_bridge.py")
                 }
-            } else {
-                std::path::PathBuf::from("python/extraction_bridge.py")
             }
         } else {
             std::path::PathBuf::from("python/extraction_bridge.py")
         };
         
         Self {
-            script_path,
+            script_path: script_path.clone(),
+            vlm_mode: script_path.file_name()
+                .and_then(|name| name.to_str())
+                .map(|name| name.contains("smoldocling"))
+                .unwrap_or(false),
+        }
+    }
+    
+    /// Set VLM mode for enhanced vision-language processing
+    pub fn set_vlm_mode(&mut self, enable: bool) {
+        self.vlm_mode = enable;
+        if enable {
+            info!("🤖 SmolDocling VLM mode enabled for enhanced document understanding");
+        } else {
+            info!("🧪 Standard Docling mode enabled");
         }
     }
     
@@ -513,9 +534,55 @@ impl PythonBridge {
     pub async fn extract_advanced(
         &self,
         file_path: &Path,
+        options: &ProcessingOptions,
+    ) -> ChonkerResult<Vec<DocumentChunk>> {
+        if self.vlm_mode {
+            debug!("🤖 SmolDocling VLM extraction: {:?}", file_path);
+            self.extract_with_vlm(file_path, options).await
+        } else {
+            debug!("🧠 Standard Python ML extraction: {:?}", file_path);
+            self.extract_with_standard_docling(file_path, options).await
+        }
+    }
+
+    /// Extract using SmolDocling VLM for enhanced understanding
+    async fn extract_with_vlm(
+        &self,
+        file_path: &Path,
         _options: &ProcessingOptions,
     ) -> ChonkerResult<Vec<DocumentChunk>> {
-        debug!("🧠 Python ML extraction with smart chunking: {:?}", file_path);
+        info!("🤖 Starting SmolDocling VLM extraction...");
+        
+        let output = std::process::Command::new("python")
+            .arg(&self.script_path)
+            .arg(file_path.to_string_lossy().as_ref())
+            .arg("--format")
+            .arg("json")
+            .output()
+            .map_err(|e| ChonkerError::SystemResource {
+                resource: "python_vlm_bridge".to_string(),
+                source: Box::new(e),
+            })?;
+        
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(ChonkerError::ExtractionFailed {
+                tool: "smoldocling_vlm".to_string(),
+                details: stderr.to_string(),
+            });
+        }
+        
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        self.parse_vlm_extraction_result(&stdout)
+    }
+
+    /// Extract using standard Docling
+    async fn extract_with_standard_docling(
+        &self,
+        file_path: &Path,
+        _options: &ProcessingOptions,
+    ) -> ChonkerResult<Vec<DocumentChunk>> {
+        info!("🧪 Starting standard Docling extraction...");
         
         // Use the actual Python extraction script
         let mut extractor = crate::extractor::Extractor::new();
@@ -525,6 +592,71 @@ impl PythonBridge {
                 message: format!("Python extraction failed: {}", e),
                 source: None,
             })?;
+        
+        // Convert extraction result to chunks
+        self.convert_extraction_to_chunks(extraction_result)
+    }
+    
+    /// Parse VLM extraction result JSON
+    fn parse_vlm_extraction_result(&self, json_str: &str) -> ChonkerResult<Vec<DocumentChunk>> {
+        use serde_json::Value;
+        
+        let result: Value = serde_json::from_str(json_str)
+            .map_err(|e| ChonkerError::ParseError {
+                content: "vlm_extraction_result".to_string(),
+                source: Box::new(e),
+            })?;
+        
+        if !result["success"].as_bool().unwrap_or(false) {
+            let error_msg = result["error"].as_str().unwrap_or("Unknown VLM error");
+            return Err(ChonkerError::ExtractionFailed {
+                tool: "smoldocling_vlm".to_string(),
+                details: error_msg.to_string(),
+            });
+        }
+        
+        let mut chunks = Vec::new();
+        
+        if let Some(extractions) = result["extractions"].as_array() {
+            for extraction in extractions {
+                if let Some(structured_chunks) = extraction["structured_chunks"].as_array() {
+                    for (idx, chunk_data) in structured_chunks.iter().enumerate() {
+                        let chunk = DocumentChunk {
+                            id: (idx + 1) as i64,
+                            content: chunk_data["content"].as_str().unwrap_or("").to_string(),
+                            page_range: chunk_data["page_number"].as_u64().unwrap_or(1).to_string(),
+                            element_types: vec![chunk_data["element_type"].as_str().unwrap_or("text").to_string()],
+                            spatial_bounds: chunk_data["bbox"].as_object().map(|bbox| {
+                                format!(
+                                    "{{\"x\":{},\"y\":{},\"width\":{},\"height\":{}}}",
+                                    bbox.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0),
+                                    bbox.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0),
+                                    bbox.get("width").and_then(|v| v.as_f64()).unwrap_or(0.0),
+                                    bbox.get("height").and_then(|v| v.as_f64()).unwrap_or(0.0)
+                                )
+                            }),
+                            char_count: chunk_data["content"].as_str().unwrap_or("").len() as i64,
+                            table_data: chunk_data["table_data"].as_object().map(|_| "vlm_table_data".to_string()),
+                        };
+                        chunks.push(chunk);
+                    }
+                }
+            }
+        }
+        
+        if chunks.is_empty() {
+            return Err(ChonkerError::ExtractionFailed {
+                tool: "smoldocling_vlm".to_string(),
+                details: "No chunks extracted from VLM result".to_string(),
+            });
+        }
+        
+        info!("✅ SmolDocling VLM extracted {} chunks", chunks.len());
+        Ok(chunks)
+    }
+    
+    /// Convert extraction result to chunks (for standard Docling)
+    fn convert_extraction_to_chunks(&self, extraction_result: crate::extractor::ExtractionResult) -> ChonkerResult<Vec<DocumentChunk>> {
         
         if !extraction_result.success {
             return Err(ChonkerError::PdfProcessing {
@@ -536,36 +668,20 @@ impl PythonBridge {
         // TODO: Implement smart chunking here once the module is properly integrated
         info!("📋 Using structured table chunker (smart chunking temporarily disabled)");
         
-        // Fallback: Legacy chunking for non-Docling results or if smart chunking fails
-        info!("📋 Using legacy character-based chunking");
-        
-        // Convert Python extraction results to DocumentChunk format (legacy method)
+        // For now, convert to basic chunks
         let mut chunks = Vec::new();
-        for (idx, page_extraction) in extraction_result.extractions.iter().enumerate() {
-            // Only create chunks if there's actual content
-            if !page_extraction.text.trim().is_empty() {
-                chunks.push(DocumentChunk {
-                    id: (idx + 1) as i64,
-                    content: page_extraction.text.clone(),
-                    page_range: page_extraction.page_number.to_string(),
-                    element_types: self.detect_element_types(&page_extraction.text),
-                    spatial_bounds: if !page_extraction.layout_boxes.is_empty() {
-                        Some(serde_json::to_string(&page_extraction.layout_boxes).unwrap_or_default())
-                    } else {
-                        None
-                    },
-                    char_count: page_extraction.text.chars().count() as i64,
-                    table_data: None,
-                });
-            }
-        }
         
-        // If no text content was found, don't create fake chunks
-        if chunks.is_empty() {
-            info!("📄 No extractable text content found in PDF");
-        } else {
-            info!("✅ Legacy extraction completed: {} chunks from {} pages", 
-                  chunks.len(), extraction_result.metadata.total_pages);
+        for (idx, extraction) in extraction_result.extractions.iter().enumerate() {
+            let chunk = DocumentChunk {
+                id: (idx + 1) as i64,
+                content: extraction.text.clone(),
+                page_range: extraction.page_number.to_string(),
+                element_types: vec!["text".to_string()],
+                spatial_bounds: None,
+                char_count: extraction.text.len() as i64,
+                table_data: None,
+            };
+            chunks.push(chunk);
         }
         
         Ok(chunks)

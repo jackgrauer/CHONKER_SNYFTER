@@ -5,13 +5,16 @@
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
-    <title>🐹🐭 CHONKER - v1.2</title>
+    <title>🐹 CHONKER - Working Version</title>
+    
+    <!-- Quill.js Rich Text Editor -->
+    <link href="https://cdn.jsdelivr.net/npm/quill@2.0.2/dist/quill.snow.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/quill@2.0.2/dist/quill.js"></script>
+    
     <script>
-        // Simple approach - the global Tauri object should be available
         window.addEventListener('DOMContentLoaded', () => {
             console.log('DOM loaded, checking for Tauri...');
             
-            // Check for global __TAURI__ object
             const checkTauri = () => {
                 if (typeof window.__TAURI__ !== 'undefined') {
                     console.log('Found __TAURI__:', window.__TAURI__);
@@ -31,19 +34,18 @@
             checkTauri();
         });
     </script>
+    
     <style>
         * {
             box-sizing: border-box;
         }
         
-        @import url('https://fonts.googleapis.com/css2?family=Hack:wght@400;700&display=swap');
-        
         body {
-            font-family: 'Hack', 'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', Consolas, 'Courier New', monospace;
+            font-family: 'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', Consolas, 'Courier New', monospace;
             margin: 0;
             padding: 0;
-            background-color: #000000;
-            color: #00ff00;
+            background-color: #1a1a1a;
+            color: #ffffff;
             height: 100vh;
             overflow: hidden;
         }
@@ -52,579 +54,153 @@
             display: flex;
             flex-direction: column;
             height: 100vh;
+            background: #1a1a1a;
         }
         
-        /* Top Panel - Header */
-        .top-panel {
-            background: linear-gradient(135deg, #000000 0%, #111111 100%);
-            color: #00ff00;
+        /* Header */
+        .header {
+            background: #2a2a2a;
             padding: 15px 20px;
-            box-shadow: 0 2px 10px rgba(0,255,0,0.3);
-            border-bottom: 2px solid #00ff00;
-        }
-        
-        .header-content {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
+            text-align: center;
+            border-bottom: 1px solid #444;
         }
         
         .app-title {
-            font-size: 24px;
-            font-weight: bold;
-            margin: 0;
+            font-size: 20px;
+            font-weight: 600;
+            color: #ffffff;
         }
         
-        .mode-toggle {
-            display: flex;
-            gap: 10px;
-        }
-        
-        .mode-btn {
-            padding: 8px 16px;
-            background: rgba(0,255,0,0.1);
-            border: 1px solid #00ff00;
-            border-radius: 20px;
-            color: #00ff00;
-            cursor: pointer;
-            font-size: 14px;
-            transition: all 0.3s ease;
-        }
-        
-        .mode-btn:hover {
-            background: rgba(0,255,0,0.2);
-            box-shadow: 0 0 10px rgba(0,255,0,0.5);
-        }
-        
-        .mode-btn.active {
-            background: rgba(255,20,147,0.3);
-            border-color: #ff1493;
-            color: #ff1493;
-            box-shadow: 0 0 15px rgba(255,20,147,0.5);
-        }
-        
-        /* Status Bar */
-        .status-bar {
-            background: #111111;
-            padding: 10px 20px;
-            border-bottom: 1px solid #00ff00;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-        
-        .status-message {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
-        
-        .progress-bar {
-            width: 200px;
-            height: 6px;
-            background: #333333;
-            border-radius: 3px;
-            overflow: hidden;
-            display: none;
-            border: 1px solid #00ff00;
-        }
-        
-        .progress-fill {
-            height: 100%;
-            background: linear-gradient(90deg, #00ff00 0%, #ff1493 100%);
-            width: 0%;
-            transition: width 0.3s ease;
-            box-shadow: 0 0 10px rgba(0,255,0,0.5);
-        }
-        
-        /* Main Content Area */
+        /* Main Content */
         .main-content {
             display: flex;
             flex: 1;
-            overflow: hidden;
+            height: calc(100vh - 60px);
         }
         
-        /* Screen 1 - CHONKER Mode: Vertical Split (PDF Viewer | Converted Output) */
-        .chonker-screen {
-            display: flex;
-            width: 100%;
-            height: 100%;
-        }
-        
-        .chonker-pane-a {
+        .pane-a {
             width: 50%;
-            background: #111111;
-            border-right: 1px solid #00ff00;
+            background: #2a2a2a;
+            border-right: 1px solid #444;
             display: flex;
             flex-direction: column;
-            overflow: hidden;
-        }
-        
-        .chonker-pane-b {
-            width: 50%;
-            background: #111111;
-            display: flex;
-            flex-direction: column;
-            overflow: hidden;
-        }
-        
-        /* Screen 2 - SNYFTER Mode: Vertical Split (Converted Output | Export/Database) */
-        .snyfter-screen {
-            display: flex;
-            width: 100%;
-            height: 100%;
-        }
-        
-        .snyfter-pane-a {
-            width: 60%;
-            background: #111111;
-            border-right: 1px solid #00ff00;
-            display: flex;
-            flex-direction: column;
-            overflow: hidden;
-        }
-        
-        .snyfter-pane-b {
-            width: 40%;
-            background: #111111;
-            display: flex;
-            flex-direction: column;
-            overflow: hidden;
-        }
-        
-        /* Left Panel */
-        .left-panel {
-            width: 400px;
-            background: #111111;
-            border-right: 1px solid #00ff00;
-            display: flex;
-            flex-direction: column;
-            overflow: hidden;
-        }
-        
-        .panel-header {
-            padding: 15px 20px;
-            background: #000000;
-            border-bottom: 1px solid #00ff00;
-            font-weight: 700;
-            color: #ff1493;
-            font-family: 'Hack', monospace;
-        }
-        
-        .panel-content {
-            flex: 1;
-            padding: 20px;
-            overflow-y: auto;
-        }
-        
-        .form-group {
-            margin-bottom: 20px;
-            padding: 15px;
-            background: #222222;
-            border-radius: 8px;
-            border: 1px solid #00ff00;
-        }
-        
-        .form-group h3 {
-            margin: 0 0 15px 0;
-            font-size: 16px;
-            color: #ff1493;
-        }
-        
-        .file-selection {
-            display: flex;
-            flex-direction: column;
-            gap: 10px;
-        }
-        
-        .selected-file {
-            padding: 10px;
-            background: #333333;
-            border-radius: 4px;
-            font-family: 'Hack', monospace;
-            font-size: 14px;
-            word-break: break-all;
-            color: #00ff00;
-            border: 1px solid #00ff00;
-        }
-        
-        .processing-options {
-            display: flex;
-            flex-direction: column;
-            gap: 10px;
-        }
-        
-        .checkbox-group {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-        
-        .checkbox-group label {
-            color: #00ff00;
-        }
-        
-        .checkbox-group input[type="checkbox"] {
-            accent-color: #ff1493;
-        }
-        
-        select {
-            background: #333333;
-            color: #00ff00;
-            border: 1px solid #00ff00;
-            padding: 8px;
-            border-radius: 4px;
-        }
-        
-        select:focus {
-            outline: none;
-            box-shadow: 0 0 10px rgba(0,255,0,0.5);
-        }
-        
-        .action-buttons {
-            display: flex;
-            flex-direction: column;
-            gap: 10px;
-        }
-        
-        .btn {
-            padding: 12px 20px;
-            border: none;
-            border-radius: 6px;
-            font-size: 14px;
             cursor: pointer;
-            transition: all 0.3s ease;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 8px;
         }
         
-        .btn-primary {
-            background: #00ff00;
-            color: #000000;
-            border: 1px solid #00ff00;
-        }
-        
-        .btn-primary:hover {
-            background: #00cc00;
-            box-shadow: 0 0 15px rgba(0,255,0,0.5);
-        }
-        
-        .btn-primary:disabled {
-            background: #444444;
-            color: #666666;
-            cursor: not-allowed;
-            border-color: #444444;
-        }
-        
-        .btn-secondary {
-            background: #ff1493;
-            color: #000000;
-            border: 1px solid #ff1493;
-        }
-        
-        .btn-secondary:hover {
-            background: #e6127a;
-            box-shadow: 0 0 15px rgba(255,20,147,0.5);
-        }
-        
-        .btn-success {
-            background: #00ff00;
-            color: #000000;
-            border: 1px solid #00ff00;
-        }
-        
-        .btn-success:hover {
-            background: #00cc00;
-            box-shadow: 0 0 15px rgba(0,255,0,0.5);
-        }
-        
-        .btn-warning {
-            background: #ff1493;
-            color: #000000;
-            border: 1px solid #ff1493;
-        }
-        
-        .btn-warning:hover {
-            background: #e6127a;
-            box-shadow: 0 0 15px rgba(255,20,147,0.5);
-        }
-        
-        /* Right Panel */
-        .right-panel {
-            flex: 1;
-            background: #111111;
+        .pane-b {
+            width: 50%;
+            background: #2a2a2a;
             display: flex;
             flex-direction: column;
-            overflow: hidden;
+            cursor: pointer;
         }
         
-        .results-summary {
-            padding: 20px;
-            background: #000000;
-            border-bottom: 1px solid #00ff00;
-        }
         
-        .stats-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 15px;
-            margin-top: 15px;
-        }
-        
-        .stat-card {
-            background: #222222;
-            padding: 15px;
-            border-radius: 8px;
-            box-shadow: 0 2px 4px rgba(0,255,0,0.3);
-            text-align: center;
-            border: 1px solid #00ff00;
-        }
-        
-        .stat-value {
-            font-size: 24px;
-            font-weight: bold;
-            color: #ff1493;
-        }
-        
-        .stat-label {
-            font-size: 14px;
-            color: #00ff00;
-            margin-top: 5px;
-        }
-        
-        /* Table Display */
-        .table-container {
-            flex: 1;
-            padding: 20px;
-            overflow: auto;
-        }
-        
-        table {
-            width: 100%;
-            border-collapse: collapse;
-            margin: 20px 0;
-            background: #222222;
-            box-shadow: 0 2px 4px rgba(0,255,0,0.3);
-            border: 1px solid #00ff00;
-        }
-        
-        th, td {
-            border: 1px solid #00ff00;
-            padding: 12px 8px;
-            text-align: left;
-            color: #00ff00;
-        }
-        
-        th {
-            background: linear-gradient(135deg, #000000 0%, #ff1493 100%);
-            color: #00ff00;
-            font-weight: 600;
-            position: sticky;
-            top: 0;
-            z-index: 10;
-        }
-        
-        tr:nth-child(even) {
-            background-color: #333333;
-        }
-        
-        tr:hover {
-            background-color: #444444;
-            box-shadow: 0 0 10px rgba(0,255,0,0.3);
-        }
-        
-        .numeric {
-            text-align: right;
-            font-family: 'Hack', monospace;
-            font-weight: 500;
-            color: #ff1493;
-        }
-        
-        .table-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 20px;
-        }
-        
-        .table-controls {
-            display: flex;
-            gap: 10px;
-            align-items: center;
-        }
-        
-        /* Responsive */
-        @media (max-width: 768px) {
-            .main-content {
-                flex-direction: column;
-            }
-            
-            .left-panel {
-                width: 100%;
-                height: 300px;
-            }
-            
-            .stats-grid {
-                grid-template-columns: 1fr;
-            }
-        }
-        
-        /* Hidden class */
-        .hidden {
-            display: none;
-        }
-        
-        /* Adversarial content warning */
-        .adversarial-warning {
-            background: #330000;
-            border: 1px solid #ff1493;
-            border-radius: 4px;
-            padding: 10px;
-            margin: 10px 0;
-            color: #ff1493;
-        }
-        
-        /* Loading animation */
-        .loading {
-            display: inline-block;
-            width: 20px;
-            height: 20px;
-            border: 3px solid #333333;
-            border-top: 3px solid #00ff00;
-            border-radius: 50%;
-            animation: spin 1s linear infinite;
-        }
-        
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
-        
-        /* PDF Viewer Styles */
         .pdf-viewer {
             flex: 1;
-            background: #000000;
-            border: 2px solid #00ff00;
+            background: #333;
             margin: 10px;
-            border-radius: 8px;
+            border-radius: 4px;
             display: flex;
-            align-items: center;
-            justify-content: center;
-            color: #00ff00;
-            font-family: 'Hack', monospace;
+            flex-direction: column;
+            overflow: auto;
+            touch-action: manipulation;
+        }
+        
+        .pdf-viewer iframe {
+            filter: invert(0.9) hue-rotate(180deg);
         }
         
         .pdf-placeholder {
             text-align: center;
             padding: 40px;
+            color: #ffffff;
+            background: #333;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
         }
         
-        /* Converted Output Display */
         .converted-output {
             flex: 1;
-            padding: 20px;
+            padding: 10px;
             overflow: auto;
-            background: #111111;
+            background: #2a2a2a;
+            color: #ffffff;
+            touch-action: manipulation;
         }
         
-        /* Export Controls */
-        .export-controls {
-            padding: 20px;
-            background: #111111;
-            overflow-y: auto;
-        }
-        
-        /* Glow effects */
-        .app-title {
-            text-shadow: 0 0 20px rgba(0,255,0,0.5);
-        }
-        
-        .panel-header {
-            text-shadow: 0 0 15px rgba(255,20,147,0.5);
-        }
-        
-        /* Scrollbar styling */
-        ::-webkit-scrollbar {
-            width: 8px;
-        }
-        
-        ::-webkit-scrollbar-track {
-            background: #333333;
-        }
-        
-        ::-webkit-scrollbar-thumb {
-            background: #00ff00;
-            border-radius: 4px;
-        }
-        
-        ::-webkit-scrollbar-thumb:hover {
+        .btn {
             background: #ff1493;
+            color: #ffffff;
+            border: none;
+            padding: 12px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        
+        .btn:hover {
+            background: #e6127a;
+        }
+        
+        .btn-secondary {
+            background: #666;
+        }
+        
+        .btn-secondary:hover {
+            background: #777;
+        }
+        
+        #tables-content {
+            background: #333;
+            color: #ffffff;
+            padding: 20px;
+            margin: 10px;
+            border-radius: 4px;
+            min-height: 300px;
+            touch-action: manipulation;
+        }
+        
+        /* Zoom and gesture support */
+        .zoomable {
+            transform-origin: center;
+            transition: transform 0.1s ease-out;
+        }
+        
+        .hidden {
+            display: none;
         }
     </style>
 </head>
 <body>
     <div class="app-container">
-        <!-- Top Panel -->
-        <div class="top-panel">
-            <div class="header-content">
-                <div class="mode-toggle">
-                    <button class="mode-btn active" onclick="switchMode('chonker')">🐹</button>
-                    <button class="mode-btn" onclick="switchMode('snyfter')">🐭</button>
-                </div>
-            </div>
+        <!-- Header -->
+        <div class="header">
+            <div class="app-title">🐹 CHONKER</div>
         </div>
         
         <!-- Main Content -->
         <div class="main-content">
-            <!-- Screen 1: CHONKER Mode (PDF Viewer | Converted Output) -->
-            <div id="screen-1" class="chonker-screen">
-                <!-- Pane A: PDF Viewer -->
-                <div class="chonker-pane-a">
-                    <div class="panel-header">PDF</div>
-                    <div class="pdf-viewer">
-                        <div class="pdf-placeholder" id="pdf-placeholder">
-                            <button class="btn btn-primary" onclick="selectFile()">Load Document</button>
-                            <div id="selected-file-display" class="selected-file hidden"></div>
-                        </div>
-                        <canvas id="pdf-canvas" style="display: none;"></canvas>
-                    </div>
-                </div>
-                
-                <!-- Pane B: Converted Output -->
-                <div class="chonker-pane-b">
-                    <div class="panel-header">OUTPUT</div>
-                    <div class="converted-output" id="converted-output">
-                        <div id="tables-content"></div>
+            <!-- Pane A: PDF Viewer -->
+            <div class="pane-a">
+                <div class="pdf-viewer">
+                    <div class="pdf-placeholder" id="pdf-placeholder">
+                        <button class="btn" onclick="selectFile()">Load Document</button>
+                        <div id="selected-file-display" class="hidden"></div>
+                        <button id="process-btn" class="btn btn-secondary" onclick="processDocument()" style="display: none;">
+                            🐹 Process Document (Ctrl+P)
+                        </button>
                     </div>
                 </div>
             </div>
             
-            <!-- Screen 2: SNYFTER Mode (Output | Export) -->
-            <div id="screen-2" class="snyfter-screen hidden">
-                <!-- Pane A: Converted Output -->
-                <div class="snyfter-pane-a">
-                    <div class="panel-header">OUTPUT</div>
-                    <div class="converted-output" id="snyfter-converted-output">
-                        <div id="snyfter-tables-content"></div>
-                    </div>
-                </div>
-                
-                <!-- Pane B: Export Controls -->
-                <div class="snyfter-pane-b">
-                    <div class="panel-header">EXPORT</div>
-                    <div class="export-controls">
-                        <button class="btn btn-primary" id="convert-btn" onclick="processDocument()" disabled>CONVERT</button>
-                        <button class="btn btn-secondary" onclick="saveToDatabase()" disabled>Save to Database</button>
-                        <button class="btn btn-success" onclick="exportSelected()">Export Selected</button>
-                        <select id="export-format">
-                            <option value="csv">CSV</option>
-                            <option value="json">JSON</option>
-                            <option value="markdown">Markdown</option>
-                            <option value="txt">Plain Text</option>
-                        </select>
-                    </div>
+            <!-- Pane B: Converted Output -->
+            <div class="pane-b">
+                <div class="converted-output" id="converted-output">
+                    <div id="tables-content">Ready for content...</div>
                 </div>
             </div>
         </div>
@@ -635,144 +211,8 @@
         let currentMode = 'chonker';
         let selectedFile = null;
         let processedData = null;
-        let exportBin = [];
-        
-        // Initialize keyboard shortcuts
-        document.addEventListener('keydown', function(e) {
-            // Tab key switches between screens
-            if (e.key === 'Tab') {
-                e.preventDefault();
-                switchScreen();
-                return;
-            }
-            
-            // Spacebar processes document
-            if (e.key === ' ' && !e.ctrlKey && !e.metaKey && !e.altKey) {
-                e.preventDefault();
-                processDocument();
-                return;
-            }
-            
-            if (e.ctrlKey || e.metaKey) {
-                switch(e.key) {
-                    case 'o':
-                        e.preventDefault();
-                        selectFile();
-                        break;
-                    case 's':
-                        e.preventDefault();
-                        saveToDatabase();
-                        break;
-                    case 'q':
-                        e.preventDefault();
-                        generateQCReport();
-                        break;
-                    case '1':
-                        e.preventDefault();
-                        switchMode('chonker');
-                        break;
-                    case '2':
-                        e.preventDefault();
-                        switchMode('snyfter');
-                        break;
-                }
-            }
-        });
-        
-        // Screen/Mode switching
-        function switchMode(mode) {
-            currentMode = mode;
-            switchToScreen(mode);
-            
-            // Update mode buttons
-            const chonkerBtn = document.querySelector('.mode-btn:first-child');
-            const snyfterBtn = document.querySelector('.mode-btn:last-child');
-            
-            if (mode === 'chonker') {
-                chonkerBtn.classList.add('active');
-                snyfterBtn.classList.remove('active');
-            } else {
-                chonkerBtn.classList.remove('active');
-                snyfterBtn.classList.add('active');
-            }
-        }
-        
-        // Switch between screens using Tab key
-        function switchScreen() {
-            if (currentMode === 'chonker') {
-                switchMode('snyfter');
-            } else {
-                switchMode('chonker');
-            }
-        }
-        
-        // Show the appropriate screen
-        function switchToScreen(mode) {
-            const screen1 = document.getElementById('screen-1');
-            const screen2 = document.getElementById('screen-2');
-            
-            if (mode === 'chonker') {
-                screen1.classList.remove('hidden');
-                screen2.classList.add('hidden');
-            } else {
-                screen1.classList.add('hidden');
-                screen2.classList.remove('hidden');
-                // Sync converted output from screen 1 to screen 2
-                syncConvertedOutput();
-            }
-        }
-        
-        // Sync converted output from Screen 1 Pane B to Screen 2 Pane A
-        function syncConvertedOutput() {
-            const chonkerOutput = document.getElementById('tables-content');
-            const snyfterOutput = document.getElementById('snyfter-tables-content');
-            
-            if (chonkerOutput && snyfterOutput) {
-                snyfterOutput.innerHTML = chonkerOutput.innerHTML;
-            }
-            
-            // Note: Stats are now integrated into the tables-content, so no separate sync needed
-            
-            // Update button states in SNYFTER mode (if elements exist)
-            const saveBtn = document.getElementById('save-db-btn-snyfter');
-            const qcBtn = document.getElementById('qc-btn-snyfter');
-            const originalSaveBtn = document.getElementById('save-db-btn');
-            const originalQcBtn = document.getElementById('qc-btn');
-            
-            if (saveBtn && originalSaveBtn) {
-                saveBtn.disabled = originalSaveBtn.disabled;
-            }
-            if (qcBtn && originalQcBtn) {
-                qcBtn.disabled = originalQcBtn.disabled;
-            }
-        }
-        
-        // Status and progress management
-        function updateStatus(message, type = 'info') {
-            const statusText = document.getElementById('status-text');
-            const loadingSpinner = document.getElementById('loading-spinner');
-            
-            statusText.textContent = message;
-            
-            if (type === 'loading') {
-                loadingSpinner.classList.remove('hidden');
-            } else {
-                loadingSpinner.classList.add('hidden');
-            }
-        }
-        
-        function showProgress(percentage) {
-            const progressBar = document.getElementById('progress-bar');
-            const progressFill = document.getElementById('progress-fill');
-            
-            if (percentage > 0) {
-                progressBar.style.display = 'block';
-                progressFill.style.width = percentage + '%';
-            } else {
-                progressBar.style.display = 'none';
-                progressFill.style.width = '0%';
-            }
-        }
+        let editorInstance = null;
+        let currentChunks = [];
         
         // File selection
         async function selectFile() {
@@ -794,108 +234,66 @@
                     fileDisplay.textContent = selectedFile.split('/').pop();
                     fileDisplay.classList.remove('hidden');
                     
-                    // Enable convert button
                     const processBtn = document.getElementById('process-btn');
-                    const convertBtn = document.getElementById('convert-btn');
-                    if (processBtn) processBtn.disabled = false;
-                    if (convertBtn) convertBtn.disabled = false;
+                    if (processBtn) {
+                        processBtn.style.display = 'block';
+                    }
                     
-                    // Display the PDF
                     await displayPDF(selectedFile);
-                } else {
-                    console.log('No file selected or invalid result:', result);
                 }
             } catch (error) {
                 console.error('Error selecting file:', error);
             }
         }
         
-        // Display PDF using MuPDF rendering
+        // Display PDF
         async function displayPDF(pdfPath) {
             try {
-                console.log('Attempting to display PDF:', pdfPath);
+                console.log('CHONKER Attempting to display PDF:', pdfPath);
                 
-                // Show loading message
                 const placeholder = document.getElementById('pdf-placeholder');
                 if (placeholder) {
-                    placeholder.innerHTML = '<div style="text-align: center; color: #00ff00;">Loading PDF...</div>';
+                    placeholder.innerHTML = '<div style="color: #00ff00;">Loading PDF...</div>';
                 }
                 
-                // Get page count first
-                console.log('Getting page count...');
-                const params = { pdfPath: pdfPath };
-                console.log('Calling get_pdf_page_count with params:', params);
-                const pageCountResult = await window.invoke('get_pdf_page_count', params);
-                console.log('Page count result:', pageCountResult);
-                
-                if (!pageCountResult.success) {
-                    console.error('Failed to get page count:', pageCountResult.error);
-                    if (placeholder) {
-                        placeholder.innerHTML = `<div style="text-align: center; color: #ff1493;">Failed to load PDF: ${pageCountResult.error}</div>`;
-                    }
-                    return;
-                }
-                
-                const pageCount = pageCountResult.page_count;
-                console.log(`PDF has ${pageCount} pages`);
-                
-                // Render first page
-                console.log('Rendering first page...');
                 const renderResult = await window.invoke('render_pdf_page', {
                     pdfPath: pdfPath,
-                    pageNum: 0,  // 0-based indexing
+                    pageNum: 0,
                     zoom: 1.0
                 });
-                console.log('Render result:', renderResult);
                 
                 if (renderResult.success) {
-                    // Hide placeholder and show PDF canvas
-                    const canvas = document.getElementById('pdf-canvas');
-                    
                     if (placeholder) placeholder.style.display = 'none';
-                    if (canvas) canvas.style.display = 'block';
                     
-                    // Create image and display
-                    const img = new Image();
-                    img.onload = function() {
-                        console.log('Image loaded, drawing to canvas');
-                        const ctx = canvas.getContext('2d');
-                        canvas.width = img.width;
-                        canvas.height = img.height;
-                        ctx.drawImage(img, 0, 0);
-                    };
-                    img.onerror = function() {
-                        console.error('Failed to load rendered image');
-                        if (placeholder) {
-                            placeholder.style.display = 'block';
-                            placeholder.innerHTML = '<div style="text-align: center; color: #ff1493;">Failed to display PDF image</div>';
-                        }
-                    };
+                    const pdfViewer = document.createElement('iframe');
+                    pdfViewer.id = 'pdf-viewer';
+                    pdfViewer.className = 'zoomable';
+                    pdfViewer.src = renderResult.pdf_url;
+                    pdfViewer.style.cssText = `
+                        width: 100%;
+                        height: 100%;
+                        border: none;
+                        background: #ffffff;
+                        filter: invert(0.9) hue-rotate(180deg);
+                        transform-origin: center;
+                    `;
                     
-                    // For debugging, let's try a simple approach first
-                    console.log('Setting image source...');
-                    img.src = 'data:image/png;base64,' + renderResult.image_data;
-                    
-                    console.log(`PDF loaded: ${pageCount} pages`);
-                } else {
-                    console.error('Failed to render PDF:', renderResult.error);
-                    if (placeholder) {
-                        placeholder.style.display = 'block';
-                        placeholder.innerHTML = `<div style="text-align: center; color: #ff1493;">Failed to render PDF: ${renderResult.error}</div>`;
+                    const existingViewer = document.getElementById('pdf-viewer');
+                    if (existingViewer) {
+                        existingViewer.remove();
                     }
+                    
+                    const pdfContainer = document.querySelector('.pdf-viewer');
+                    if (pdfContainer) {
+                        pdfContainer.appendChild(pdfViewer);
+                    }
+                    
+                    console.log('CHONKER PDF loaded successfully');
+                } else {
+                    console.error('CHONKER Failed to get PDF URL:', renderResult.error);
                 }
             } catch (error) {
-                console.error('Error displaying PDF:', error);
-                console.error('Error details:', {
-                    message: error.message,
-                    stack: error.stack,
-                    name: error.name
-                });
-                const placeholder = document.getElementById('pdf-placeholder');
-                if (placeholder) {
-                    placeholder.style.display = 'block';
-                    placeholder.innerHTML = `<div style="text-align: center; color: #ff1493;">Error: ${error.message || error.toString()}</div>`;
-                }
+                console.error('CHONKER Error displaying PDF:', error);
             }
         }
         
@@ -903,27 +301,17 @@
         async function processDocument() {
             if (!selectedFile) {
                 console.log('No file selected');
-                const outputDiv = document.getElementById('tables-content');
-                if (outputDiv) {
-                    outputDiv.innerHTML = '<div style="padding: 20px; text-align: center; color: #ff1493;">No file selected. Please select a PDF first.</div>';
-                }
                 return;
             }
             
-            console.log('🐹 Starting document processing...');
-            console.log('Selected file:', selectedFile);
+            console.log('CHONKER Starting document processing...');
             
-            // Show processing feedback
             const outputDiv = document.getElementById('tables-content');
             if (outputDiv) {
-                outputDiv.innerHTML = '<div style="padding: 20px; text-align: center; color: #ff1493;">Processing document... 🐹</div>';
+                outputDiv.innerHTML = '<div style="color: #ff1493;">Processing document...</div>';
             }
             
             try {
-                if (!window.invoke) {
-                    throw new Error('Tauri API not available');
-                }
-                
                 const options = {
                     ocr_enabled: true,
                     formula_recognition: true,
@@ -931,46 +319,39 @@
                     language: 'English'
                 };
                 
-                console.log('Invoking process_document with:', { filePath: selectedFile, options });
-                
                 const result = await window.invoke('process_document', {
                     filePath: selectedFile,
                     options: options
                 });
                 
-                console.log('Processing result:', result);
-                
                 if (result && result.success) {
                     processedData = result.data;
                     displayProcessingResults(result.data);
-                    syncConvertedOutput();
-                    console.log('✅ Processing completed successfully');
+                    console.log('Processing completed successfully');
                 } else {
                     const errorMsg = result ? result.error : 'Unknown error';
-                    console.error('❌ Processing failed:', errorMsg);
+                    console.error('Processing failed:', errorMsg);
                     if (outputDiv) {
-                        outputDiv.innerHTML = `<div style="padding: 20px; text-align: center; color: #ff1493;">Processing failed: ${errorMsg}</div>`;
+                        outputDiv.innerHTML = `<div style="color: #ff1493;">Processing failed: ${errorMsg}</div>`;
                     }
                 }
             } catch (error) {
-                console.error('❌ Error processing document:', error);
-                console.error('Error details:', {
-                    message: error.message,
-                    stack: error.stack,
-                    name: error.name,
-                    type: typeof error
-                });
+                console.error('Error processing document:', error);
                 const errorMsg = error ? (error.message || error.toString()) : 'Unknown error';
                 if (outputDiv) {
-                    outputDiv.innerHTML = `<div style="padding: 20px; text-align: center; color: #ff1493;">Error: ${errorMsg}</div>`;
+                    outputDiv.innerHTML = `<div style="color: #ff1493;">Error: ${errorMsg}</div>`;
                 }
             }
         }
         
         // Display processing results
         function displayProcessingResults(data) {
-            console.log('🐹 displayProcessingResults called with data:', data);
-            console.log('🐹 Frontend version: v1.2 - Updated displayProcessingResults');
+            console.log('CHONKER displayProcessingResults called with data:', data);
+            
+            if (data.chunks) {
+                currentChunks = data.chunks;
+                console.log('CHONKER Stored', currentChunks.length, 'chunks');
+            }
             
             const tablesContent = document.getElementById('tables-content');
             if (!tablesContent) {
@@ -978,404 +359,447 @@
                 return;
             }
             
-            // Create stats cards
-            const stats = [
-                { value: data.tables_found || 0, label: 'Tables Found' },
-                { value: data.chunks_extracted || 0, label: 'Chunks Extracted' },
-                { value: data.formulas_detected || 0, label: 'Formulas Detected' },
-                { value: data.pages_processed || 0, label: 'Pages Processed' }
-            ];
+            // Clear container
+            tablesContent.innerHTML = '';
             
-            const statsHtml = `
-                <div class="stats-grid" style="margin-bottom: 20px;">
-                    ${stats.map(stat => `
-                        <div class="stat-card">
-                            <div class="stat-value">${stat.value}</div>
-                            <div class="stat-label">${stat.label}</div>
-                        </div>
-                    `).join('')}
-                </div>
-            `;
-            
-            // Start with stats display
-            tablesContent.innerHTML = statsHtml;
-            
-            // Display tables if available
-            if (data.tables && data.tables.length > 0) {
-                // Append tables to the existing content
-                tablesContent.innerHTML += data.tables.map((table, index) => {
-                    const headers = table.headers || [];
-                    const rows = table.rows || [];
-                    
-                    return `
-                        <div style="margin-bottom: 30px;">
-                            <h3>Table ${index + 1}</h3>
-                            <table>
-                                <thead>
-                                    <tr>
-                                        ${headers.map(header => `<th>${header}</th>`).join('')}
-                                        <th>Actions</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    ${rows.map((row, rowIndex) => `
-                                        <tr>
-                                            ${row.map(cell => `<td class="${isNumeric(cell) ? 'numeric' : ''}">${cell}</td>`).join('')}
-                                            <td>
-                                                <button class="btn btn-primary" onclick="addToExportBin(${index}, ${rowIndex})" style="padding: 5px 10px; font-size: 12px;">
-                                                    🐭 Add to Export
-                                                </button>
-                                            </td>
-                                        </tr>
-                                    `).join('')}
-                                </tbody>
-                            </table>
-                        </div>
-                    `;
-                }).join('');
-            }
-            
-            // Sync to SNYFTER screen
-            syncConvertedOutput();
-        }
-        
-        
-        // Helper function to detect numeric values
-        function isNumeric(value) {
-            return !isNaN(parseFloat(value)) && isFinite(value);
-        }
-        
-        // Save to database
-        async function saveToDatabase() {
-            if (!processedData) {
-                updateStatus('No processed data to save.');
-                return;
-            }
-            
-            try {
-                updateStatus('🐹 Saving to database...', 'loading');
-                
-                const result = await window.invoke('save_to_database', {
-                    data: processedData
-                });
-                
-                if (result.success) {
-                    updateStatus('Data saved to database successfully!');
-                } else {
-                    updateStatus('Save failed: ' + result.error);
-                }
-            } catch (error) {
-                console.error('Error saving to database:', error);
-                updateStatus('Save error: ' + error.message);
-            }
-        }
-        
-        // Generate QC Report
-        async function generateQCReport() {
-            if (!processedData) {
-                updateStatus('No processed data for QC report.');
-                return;
-            }
-            
-            try {
-                updateStatus('🐹 Generating QC report with Qwen cleaning... (This may take 30+ seconds)', 'loading');
-                showProgress(20);
-                
-                const result = await window.invoke('generate_qc_report', {
-                    data: processedData
-                });
-                
-                showProgress(80);
-                
-                if (result.success) {
-                    updateStatus('QC report generated successfully!');
-                    
-                    // Display adversarial content warnings if any
-                    if (result.adversarial_content) {
-                        displayAdversarialWarnings(result.adversarial_content);
-                    }
-                } else {
-                    updateStatus('QC report generation failed: ' + result.error);
-                }
-                
-                showProgress(100);
-                setTimeout(() => showProgress(0), 2000);
-                
-            } catch (error) {
-                console.error('Error generating QC report:', error);
-                updateStatus('QC report error: ' + error.message);
-                showProgress(0);
-            }
-        }
-        
-        // Display adversarial content warnings
-        function displayAdversarialWarnings(adversarialContent) {
-            const tablesContent = document.getElementById('tables-content');
-            const warningDiv = document.createElement('div');
-            warningDiv.className = 'adversarial-warning';
-            warningDiv.innerHTML = `
-                <h4>Adversarial Content Detected</h4>
-                <p>The following content has been flagged as potentially adversarial:</p>
-                <ul>
-                    ${adversarialContent.map(item => `<li>${item}</li>`).join('')}
-                </ul>
-                <p>Please review these items carefully before proceeding.</p>
-            `;
-            tablesContent.insertBefore(warningDiv, tablesContent.firstChild);
-        }
-        
-        // Export bin management
-        function addToExportBin(tableIndex, rowIndex) {
-            if (!processedData || !processedData.tables) return;
-            
-            const table = processedData.tables[tableIndex];
-            const row = table.rows[rowIndex];
-            
-            const exportItem = {
-                id: Date.now() + Math.random(),
-                tableIndex: tableIndex,
-                rowIndex: rowIndex,
-                data: row,
-                headers: table.headers
-            };
-            
-            exportBin.push(exportItem);
-            updateExportBinDisplay();
-            updateStatus(`🐭 Added row ${rowIndex + 1} from table ${tableIndex + 1} to export bin`);
-        }
-        
-        function removeFromExportBin(id) {
-            exportBin = exportBin.filter(item => item.id !== id);
-            updateExportBinDisplay();
-            updateStatus('🐭 Removed item from export bin');
-        }
-        
-        function updateExportBinDisplay() {
-            const exportBinContent = document.getElementById('export-bin-content');
-            
-            if (exportBin.length === 0) {
-                exportBinContent.innerHTML = '<p>Export bin is empty</p>';
-                return;
-            }
-            
-            exportBinContent.innerHTML = `
-                <p>Export bin contains ${exportBin.length} items:</p>
-                <div style="max-height: 300px; overflow-y: auto;">
-                    ${exportBin.map(item => `
-                        <div style="background: #f8f9fa; padding: 10px; margin: 5px 0; border-radius: 4px; font-size: 12px;">
-                            <strong>Table ${item.tableIndex + 1}, Row ${item.rowIndex + 1}:</strong>
-                            <br>
-                            ${item.data.slice(0, 3).join(', ')}${item.data.length > 3 ? '...' : ''}
-                            <button onclick="removeFromExportBin('${item.id}')" style="float: right; background: #dc3545; color: white; border: none; padding: 2px 6px; border-radius: 3px; cursor: pointer; font-size: 10px;">
-                                ❌
-                            </button>
-                        </div>
-                    `).join('')}
-                </div>
-            `;
-        }
-        
-        // Export selected items
-        async function exportSelected() {
-            if (exportBin.length === 0) {
-                updateStatus('Export bin is empty.');
-                return;
-            }
-            
-            try {
-                const format = document.getElementById('export-format').value;
-                updateStatus('🐭 Exporting selected items...', 'loading');
-                
-                const result = await window.invoke('export_data', {
-                    items: exportBin,
-                    format: format
-                });
-                
-                if (result.success) {
-                    updateStatus(`Exported ${exportBin.length} items to ${format.toUpperCase()} format!`);
-                } else {
-                    updateStatus('Export failed: ' + result.error);
-                }
-            } catch (error) {
-                console.error('Error exporting data:', error);
-                updateStatus('Export error: ' + error.message);
-            }
-        }
-        
-        // Clear export bin
-        function clearExportBin() {
-            exportBin = [];
-            updateExportBinDisplay();
-            updateStatus('🐭 Export bin cleared');
-        }
-        
-        // Original functions for backward compatibility
-        async function loadRealTables() {
-            try {
-                if (!window.invoke) {
-                    updateStatus('Tauri API not ready yet. Please wait a moment and try again.');
-                    return;
-                }
-                
-                const statusDiv = document.querySelector('.status');
-                if (statusDiv) statusDiv.innerHTML = '<strong>🐹 Status:</strong> Loading tables from database... 🐭';
-                
-                // Get table chunks from CHONKER database
-                const tableChunks = await window.invoke('get_table_chunks');
-                
-                if (tableChunks.length === 0) {
-                    updateStatus('No table chunks found in database.');
-                    document.getElementById('tables-content').innerHTML = '<p>No tables found in the CHONKER database.</p>';
-                    return;
-                }
-                
-                updateStatus(`🐹 Found ${tableChunks.length} table chunks in database! 🐭`);
-                
-                // Convert chunks to table format
-                const tables = convertChunksToTables(tableChunks);
-                displayTables(tables);
-                
-            } catch (error) {
-                console.error('Error loading tables:', error);
-                updateStatus('Error loading tables: ' + error.message);
-            }
-        }
-        
-        // Convert database chunks to table format
-        function convertChunksToTables(chunks) {
-            return chunks.map((chunk, index) => {
-                try {
-                    // Try to parse JSON content
-                    const content = JSON.parse(chunk.content);
-                    
-                    if (content.headers && content.rows) {
-                        return {
-                            headers: content.headers,
-                            rows: content.rows,
-                            source: chunk.file_name || 'Unknown',
-                            page: chunk.page_number || 'Unknown'
-                        };
-                    } else {
-                        // Fallback for non-structured content
-                        return {
-                            headers: ['Content', 'Source', 'Page', 'Type'],
-                            rows: [[
-                                chunk.content.substring(0, 100) + (chunk.content.length > 100 ? '...' : ''),
-                                chunk.file_name || 'Unknown',
-                                chunk.page_number || 'Unknown',
-                                chunk.chunk_type || 'text'
-                            ]],
-                            source: chunk.file_name || 'Unknown',
-                            page: chunk.page_number || 'Unknown'
-                        };
-                    }
-                } catch (e) {
-                    // Fallback for non-JSON content
-                    return {
-                        headers: ['Content', 'Source', 'Page', 'Type'],
-                        rows: [[
-                            chunk.content.substring(0, 100) + (chunk.content.length > 100 ? '...' : ''),
-                            chunk.file_name || 'Unknown',
-                            chunk.page_number || 'Unknown',
-                            chunk.chunk_type || 'text'
-                        ]],
-                        source: chunk.file_name || 'Unknown',
-                        page: chunk.page_number || 'Unknown'
-                    };
-                }
-            });
-        }
-        
-        async function debugTauriAPI() {
-            try {
-                updateStatus('Testing Tauri API...', 'loading');
-                
-                if (!window.invoke) {
-                    updateStatus('Tauri API not available');
-                    return;
-                }
-                
-                console.log('Tauri API available:', !!window.invoke);
-                console.log('Global __TAURI__ object:', window.__TAURI__);
-                
-                // Test a simple command
-                const response = await window.invoke('test_command');
-                console.log('Test command response:', response);
-                
-                updateStatus('Tauri API test completed - check console for details');
-                
-            } catch (error) {
-                console.error('Tauri API test error:', error);
-                updateStatus('Tauri API test failed: ' + error.message);
-            }
-        }
-        
-        // Help modal functionality
-        function showHelpModal() {
-            const modal = document.createElement('div');
-            modal.style.cssText = `
-                position: fixed;
-                top: 0;
-                left: 0;
+            // Create Quill editor container
+            const editorContainer = document.createElement('div');
+            editorContainer.style.cssText = `
                 width: 100%;
-                height: 100%;
-                background: rgba(0,0,0,0.5);
-                display: flex;
-                justify-content: center;
-                align-items: center;
-                z-index: 1000;
+                height: calc(100vh - 120px);
+                background: #333;
+                margin: 0;
+                border: none;
+                border-radius: 4px;
+                padding: 0;
             `;
             
-            modal.innerHTML = `
-                <div style="background: white; padding: 30px; border-radius: 10px; max-width: 600px; max-height: 80vh; overflow-y: auto;">
-                    <h2>🐹🐭 CHONKER Help</h2>
-                    <h3>Keyboard Shortcuts:</h3>
-                    <ul>
-                        <li><strong>Ctrl/Cmd + O:</strong> Select PDF file</li>
-                        <li><strong>Spacebar:</strong> Process document</li>
-                        <li><strong>Tab:</strong> Switch between 🐹/🐭 modes</li>
-                        <li><strong>Ctrl/Cmd + S:</strong> Save to database</li>
-                        <li><strong>Ctrl/Cmd + Q:</strong> Generate QC report</li>
-                        <li><strong>Ctrl/Cmd + 1:</strong> Switch to CHONKER mode</li>
-                        <li><strong>Ctrl/Cmd + 2:</strong> Switch to SNYFTER mode</li>
-                    </ul>
-                    <h3>Features:</h3>
-                    <ul>
-                        <li><strong>CHONKER Mode:</strong> Process PDF documents and extract tables</li>
-                        <li><strong>SNYFTER Mode:</strong> Export and manage processed data</li>
-                        <li><strong>Export Bin:</strong> Collect specific rows for export</li>
-                        <li><strong>QC Reports:</strong> Generate quality control reports with AI cleaning</li>
-                    </ul>
-                    <button onclick="this.parentElement.parentElement.remove()" style="background: #007bff; color: white; border: none; padding: 10px 20px; border-radius: 5px; cursor: pointer; margin-top: 20px;">
-                        Close Help
-                    </button>
-                </div>
-            `;
+            const quillContainer = document.createElement('div');
+            quillContainer.id = 'quill-editor';
+            quillContainer.style.cssText = 'width: 100%; height: 100%; background: #333; color: #ffffff;';
             
-            document.body.appendChild(modal);
+            editorContainer.appendChild(quillContainer);
+            tablesContent.appendChild(editorContainer);
             
-            // Close on background click
-            modal.addEventListener('click', (e) => {
-                if (e.target === modal) {
-                    modal.remove();
+            // Initialize Quill without toolbar
+            try {
+                if (typeof Quill === 'undefined') {
+                    throw new Error('Quill.js not loaded');
                 }
-            });
+                
+                const quillEditor = new Quill('#quill-editor', {
+                    theme: 'snow',
+                    modules: {
+                        toolbar: false  // No toolbar GUI
+                    },
+                    placeholder: 'Document content will appear here...',
+                    readOnly: false
+                });
+                
+                // Apply dark mode styles
+                const quillRoot = quillEditor.root;
+                quillRoot.style.backgroundColor = '#333';
+                quillRoot.style.color = '#ffffff';
+                quillRoot.style.border = 'none';
+                quillRoot.style.padding = '20px';
+                
+                // Add zoomable class to the container, not the quill root
+                editorContainer.classList.add('zoomable');
+                
+                // Clean and set content
+                let cleanContent = '';
+                if (data.formatted_html) {
+                    console.log('CHONKER Using formatted HTML output');
+                    // Remove emojis and clean up the HTML
+                    cleanContent = cleanHTML(data.formatted_html);
+                } else {
+                    console.log('CHONKER Creating basic display');
+                    cleanContent = '<h2>Processing Complete</h2><p>Content processed successfully.</p>';
+                }
+                
+                // Set content using Quill's clipboard API
+                try {
+                    quillEditor.clipboard.dangerouslyPasteHTML(cleanContent);
+                    console.log('CHONKER Content set successfully');
+                } catch (error) {
+                    console.log('CHONKER Fallback to direct innerHTML:', error);
+                    quillEditor.root.innerHTML = cleanContent;
+                }
+                
+                // Store editor instance
+                editorInstance = quillEditor;
+                
+                console.log('CHONKER Quill editor initialized without toolbar');
+                
+            } catch (error) {
+                console.error('CHONKER Quill initialization failed:', error);
+                // Fallback to plain HTML display
+                let cleanContent = data.formatted_html ? cleanHTML(data.formatted_html) : '<h2>Processing Complete</h2><p>Content processed successfully.</p>';
+                tablesContent.innerHTML = `
+                    <div style="background: #333; color: #ffffff; padding: 20px; border-radius: 4px; height: calc(100vh - 120px); overflow-y: auto;">
+                        ${cleanContent}
+                    </div>
+                `;
+            }
         }
         
-        // Add help button to header
-        document.addEventListener('DOMContentLoaded', () => {
-            const headerContent = document.querySelector('.header-content');
-            const helpButton = document.createElement('button');
-            helpButton.className = 'mode-btn';
-            helpButton.onclick = showHelpModal;
-            helpButton.innerHTML = 'Help';
-            headerContent.appendChild(helpButton);
+        // Clean HTML function to remove emojis and make readable
+        function cleanHTML(html) {
+            return html
+                // Remove emojis using regex
+                .replace(/[\u{1f600}-\u{1f64f}]|[\u{1f300}-\u{1f5ff}]|[\u{1f680}-\u{1f6ff}]|[\u{1f1e0}-\u{1f1ff}]|[\u{2600}-\u{26ff}]|[\u{2700}-\u{27bf}]/gu, '')
+                // Clean up extra spaces
+                .replace(/\s+/g, ' ')
+                // Remove any remaining emoji-like patterns
+                .replace(/\ud83d[\ude00-\ude4f]/g, '')
+                .replace(/\ud83c[\udf00-\udfff]/g, '')
+                .replace(/\ud83d[\u0000-\uddff]/g, '')
+                .replace(/\ud83e[\udd00-\uddff]/g, '')
+                .replace(/[\u2600-\u27bf]/g, '')
+                // Clean up HTML spacing
+                .trim();
+        }
+        
+        // Mouse tracking for zoom focus
+        let mouseX = 0;
+        let mouseY = 0;
+        let minZoom = 0.25;
+        let maxZoom = 3.0;
+        
+        // Track mouse position globally
+        document.addEventListener('mousemove', function(e) {
+            mouseX = e.clientX;
+            mouseY = e.clientY;
         });
         
-        // Initialize the app
+        // Zoom functions that focus on mouse position
+        function zoomElement(element, currentZoom, zoomFactor, mouseEvent) {
+            if (!element) return currentZoom;
+            
+            const rect = element.getBoundingClientRect();
+            const newZoom = Math.max(minZoom, Math.min(maxZoom, currentZoom * zoomFactor));
+            
+            if (newZoom === currentZoom) return currentZoom;
+            
+            // Calculate mouse position relative to element
+            let relativeX, relativeY;
+            if (mouseEvent) {
+                relativeX = (mouseEvent.clientX - rect.left) / rect.width;
+                relativeY = (mouseEvent.clientY - rect.top) / rect.height;
+            } else {
+                // Use global mouse position if no event
+                relativeX = (mouseX - rect.left) / rect.width;
+                relativeY = (mouseY - rect.top) / rect.height;
+            }
+            
+            // Clamp to element bounds
+            relativeX = Math.max(0, Math.min(1, relativeX));
+            relativeY = Math.max(0, Math.min(1, relativeY));
+            
+            // Apply zoom with transform-origin at mouse position
+            element.style.transformOrigin = `${relativeX * 100}% ${relativeY * 100}%`;
+            element.style.transform = `scale(${newZoom})`;
+            
+            return newZoom;
+        }
+        
+        // Remove the active pane system - let each pane handle its own zoom naturally
+        
+        // Natural trackpad and mouse controls
+        function setupGestureSupport() {
+            setupPDFZoom();
+            setupEditorZoom();
+        }
+        
+        function setupPDFZoom() {
+            const pdfContainer = document.querySelector('.pdf-viewer');
+            const paneA = document.querySelector('.pane-a');
+            let pdfZoom = 1.0;
+            
+            console.log('CHONKER Setting up PDF zoom, container found:', !!pdfContainer, 'paneA found:', !!paneA);
+            
+            if (!paneA) return;
+            
+            // Function to get the PDF element (iframe or placeholder)
+            function getPDFElement() {
+                return document.getElementById('pdf-viewer') || 
+                       document.querySelector('.pdf-viewer iframe') ||
+                       document.querySelector('.pdf-placeholder');
+            }
+            
+            // Wheel zoom with Cmd/Ctrl on the entire pane A
+            paneA.addEventListener('wheel', function(e) {
+                if (e.ctrlKey || e.metaKey) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    
+                    console.log('CHONKER PDF wheel zoom triggered');
+                    
+                    const zoomFactor = e.deltaY < 0 ? 1.1 : 0.9;
+                    const pdfElement = getPDFElement();
+                    
+                    console.log('CHONKER PDF element found:', !!pdfElement, pdfElement?.tagName);
+                    
+                    if (pdfElement) {
+                        const newZoom = Math.max(minZoom, Math.min(maxZoom, pdfZoom * zoomFactor));
+                        
+                        if (newZoom !== pdfZoom) {
+                            pdfZoom = newZoom;
+                            
+                            // Calculate mouse position relative to element
+                            const rect = pdfElement.getBoundingClientRect();
+                            const relativeX = (e.clientX - rect.left) / rect.width;
+                            const relativeY = (e.clientY - rect.top) / rect.height;
+                            
+                            // Clamp to element bounds
+                            const clampedX = Math.max(0, Math.min(1, relativeX));
+                            const clampedY = Math.max(0, Math.min(1, relativeY));
+                            
+                            // Apply zoom with transform-origin at mouse position
+                            pdfElement.style.transformOrigin = `${clampedX * 100}% ${clampedY * 100}%`;
+                            pdfElement.style.transform = `scale(${pdfZoom})`;
+                            
+                            console.log('CHONKER PDF zoom applied:', pdfZoom);
+                        }
+                    }
+                }
+            }, { passive: false });
+            
+            // Touch gestures for pinch-to-zoom on pane A
+            let initialDistance = 0;
+            let initialZoom = pdfZoom;
+            
+            paneA.addEventListener('touchstart', function(e) {
+                if (e.touches.length === 2) {
+                    initialDistance = getDistance(e.touches[0], e.touches[1]);
+                    initialZoom = pdfZoom;
+                    console.log('CHONKER PDF pinch start');
+                }
+            });
+            
+            paneA.addEventListener('touchmove', function(e) {
+                if (e.touches.length === 2) {
+                    e.preventDefault();
+                    const currentDistance = getDistance(e.touches[0], e.touches[1]);
+                    const scale = currentDistance / initialDistance;
+                    
+                    const pdfElement = getPDFElement();
+                    if (pdfElement) {
+                        pdfZoom = Math.max(minZoom, Math.min(maxZoom, initialZoom * scale));
+                        
+                        // Calculate center point for touch zoom
+                        const touch1 = e.touches[0];
+                        const touch2 = e.touches[1];
+                        const centerX = (touch1.clientX + touch2.clientX) / 2;
+                        const centerY = (touch1.clientY + touch2.clientY) / 2;
+                        
+                        const rect = pdfElement.getBoundingClientRect();
+                        const relativeX = (centerX - rect.left) / rect.width;
+                        const relativeY = (centerY - rect.top) / rect.height;
+                        
+                        pdfElement.style.transformOrigin = `${relativeX * 100}% ${relativeY * 100}%`;
+                        pdfElement.style.transform = `scale(${pdfZoom})`;
+                        
+                        console.log('CHONKER PDF pinch zoom:', pdfZoom);
+                    }
+                }
+            }, { passive: false });
+            
+            // Store zoom reset function on paneA
+            paneA.resetZoom = function() {
+                const pdfElement = getPDFElement();
+                if (pdfElement) {
+                    pdfZoom = 1.0;
+                    pdfElement.style.transform = 'scale(1.0)';
+                    pdfElement.style.transformOrigin = 'center center';
+                    console.log('CHONKER PDF zoom reset');
+                }
+            };
+        }
+        
+        function setupEditorZoom() {
+            const editorContainer = document.querySelector('.pane-b');
+            let editorZoom = 1.0;
+            
+            if (!editorContainer) return;
+            
+            // Wheel zoom with Cmd/Ctrl
+            editorContainer.addEventListener('wheel', function(e) {
+                if (e.ctrlKey || e.metaKey) {
+                    e.preventDefault();
+                    
+                    const zoomFactor = e.deltaY < 0 ? 1.1 : 0.9;
+                    const editor = editorContainer.querySelector('.zoomable') || editorContainer.querySelector('#tables-content');
+                    
+                    if (editor) {
+                        editorZoom = zoomElement(editor, editorZoom, zoomFactor, e);
+                    }
+                }
+            }, { passive: false });
+            
+            // Touch gestures for pinch-to-zoom
+            let initialDistance = 0;
+            let initialZoom = editorZoom;
+            
+            editorContainer.addEventListener('touchstart', function(e) {
+                if (e.touches.length === 2) {
+                    initialDistance = getDistance(e.touches[0], e.touches[1]);
+                    initialZoom = editorZoom;
+                }
+            });
+            
+            editorContainer.addEventListener('touchmove', function(e) {
+                if (e.touches.length === 2) {
+                    e.preventDefault();
+                    const currentDistance = getDistance(e.touches[0], e.touches[1]);
+                    const scale = currentDistance / initialDistance;
+                    
+                    const editor = editorContainer.querySelector('.zoomable') || editorContainer.querySelector('#tables-content');
+                    if (editor) {
+                        editorZoom = Math.max(minZoom, Math.min(maxZoom, initialZoom * scale));
+                        editor.style.transform = `scale(${editorZoom})`;
+                    }
+                }
+            }, { passive: false });
+            
+            // Store zoom reset function
+            editorContainer.resetZoom = function() {
+                const editor = editorContainer.querySelector('.zoomable') || editorContainer.querySelector('#tables-content');
+                if (editor) {
+                    editorZoom = 1.0;
+                    editor.style.transform = 'scale(1.0)';
+                    editor.style.transformOrigin = 'center center';
+                }
+            };
+        }
+        
+        function getDistance(touch1, touch2) {
+            const dx = touch1.clientX - touch2.clientX;
+            const dy = touch1.clientY - touch2.clientY;
+            return Math.sqrt(dx * dx + dy * dy);
+        }
+        
+        // Keyboard shortcuts - natural browser-like behavior
+        document.addEventListener('keydown', function(e) {
+            if (e.ctrlKey || e.metaKey) {
+                switch(e.key) {
+                    case 'o':
+                        e.preventDefault();
+                        selectFile();
+                        break;
+                    case 'p':
+                        e.preventDefault();
+                        processDocument();
+                        break;
+                    case '=':
+                    case '+':
+                        e.preventDefault();
+                        // Zoom the element under the mouse
+                        zoomAtMousePosition(1.1);
+                        break;
+                    case '-':
+                        e.preventDefault();
+                        // Zoom the element under the mouse
+                        zoomAtMousePosition(0.9);
+                        break;
+                    case '0':
+                        e.preventDefault();
+                        // Reset zoom for both panes
+                        resetAllZoom();
+                        break;
+                }
+            }
+        });
+        
+        // Zoom at current mouse position
+        function zoomAtMousePosition(zoomFactor) {
+            const elementUnderMouse = document.elementFromPoint(mouseX, mouseY);
+            
+            // Find which pane the mouse is over
+            const paneA = document.querySelector('.pane-a');
+            const paneB = document.querySelector('.pane-b');
+            
+            console.log('CHONKER Keyboard zoom triggered, mouse at:', mouseX, mouseY);
+            
+            if (paneA && paneA.contains(elementUnderMouse)) {
+                // Mouse is over PDF pane A
+                console.log('CHONKER Zooming PDF pane');
+                
+                const pdfElement = document.getElementById('pdf-viewer') || 
+                                 document.querySelector('.pdf-viewer iframe') ||
+                                 document.querySelector('.pdf-placeholder');
+                
+                if (pdfElement) {
+                    const currentScale = getCurrentZoom(pdfElement);
+                    const newZoom = Math.max(minZoom, Math.min(maxZoom, currentScale * zoomFactor));
+                    
+                    if (newZoom !== currentScale) {
+                        // Calculate mouse position relative to element
+                        const rect = pdfElement.getBoundingClientRect();
+                        const relativeX = (mouseX - rect.left) / rect.width;
+                        const relativeY = (mouseY - rect.top) / rect.height;
+                        
+                        // Clamp to element bounds
+                        const clampedX = Math.max(0, Math.min(1, relativeX));
+                        const clampedY = Math.max(0, Math.min(1, relativeY));
+                        
+                        // Apply zoom
+                        pdfElement.style.transformOrigin = `${clampedX * 100}% ${clampedY * 100}%`;
+                        pdfElement.style.transform = `scale(${newZoom})`;
+                        
+                        console.log('CHONKER PDF keyboard zoom applied:', newZoom);
+                    }
+                }
+            } else if (paneB && paneB.contains(elementUnderMouse)) {
+                // Mouse is over editor pane B
+                console.log('CHONKER Zooming editor pane');
+                
+                const editor = paneB.querySelector('.zoomable') || paneB.querySelector('#tables-content');
+                if (editor) {
+                    const currentScale = getCurrentZoom(editor);
+                    zoomElement(editor, currentScale, zoomFactor);
+                }
+            }
+        }
+        
+        // Get current zoom level from transform
+        function getCurrentZoom(element) {
+            const transform = element.style.transform;
+            const match = transform.match(/scale\(([^)]+)\)/);
+            return match ? parseFloat(match[1]) : 1.0;
+        }
+        
+        // Reset all zoom levels
+        function resetAllZoom() {
+            console.log('CHONKER Resetting all zoom levels');
+            
+            // Reset PDF zoom
+            const pdfElement = document.getElementById('pdf-viewer') || 
+                              document.querySelector('.pdf-viewer iframe') ||
+                              document.querySelector('.pdf-placeholder');
+            if (pdfElement) {
+                pdfElement.style.transform = 'scale(1.0)';
+                pdfElement.style.transformOrigin = 'center center';
+                console.log('CHONKER PDF zoom reset');
+            }
+            
+            // Reset editor zoom
+            const paneB = document.querySelector('.pane-b');
+            if (paneB) {
+                const editor = paneB.querySelector('.zoomable') || paneB.querySelector('#tables-content');
+                if (editor) {
+                    editor.style.transform = 'scale(1.0)';
+                    editor.style.transformOrigin = 'center center';
+                    console.log('CHONKER Editor zoom reset');
+                }
+            }
+        }
+        
+        // Initialize
         document.addEventListener('DOMContentLoaded', () => {
-            updateStatus('🐹 CHONKER application loaded successfully! 🐭');
-            console.log('🐹🐭 CHONKER Tauri frontend initialized');
+            console.log('CHONKER initialized');
+            setupGestureSupport();
+            console.log('CHONKER Natural zoom controls enabled');
         });
     </script>
 </body>

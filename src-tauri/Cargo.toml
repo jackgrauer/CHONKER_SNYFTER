@@ -36,6 +36,6 @@ tracing = "0.1"
 thiserror = "1.0"
 md5 = "0.7"
 
-# PDF rendering
-mupdf-sys = "0.5"
+# PDF rendering (using alternative approach)
+# mupdf-sys = "0.5"  # Commented out due to build issues
 base64 = "0.22"
