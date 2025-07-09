@@ -1,0 +1,203 @@
+{
+  "builtTestProducts" : [
+
+  ],
+  "copyCommands" : {
+
+  },
+  "explicitTargetDependencyImportCheckingMode" : {
+    "none" : {
+
+    }
+  },
+  "generatedSourceTargetSet" : [
+
+  ],
+  "pluginDescriptions" : [
+
+  ],
+  "swiftCommands" : {
+    "C.apple_vision_ocr-arm64-apple-macosx15.0-release.module" : {
+      "executable" : "/Library/Developer/CommandLineTools/usr/bin/swiftc",
+      "fileList" : "/Users/jack/CHONKER_SNYFTER/swift/.build/arm64-apple-macosx/release/apple_vision_ocr.build/sources",
+      "importPath" : "/Users/jack/CHONKER_SNYFTER/swift/.build/arm64-apple-macosx/release/Modules",
+      "inputs" : [
+        {
+          "kind" : "file",
+          "name" : "/Users/jack/CHONKER_SNYFTER/swift/Sources/main.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/jack/CHONKER_SNYFTER/swift/.build/arm64-apple-macosx/release/swift-version--1AB21518FC5DEDBE.txt"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/jack/CHONKER_SNYFTER/swift/.build/arm64-apple-macosx/release/apple_vision_ocr.build/sources"
+        }
+      ],
+      "isLibrary" : false,
+      "moduleName" : "apple_vision_ocr",
+      "moduleOutputPath" : "/Users/jack/CHONKER_SNYFTER/swift/.build/arm64-apple-macosx/release/Modules/apple_vision_ocr.swiftmodule",
+      "objects" : [
+        "/Users/jack/CHONKER_SNYFTER/swift/.build/arm64-apple-macosx/release/apple_vision_ocr.build/main.swift.o"
+      ],
+      "otherArguments" : [
+        "-target",
+        "arm64-apple-macosx12.0",
+        "-O",
+        "-j8",
+        "-DSWIFT_PACKAGE",
+        "-module-cache-path",
+        "/Users/jack/CHONKER_SNYFTER/swift/.build/arm64-apple-macosx/release/ModuleCache",
+        "-parseable-output",
+        "-Xfrontend",
+        "-entry-point-function-name",
+        "-Xfrontend",
+        "apple_vision_ocr_main",
+        "-parse-as-library",
+        "-color-diagnostics",
+        "-swift-version",
+        "5",
+        "-F",
+        "/Library/Developer/CommandLineTools/Library/Developer/Frameworks",
+        "-sdk",
+        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk",
+        "-g",
+        "-Xcc",
+        "-isysroot",
+        "-Xcc",
+        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk",
+        "-Xcc",
+        "-fPIC",
+        "-Xcc",
+        "-g",
+        "-package-name",
+        "swift"
+      ],
+      "outputFileMapPath" : "/Users/jack/CHONKER_SNYFTER/swift/.build/arm64-apple-macosx/release/apple_vision_ocr.build/output-file-map.json",
+      "outputs" : [
+        {
+          "kind" : "file",
+          "name" : "/Users/jack/CHONKER_SNYFTER/swift/.build/arm64-apple-macosx/release/apple_vision_ocr.build/main.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/jack/CHONKER_SNYFTER/swift/.build/arm64-apple-macosx/release/Modules/apple_vision_ocr.swiftmodule"
+        }
+      ],
+      "prepareForIndexing" : false,
+      "sources" : [
+        "/Users/jack/CHONKER_SNYFTER/swift/Sources/main.swift"
+      ],
+      "tempsPath" : "/Users/jack/CHONKER_SNYFTER/swift/.build/arm64-apple-macosx/release/apple_vision_ocr.build",
+      "wholeModuleOptimization" : true
+    }
+  },
+  "swiftFrontendCommands" : {
+
+  },
+  "swiftTargetScanArgs" : {
+    "apple_vision_ocr" : [
+      "/Library/Developer/CommandLineTools/usr/bin/swiftc",
+      "-module-name",
+      "apple_vision_ocr",
+      "-package-name",
+      "swift",
+      "-whole-module-optimization",
+      "-num-threads",
+      "8",
+      "-c",
+      "/Users/jack/CHONKER_SNYFTER/swift/Sources/main.swift",
+      "-I",
+      "/Users/jack/CHONKER_SNYFTER/swift/.build/arm64-apple-macosx/release/Modules",
+      "-target",
+      "arm64-apple-macosx12.0",
+      "-O",
+      "-j8",
+      "-DSWIFT_PACKAGE",
+      "-module-cache-path",
+      "/Users/jack/CHONKER_SNYFTER/swift/.build/arm64-apple-macosx/release/ModuleCache",
+      "-parseable-output",
+      "-Xfrontend",
+      "-entry-point-function-name",
+      "-Xfrontend",
+      "apple_vision_ocr_main",
+      "-parse-as-library",
+      "-color-diagnostics",
+      "-swift-version",
+      "5",
+      "-F",
+      "/Library/Developer/CommandLineTools/Library/Developer/Frameworks",
+      "-sdk",
+      "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk",
+      "-g",
+      "-Xcc",
+      "-isysroot",
+      "-Xcc",
+      "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk",
+      "-Xcc",
+      "-fPIC",
+      "-Xcc",
+      "-g",
+      "-package-name",
+      "swift",
+      "-driver-use-frontend-path",
+      "/Library/Developer/CommandLineTools/usr/bin/swiftc"
+    ]
+  },
+  "targetDependencyMap" : {
+    "apple_vision_ocr" : [
+
+    ]
+  },
+  "testDiscoveryCommands" : {
+
+  },
+  "testEntryPointCommands" : {
+
+  },
+  "writeCommands" : {
+    "/Users/jack/CHONKER_SNYFTER/swift/.build/arm64-apple-macosx/release/apple_vision_ocr.build/sources" : {
+      "alwaysOutOfDate" : false,
+      "inputs" : [
+        {
+          "kind" : "virtual",
+          "name" : "<sources-file-list>"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/jack/CHONKER_SNYFTER/swift/Sources/main.swift"
+        }
+      ],
+      "outputFilePath" : "/Users/jack/CHONKER_SNYFTER/swift/.build/arm64-apple-macosx/release/apple_vision_ocr.build/sources"
+    },
+    "/Users/jack/CHONKER_SNYFTER/swift/.build/arm64-apple-macosx/release/apple_vision_ocr.product/Objects.LinkFileList" : {
+      "alwaysOutOfDate" : false,
+      "inputs" : [
+        {
+          "kind" : "virtual",
+          "name" : "<link-file-list>"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/jack/CHONKER_SNYFTER/swift/.build/arm64-apple-macosx/release/apple_vision_ocr.build/main.swift.o"
+        }
+      ],
+      "outputFilePath" : "/Users/jack/CHONKER_SNYFTER/swift/.build/arm64-apple-macosx/release/apple_vision_ocr.product/Objects.LinkFileList"
+    },
+    "/Users/jack/CHONKER_SNYFTER/swift/.build/arm64-apple-macosx/release/swift-version--1AB21518FC5DEDBE.txt" : {
+      "alwaysOutOfDate" : true,
+      "inputs" : [
+        {
+          "kind" : "virtual",
+          "name" : "<swift-get-version>"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Library/Developer/CommandLineTools/usr/bin/swiftc"
+        }
+      ],
+      "outputFilePath" : "/Users/jack/CHONKER_SNYFTER/swift/.build/arm64-apple-macosx/release/swift-version--1AB21518FC5DEDBE.txt"
+    }
+  }
+}

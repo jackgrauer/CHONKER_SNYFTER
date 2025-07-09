@@ -113,7 +113,7 @@ impl HtmlRenderer {
     }}
     
     .table-container {{
-        margin: 25px 0;
+        margin: 40px 0;
         background: rgba(17, 17, 17, 0.95);
         border: 1px solid {primary};
         border-radius: 10px;
@@ -213,7 +213,7 @@ impl HtmlRenderer {
     
     /* Content type styling */
     .content-container {{
-        margin: 15px 0;
+        margin: 30px 0;
         padding: 15px;
         background: rgba(17, 17, 17, 0.8);
         border-radius: 6px;
@@ -368,13 +368,10 @@ impl HtmlRenderer {
             <div class="table-container">
                 <div class="table-header">
                     <h3 class="table-title">🐹 Table {}</h3>
-                    <div class="table-info">
-                        {} × {} cells
-                    </div>
                 </div>
                 <div style="overflow-x: auto;">
                     <table class="chonker-table">
-        "#, table_index, rows.len(), headers.len());
+        "#, table_index);
 
         // Render headers
         if !headers.is_empty() {
@@ -610,35 +607,41 @@ impl HtmlRenderer {
     /// Render TableData structure as HTML
     #[allow(dead_code)]
     fn render_table_data(&self, table_data: &TableData, table_index: usize) -> String {
-        let mut html = format!(r#"
-            <div class="table-container">
-                <div class="table-header">
-                    <h3 class="table-title">🐹 Table {}</h3>
-                    <div class="table-info">
-                        {} × {} cells
-                    </div>
-                </div>
-                <div style="overflow-x: auto;">
-                    <table class="chonker-table">
-        "#, table_index, table_data.num_rows, table_data.num_cols);
+        self.render_enhanced_table(table_data, table_index)
+    }
 
-        // Render table data
+    /// Enhanced table rendering with complex structure support
+    fn render_enhanced_table(&self, table_data: &TableData, table_index: usize) -> String {
+        eprintln!("🐹 DEBUG: Rendering enhanced table {} with {} rows, {} cols", table_index, table_data.num_rows, table_data.num_cols);
+        eprintln!("🐹 DEBUG: Table data: {:?}", table_data.data.len());
+        
+        let mut html = format!(r#"
+            <div class="table-container" data-table-index="{}">
+                <div class="table-header">
+                    <h3 class="table-title">📊 Table {} (Enhanced)</h3>
+                    <div class="table-info">{}×{} cells</div>
+                </div>
+                <div class="table-wrapper" style="overflow-x: auto; max-height: 500px; overflow-y: auto;">
+                    <table class="chonker-table enhanced-table" contenteditable="false">
+        "#, table_index, table_index, table_data.num_rows, table_data.num_cols);
+
+        // Render table data with enhanced structure
         for (row_idx, row) in table_data.data.iter().enumerate() {
             if row_idx == 0 && !row.is_empty() {
-                // First row as headers
+                // Header row with editing support
                 html.push_str("                        <thead>\n                            <tr>\n");
-                for cell in row {
+                for (col_idx, cell) in row.iter().enumerate() {
                     html.push_str(&format!(
-                        "                                <th>{}</th>\n", 
-                        self.html_escape(&cell.content)
+                        "                                <th contenteditable=\"true\" data-row=\"{}\" data-col=\"{}\">{}</th>\n",
+                        row_idx, col_idx, self.html_escape(&cell.content)
                     ));
                 }
                 html.push_str("                            </tr>\n                        </thead>\n");
                 html.push_str("                        <tbody>\n");
             } else {
-                // Data rows
+                // Data rows with editing support
                 html.push_str("                            <tr>\n");
-                for cell in row {
+                for (col_idx, cell) in row.iter().enumerate() {
                     let cell_class = if self.is_numeric_content(&cell.content) { "numeric" } else { "text" };
                     let display_text = if cell.content.trim().is_empty() { 
                         "<span class=\"empty-cell\">—</span>".to_string()
@@ -646,9 +649,25 @@ impl HtmlRenderer {
                         self.html_escape(&cell.content) 
                     };
                     
+                    // Add colspan/rowspan support
+                    let mut cell_attrs = format!("class=\"{}\" contenteditable=\"true\" data-row=\"{}\" data-col=\"{}\"",
+                        cell_class, row_idx, col_idx);
+                    
+                    if let Some(colspan) = cell.colspan {
+                        if colspan > 1 {
+                            cell_attrs.push_str(&format!(" colspan=\"{}\"", colspan));
+                        }
+                    }
+                    
+                    if let Some(rowspan) = cell.rowspan {
+                        if rowspan > 1 {
+                            cell_attrs.push_str(&format!(" rowspan=\"{}\"", rowspan));
+                        }
+                    }
+                    
                     html.push_str(&format!(
-                        "                                <td class=\"{}\">{}</td>\n",
-                        cell_class, display_text
+                        "                                <td {}>{}</td>\n",
+                        cell_attrs, display_text
                     ));
                 }
                 html.push_str("                            </tr>\n");
