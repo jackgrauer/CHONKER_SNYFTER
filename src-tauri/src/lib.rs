@@ -283,6 +283,18 @@ async fn process_document(file_path: String, options: serde_json::Value) -> Resu
 }
 
 #[tauri::command]
+async fn update_table_cell(row: i32, col: i32, value: String) -> Result<serde_json::Value, String> {
+    tracing::info!("🐹 Updating table cell at [{}, {}] with value: {}", row, col, value);
+    
+    // In a real implementation, this would update the table data in memory/database
+    // For now, we'll just acknowledge the change
+    Ok(serde_json::json!({
+        "success": true,
+        "message": format!("Cell [{}, {}] updated to: {}", row, col, value)
+    }))
+}
+
+#[tauri::command]
 async fn save_to_database(state: State<'_, AppState>, data: serde_json::Value) -> Result<serde_json::Value, String> {
     use chonker_types::{Document, DocumentChunk, TableData, TableCell};
     use uuid::Uuid;
@@ -620,6 +632,7 @@ fn create_html_document(html_tables: &[serde_json::Value], source_file: &str) ->
         .chonker-table tr:hover {{
             background: rgba(0, 255, 0, 0.1);
         }}
+        
         .footer {{
             text-align: center;
             margin-top: 40px;
@@ -860,6 +873,7 @@ async fn search_documents(query: String, _limit: Option<i64>) -> Result<serde_js
     }))
 }
 
+
 #[tauri::command]
 async fn get_processing_stats(state: State<'_, AppState>) -> Result<serde_json::Value, String> {
     // Get comprehensive database statistics
@@ -1047,7 +1061,8 @@ pub fn run() {
         generate_qc_report,
         render_markdown,
         export_data,
-        extract_tables_to_html
+        extract_tables_to_html,
+        update_table_cell
     ])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");

@@ -7,9 +7,7 @@
     <meta http-equiv="Expires" content="0">
     <title>🐹 CHONKER - Working Version</title>
     
-    <!-- Quill.js Rich Text Editor -->
-    <link href="https://cdn.jsdelivr.net/npm/quill@2.0.2/dist/quill.snow.css" rel="stylesheet">
-    <script src="https://cdn.jsdelivr.net/npm/quill@2.0.2/dist/quill.js"></script>
+    <!-- Basic Rich Text Editor (No external dependencies) -->
     
     <script>
         window.addEventListener('DOMContentLoaded', () => {
@@ -154,7 +152,7 @@
             background: #777;
         }
         
-        #tables-content {
+        #tiptap-editor {
             background: #333;
             color: #ffffff;
             padding: 20px;
@@ -172,6 +170,185 @@
         
         .hidden {
             display: none;
+        }
+        
+        /* Tiptap Editor Styles */
+        .tiptap-editor {
+            background: #333;
+            color: #ffffff;
+            border: none;
+            border-radius: 4px;
+            min-height: 300px;
+            padding: 20px;
+            font-family: 'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', Consolas, 'Courier New', monospace;
+            font-size: 14px;
+            line-height: 1.6;
+            outline: none;
+            overflow-y: auto;
+        }
+        
+        .tiptap-editor h1,
+        .tiptap-editor h2,
+        .tiptap-editor h3 {
+            color: #e0e0e0;
+            margin-top: 20px;
+            margin-bottom: 10px;
+        }
+        
+        .tiptap-editor p {
+            margin-bottom: 10px;
+        }
+        
+        .tiptap-editor table {
+            border-collapse: collapse;
+            width: 100%;
+            margin: 20px 0;
+            background: #2a2a2a;
+            border: 1px solid #555;
+            border-radius: 4px;
+        }
+        
+        .tiptap-editor table td,
+        .tiptap-editor table th {
+            border: 1px solid #555;
+            padding: 8px 12px;
+            text-align: left;
+            min-width: 60px;
+            position: relative;
+        }
+        
+        .tiptap-editor table th {
+            background: #404040;
+            color: #ffffff;
+            font-weight: bold;
+        }
+        
+        .tiptap-editor table td {
+            background: #2a2a2a;
+            color: #ffffff;
+        }
+        
+        .tiptap-editor table tr:hover td {
+            background: #353535;
+        }
+        
+        .tiptap-editor table td:focus,
+        .tiptap-editor table th:focus {
+            outline: 2px solid #0078d4;
+            outline-offset: -2px;
+            background: #3a3a3a;
+        }
+        
+        .tiptap-editor ul,
+        .tiptap-editor ol {
+            padding-left: 20px;
+            margin: 10px 0;
+        }
+        
+        .tiptap-editor li {
+            margin: 5px 0;
+        }
+        
+        .tiptap-editor blockquote {
+            border-left: 3px solid #0078d4;
+            padding-left: 15px;
+            margin: 15px 0;
+            color: #cccccc;
+        }
+        
+        .tiptap-editor code {
+            background: rgba(120, 120, 120, 0.2);
+            color: #e0e0e0;
+            padding: 2px 4px;
+            border-radius: 3px;
+            font-family: 'Courier New', monospace;
+        }
+        
+        .tiptap-editor pre {
+            background: rgba(0, 0, 0, 0.5);
+            color: #e0e0e0;
+            padding: 15px;
+            border-radius: 4px;
+            overflow-x: auto;
+            margin: 15px 0;
+        }
+        
+        .tiptap-editor pre code {
+            background: none;
+            padding: 0;
+        }
+        
+        /* Selection styles */
+        .tiptap-editor ::selection {
+            background: rgba(0, 120, 212, 0.3);
+        }
+        
+        /* Placeholder styles */
+        .tiptap-editor.ProseMirror-focused .is-empty::before {
+            content: attr(data-placeholder);
+            color: #666;
+            float: left;
+            pointer-events: none;
+            height: 0;
+        }
+        
+        /* Table manipulation controls */
+        .table-controls {
+            position: absolute;
+            background: #404040;
+            border: 1px solid #555;
+            border-radius: 4px;
+            padding: 5px;
+            display: none;
+            z-index: 1000;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+        }
+        
+        .table-controls button {
+            background: #555;
+            color: #fff;
+            border: none;
+            padding: 4px 8px;
+            margin: 2px;
+            border-radius: 3px;
+            cursor: pointer;
+            font-size: 12px;
+        }
+        
+        .table-controls button:hover {
+            background: #666;
+        }
+        
+        .resize-handle {
+            position: absolute;
+            background: #0078d4;
+            opacity: 0;
+            transition: opacity 0.2s;
+        }
+        
+        .resize-handle:hover {
+            opacity: 1;
+        }
+        
+        .resize-handle.vertical {
+            right: -3px;
+            top: 0;
+            width: 6px;
+            height: 100%;
+            cursor: col-resize;
+        }
+        
+        .resize-handle.horizontal {
+            bottom: -3px;
+            left: 0;
+            width: 100%;
+            height: 6px;
+            cursor: row-resize;
+        }
+        
+        .tiptap-editor table td:hover .resize-handle,
+        .tiptap-editor table th:hover .resize-handle {
+            opacity: 0.5;
         }
     </style>
 </head>
@@ -200,7 +377,7 @@
             <!-- Pane B: Converted Output -->
             <div class="pane-b">
                 <div class="converted-output" id="converted-output">
-                    <div id="tables-content">Ready for content...</div>
+                    <div id="tiptap-editor">Ready for content...</div>
                 </div>
             </div>
         </div>
@@ -306,7 +483,7 @@
             
             console.log('CHONKER Starting document processing...');
             
-            const outputDiv = document.getElementById('tables-content');
+            const outputDiv = document.getElementById('tiptap-editor');
             if (outputDiv) {
                 outputDiv.innerHTML = '<div style="color: #ff1493;">Processing document...</div>';
             }
@@ -353,17 +530,16 @@
                 console.log('CHONKER Stored', currentChunks.length, 'chunks');
             }
             
-            const tablesContent = document.getElementById('tables-content');
-            if (!tablesContent) {
-                console.error('tables-content element not found');
+            const editorContainer = document.getElementById('tiptap-editor');
+            if (!editorContainer) {
+                console.error('tiptap-editor element not found');
                 return;
             }
             
             // Clear container
-            tablesContent.innerHTML = '';
+            editorContainer.innerHTML = '';
             
-            // Create Quill editor container
-            const editorContainer = document.createElement('div');
+            // Style the container
             editorContainer.style.cssText = `
                 width: 100%;
                 height: calc(100vh - 120px);
@@ -374,37 +550,13 @@
                 padding: 0;
             `;
             
-            const quillContainer = document.createElement('div');
-            quillContainer.id = 'quill-editor';
-            quillContainer.style.cssText = 'width: 100%; height: 100%; background: #333; color: #ffffff;';
-            
-            editorContainer.appendChild(quillContainer);
-            tablesContent.appendChild(editorContainer);
-            
-            // Initialize Quill without toolbar
+            // Initialize simple contenteditable editor
             try {
-                if (typeof Quill === 'undefined') {
-                    throw new Error('Quill.js not loaded');
-                }
-                
-                const quillEditor = new Quill('#quill-editor', {
-                    theme: 'snow',
-                    modules: {
-                        toolbar: false  // No toolbar GUI
-                    },
-                    placeholder: 'Document content will appear here...',
-                    readOnly: false
-                });
-                
-                // Apply dark mode styles
-                const quillRoot = quillEditor.root;
-                quillRoot.style.backgroundColor = '#333';
-                quillRoot.style.color = '#ffffff';
-                quillRoot.style.border = 'none';
-                quillRoot.style.padding = '20px';
-                
-                // Add zoomable class to the container, not the quill root
-                editorContainer.classList.add('zoomable');
+                // Make the container editable
+                editorContainer.contentEditable = true;
+                editorContainer.className = 'tiptap-editor zoomable';
+                editorContainer.style.height = 'calc(100vh - 120px)';
+                editorContainer.style.overflowY = 'auto';
                 
                 // Clean and set content
                 let cleanContent = '';
@@ -417,29 +569,27 @@
                     cleanContent = '<h2>Processing Complete</h2><p>Content processed successfully.</p>';
                 }
                 
-                // Set content using Quill's clipboard API
-                try {
-                    quillEditor.clipboard.dangerouslyPasteHTML(cleanContent);
-                    console.log('CHONKER Content set successfully');
-                } catch (error) {
-                    console.log('CHONKER Fallback to direct innerHTML:', error);
-                    quillEditor.root.innerHTML = cleanContent;
-                }
+                // Set content directly
+                editorContainer.innerHTML = cleanContent;
                 
-                // Store editor instance
-                editorInstance = quillEditor;
+                // Store editor instance (the contenteditable element itself)
+                editorInstance = editorContainer;
                 
-                console.log('CHONKER Quill editor initialized without toolbar');
+                // Initialize enhanced table editor
+                initEnhancedTableEditor(editorContainer);
+                
+                console.log('CHONKER Simple editor initialized');
                 
             } catch (error) {
-                console.error('CHONKER Quill initialization failed:', error);
+                console.error('CHONKER Editor initialization failed:', error);
                 // Fallback to plain HTML display
                 let cleanContent = data.formatted_html ? cleanHTML(data.formatted_html) : '<h2>Processing Complete</h2><p>Content processed successfully.</p>';
-                tablesContent.innerHTML = `
-                    <div style="background: #333; color: #ffffff; padding: 20px; border-radius: 4px; height: calc(100vh - 120px); overflow-y: auto;">
+                editorContainer.innerHTML = `
+                    <div class="tiptap-editor" style="height: calc(100vh - 120px); overflow-y: auto;">
                         ${cleanContent}
                     </div>
                 `;
+                editorContainer.classList.add('zoomable');
             }
         }
         
@@ -629,7 +779,7 @@
                     e.preventDefault();
                     
                     const zoomFactor = e.deltaY < 0 ? 1.1 : 0.9;
-                    const editor = editorContainer.querySelector('.zoomable') || editorContainer.querySelector('#tables-content');
+                    const editor = editorContainer.querySelector('.zoomable') || editorContainer.querySelector('#tiptap-editor');
                     
                     if (editor) {
                         editorZoom = zoomElement(editor, editorZoom, zoomFactor, e);
@@ -654,7 +804,7 @@
                     const currentDistance = getDistance(e.touches[0], e.touches[1]);
                     const scale = currentDistance / initialDistance;
                     
-                    const editor = editorContainer.querySelector('.zoomable') || editorContainer.querySelector('#tables-content');
+                    const editor = editorContainer.querySelector('.zoomable') || editorContainer.querySelector('#tiptap-editor');
                     if (editor) {
                         editorZoom = Math.max(minZoom, Math.min(maxZoom, initialZoom * scale));
                         editor.style.transform = `scale(${editorZoom})`;
@@ -664,7 +814,7 @@
             
             // Store zoom reset function
             editorContainer.resetZoom = function() {
-                const editor = editorContainer.querySelector('.zoomable') || editorContainer.querySelector('#tables-content');
+                const editor = editorContainer.querySelector('.zoomable') || editorContainer.querySelector('#tiptap-editor');
                 if (editor) {
                     editorZoom = 1.0;
                     editor.style.transform = 'scale(1.0)';
@@ -754,7 +904,7 @@
                 // Mouse is over editor pane B
                 console.log('CHONKER Zooming editor pane');
                 
-                const editor = paneB.querySelector('.zoomable') || paneB.querySelector('#tables-content');
+                const editor = paneB.querySelector('.zoomable') || paneB.querySelector('#tiptap-editor');
                 if (editor) {
                     const currentScale = getCurrentZoom(editor);
                     zoomElement(editor, currentScale, zoomFactor);
@@ -786,7 +936,7 @@
             // Reset editor zoom
             const paneB = document.querySelector('.pane-b');
             if (paneB) {
-                const editor = paneB.querySelector('.zoomable') || paneB.querySelector('#tables-content');
+                const editor = paneB.querySelector('.zoomable') || paneB.querySelector('#tiptap-editor');
                 if (editor) {
                     editor.style.transform = 'scale(1.0)';
                     editor.style.transformOrigin = 'center center';
@@ -795,11 +945,532 @@
             }
         }
         
+        // Enhanced table editor class
+        class ChonkerTableEditor {
+            constructor(editorElement) {
+                this.editor = editorElement;
+                this.init();
+            }
+
+            init() {
+                // Add table editing event listeners
+                this.editor.addEventListener('blur', this.handleCellEdit.bind(this), true);
+                this.editor.addEventListener('keydown', this.handleKeyNav.bind(this), true);
+                this.editor.addEventListener('input', this.handleCellInput.bind(this), true);
+                this.editor.addEventListener('contextmenu', this.handleRightClick.bind(this), true);
+                this.editor.addEventListener('click', this.handleClick.bind(this), true);
+                
+                // Add table-specific CSS
+                this.addTableStyles();
+                
+                // Create table controls
+                this.createTableControls();
+                
+                // Add resize handles to existing tables
+                this.addResizeHandles();
+            }
+
+            addTableStyles() {
+                const style = document.createElement('style');
+                style.textContent = `
+                    .enhanced-table {
+                        border-collapse: collapse;
+                        width: 100%;
+                        max-width: 100%;
+                        margin: 10px 0;
+                    }
+                    
+                    .enhanced-table td[contenteditable="true"]:focus,
+                    .enhanced-table th[contenteditable="true"]:focus {
+                        outline: 2px solid #0078d4;
+                        outline-offset: -2px;
+                        background: #3a3a3a;
+                    }
+                    
+                    .enhanced-table td[contenteditable="true"]:hover,
+                    .enhanced-table th[contenteditable="true"]:hover {
+                        background: #353535;
+                        cursor: text;
+                    }
+                    
+                    .enhanced-table td.numeric {
+                        text-align: right;
+                        font-family: 'Courier New', monospace;
+                        color: #e0e0e0;
+                    }
+                    
+                    .enhanced-table td.text {
+                        color: #ffffff;
+                    }
+                    
+                    .enhanced-table th {
+                        background: #404040;
+                        color: #ffffff;
+                        font-weight: bold;
+                        text-align: left;
+                        padding: 8px;
+                        border: 1px solid #555;
+                    }
+                    
+                    .enhanced-table td {
+                        border: 1px solid #555;
+                        padding: 6px 8px;
+                        min-width: 60px;
+                        background: #2a2a2a;
+                        position: relative;
+                    }
+                    
+                    .enhanced-table tr:hover td {
+                        background: #353535;
+                    }
+                    
+                    .table-container {
+                        margin: 20px 0;
+                        background: #2a2a2a;
+                        border: 1px solid #555;
+                        border-radius: 8px;
+                        padding: 15px;
+                        overflow: hidden;
+                        position: relative;
+                    }
+                    
+                    .table-wrapper {
+                        overflow-x: auto;
+                        max-height: 500px;
+                        overflow-y: auto;
+                    }
+                    
+                    .cell-error {
+                        background: rgba(255, 100, 100, 0.2) !important;
+                        border: 1px solid #ff6666 !important;
+                    }
+                    
+                    .cell-modified {
+                        background: rgba(0, 120, 212, 0.1) !important;
+                        border-left: 3px solid #0078d4 !important;
+                    }
+                `;
+                document.head.appendChild(style);
+            }
+
+            handleCellEdit(event) {
+                const cell = event.target;
+                if (cell.matches('td[contenteditable="true"], th[contenteditable="true"]')) {
+                    const row = cell.getAttribute('data-row');
+                    const col = cell.getAttribute('data-col');
+                    const newValue = cell.textContent.trim();
+                    
+                    // Mark as modified
+                    cell.classList.add('cell-modified');
+                    
+                    // Validate numeric cells
+                    if (cell.classList.contains('numeric')) {
+                        if (newValue && !this.isNumeric(newValue)) {
+                            cell.classList.add('cell-error');
+                            this.showError(cell, 'Invalid numeric value');
+                        } else {
+                            cell.classList.remove('cell-error');
+                        }
+                    }
+                    
+                    // Save changes to Rust backend
+                    this.saveTableChange(row, col, newValue);
+                    
+                    console.log(`Cell edited: [${row}, ${col}] = "${newValue}"`);
+                }
+            }
+
+            handleKeyNav(event) {
+                const cell = event.target;
+                if (!cell.matches('td[contenteditable="true"], th[contenteditable="true"]')) {
+                    return;
+                }
+
+                const row = parseInt(cell.getAttribute('data-row'));
+                const col = parseInt(cell.getAttribute('data-col'));
+                
+                switch(event.key) {
+                    case 'Tab':
+                        event.preventDefault();
+                        this.navigateToCell(row, col + 1);
+                        break;
+                    case 'Enter':
+                        event.preventDefault();
+                        this.navigateToCell(row + 1, col);
+                        break;
+                    case 'ArrowRight':
+                        if (this.isCursorAtEnd(cell)) {
+                            event.preventDefault();
+                            this.navigateToCell(row, col + 1);
+                        }
+                        break;
+                    case 'ArrowLeft':
+                        if (this.isCursorAtStart(cell)) {
+                            event.preventDefault();
+                            this.navigateToCell(row, col - 1);
+                        }
+                        break;
+                    case 'ArrowUp':
+                        event.preventDefault();
+                        this.navigateToCell(row - 1, col);
+                        break;
+                    case 'ArrowDown':
+                        event.preventDefault();
+                        this.navigateToCell(row + 1, col);
+                        break;
+                }
+            }
+
+            handleCellInput(event) {
+                const cell = event.target;
+                if (cell.matches('td[contenteditable="true"], th[contenteditable="true"]')) {
+                    // Auto-format thermal units
+                    const value = cell.textContent;
+                    if (value.includes('C/W') && !value.includes('°C/W')) {
+                        cell.textContent = value.replace('C/W', '°C/W');
+                    }
+                }
+            }
+
+            navigateToCell(targetRow, targetCol) {
+                const targetCell = this.editor.querySelector(
+                    `[data-row="${targetRow}"][data-col="${targetCol}"]`
+                );
+                
+                if (targetCell) {
+                    targetCell.focus();
+                    // Select all text in the cell
+                    const range = document.createRange();
+                    range.selectNodeContents(targetCell);
+                    const selection = window.getSelection();
+                    selection.removeAllRanges();
+                    selection.addRange(range);
+                }
+            }
+
+            isCursorAtEnd(element) {
+                const selection = window.getSelection();
+                if (selection.rangeCount === 0) return false;
+                const range = selection.getRangeAt(0);
+                return range.endOffset === element.textContent.length;
+            }
+
+            isCursorAtStart(element) {
+                const selection = window.getSelection();
+                if (selection.rangeCount === 0) return false;
+                const range = selection.getRangeAt(0);
+                return range.startOffset === 0;
+            }
+
+            isNumeric(value) {
+                return /^-?\d*\.?\d*$/.test(value.replace(/[°C\/W\s]/g, ''));
+            }
+
+            showError(cell, message) {
+                // Simple error display
+                cell.title = message;
+                setTimeout(() => {
+                    cell.classList.remove('cell-error');
+                    cell.title = '';
+                }, 3000);
+            }
+
+            async saveTableChange(row, col, value) {
+                try {
+                    // Save to Rust backend via Tauri
+                    const result = await window.invoke('update_table_cell', {
+                        row: parseInt(row),
+                        col: parseInt(col),
+                        value: value
+                    });
+                    console.log('Table cell saved:', result);
+                } catch (error) {
+                    console.error('Failed to save table change:', error);
+                }
+            }
+
+            // Export table data
+            exportTableData() {
+                const tables = this.editor.querySelectorAll('.enhanced-table');
+                const exportData = [];
+                
+                tables.forEach((table, tableIndex) => {
+                    const rows = table.querySelectorAll('tr');
+                    const tableData = [];
+                    
+                    rows.forEach(row => {
+                        const cells = row.querySelectorAll('td, th');
+                        const rowData = [];
+                        
+                        cells.forEach(cell => {
+                            rowData.push({
+                                content: cell.textContent.trim(),
+                                row: cell.getAttribute('data-row'),
+                                col: cell.getAttribute('data-col'),
+                                colspan: cell.getAttribute('colspan') || 1,
+                                rowspan: cell.getAttribute('rowspan') || 1
+                            });
+                        });
+                        
+                        if (rowData.length > 0) {
+                            tableData.push(rowData);
+                        }
+                    });
+                    
+                    exportData.push({
+                        tableIndex: tableIndex,
+                        data: tableData
+                    });
+                });
+                
+                return exportData;
+            }
+            
+            // Create table controls
+            createTableControls() {
+                const controls = document.createElement('div');
+                controls.className = 'table-controls';
+                controls.innerHTML = `
+                    <button onclick="window.chonkerTableEditor.addRowAbove()">Add Row Above</button>
+                    <button onclick="window.chonkerTableEditor.addRowBelow()">Add Row Below</button>
+                    <button onclick="window.chonkerTableEditor.addColumnLeft()">Add Column Left</button>
+                    <button onclick="window.chonkerTableEditor.addColumnRight()">Add Column Right</button>
+                    <button onclick="window.chonkerTableEditor.deleteRow()">Delete Row</button>
+                    <button onclick="window.chonkerTableEditor.deleteColumn()">Delete Column</button>
+                `;
+                document.body.appendChild(controls);
+                this.tableControls = controls;
+            }
+            
+            // Add resize handles to tables
+            addResizeHandles() {
+                const tables = this.editor.querySelectorAll('table');
+                tables.forEach(table => {
+                    const cells = table.querySelectorAll('td, th');
+                    cells.forEach(cell => {
+                        // Add vertical resize handle
+                        const vHandle = document.createElement('div');
+                        vHandle.className = 'resize-handle vertical';
+                        vHandle.addEventListener('mousedown', (e) => this.startResize(e, cell, 'vertical'));
+                        cell.appendChild(vHandle);
+                        
+                        // Add horizontal resize handle
+                        const hHandle = document.createElement('div');
+                        hHandle.className = 'resize-handle horizontal';
+                        hHandle.addEventListener('mousedown', (e) => this.startResize(e, cell, 'horizontal'));
+                        cell.appendChild(hHandle);
+                    });
+                });
+            }
+            
+            // Handle right-click context menu
+            handleRightClick(event) {
+                const cell = event.target.closest('td, th');
+                if (cell) {
+                    event.preventDefault();
+                    this.currentCell = cell;
+                    this.showTableControls(event.clientX, event.clientY);
+                }
+            }
+            
+            // Handle click events
+            handleClick(event) {
+                const cell = event.target.closest('td, th');
+                if (cell) {
+                    this.currentCell = cell;
+                } else {
+                    this.hideTableControls();
+                }
+            }
+            
+            // Show table controls
+            showTableControls(x, y) {
+                this.tableControls.style.left = x + 'px';
+                this.tableControls.style.top = y + 'px';
+                this.tableControls.style.display = 'block';
+            }
+            
+            // Hide table controls
+            hideTableControls() {
+                this.tableControls.style.display = 'none';
+            }
+            
+            // Add row above current cell
+            addRowAbove() {
+                if (!this.currentCell) return;
+                const row = this.currentCell.parentElement;
+                const table = row.closest('table');
+                const newRow = row.cloneNode(true);
+                
+                // Clear content and update data attributes
+                newRow.querySelectorAll('td, th').forEach((cell, index) => {
+                    cell.textContent = '';
+                    const currentRow = parseInt(cell.getAttribute('data-row') || '0');
+                    cell.setAttribute('data-row', currentRow);
+                });
+                
+                row.parentElement.insertBefore(newRow, row);
+                this.addResizeHandles();
+                this.hideTableControls();
+            }
+            
+            // Add row below current cell
+            addRowBelow() {
+                if (!this.currentCell) return;
+                const row = this.currentCell.parentElement;
+                const table = row.closest('table');
+                const newRow = row.cloneNode(true);
+                
+                // Clear content and update data attributes
+                newRow.querySelectorAll('td, th').forEach((cell, index) => {
+                    cell.textContent = '';
+                    const currentRow = parseInt(cell.getAttribute('data-row') || '0');
+                    cell.setAttribute('data-row', currentRow + 1);
+                });
+                
+                row.parentElement.insertBefore(newRow, row.nextSibling);
+                this.addResizeHandles();
+                this.hideTableControls();
+            }
+            
+            // Add column to the left
+            addColumnLeft() {
+                if (!this.currentCell) return;
+                const cellIndex = Array.from(this.currentCell.parentElement.children).indexOf(this.currentCell);
+                const table = this.currentCell.closest('table');
+                const rows = table.querySelectorAll('tr');
+                
+                rows.forEach(row => {
+                    const newCell = document.createElement(row.querySelector('th') ? 'th' : 'td');
+                    newCell.contentEditable = true;
+                    newCell.className = 'text';
+                    newCell.textContent = '';
+                    
+                    const refCell = row.children[cellIndex];
+                    row.insertBefore(newCell, refCell);
+                });
+                
+                this.addResizeHandles();
+                this.hideTableControls();
+            }
+            
+            // Add column to the right
+            addColumnRight() {
+                if (!this.currentCell) return;
+                const cellIndex = Array.from(this.currentCell.parentElement.children).indexOf(this.currentCell);
+                const table = this.currentCell.closest('table');
+                const rows = table.querySelectorAll('tr');
+                
+                rows.forEach(row => {
+                    const newCell = document.createElement(row.querySelector('th') ? 'th' : 'td');
+                    newCell.contentEditable = true;
+                    newCell.className = 'text';
+                    newCell.textContent = '';
+                    
+                    const refCell = row.children[cellIndex];
+                    row.insertBefore(newCell, refCell.nextSibling);
+                });
+                
+                this.addResizeHandles();
+                this.hideTableControls();
+            }
+            
+            // Delete current row
+            deleteRow() {
+                if (!this.currentCell) return;
+                const row = this.currentCell.parentElement;
+                const table = row.closest('table');
+                
+                if (table.rows.length > 1) {
+                    row.remove();
+                }
+                
+                this.hideTableControls();
+            }
+            
+            // Delete current column
+            deleteColumn() {
+                if (!this.currentCell) return;
+                const cellIndex = Array.from(this.currentCell.parentElement.children).indexOf(this.currentCell);
+                const table = this.currentCell.closest('table');
+                const rows = table.querySelectorAll('tr');
+                
+                // Check if there's more than one column
+                if (rows[0].children.length > 1) {
+                    rows.forEach(row => {
+                        if (row.children[cellIndex]) {
+                            row.children[cellIndex].remove();
+                        }
+                    });
+                }
+                
+                this.hideTableControls();
+            }
+            
+            // Start resize operation
+            startResize(event, cell, direction) {
+                event.preventDefault();
+                event.stopPropagation();
+                
+                const startX = event.clientX;
+                const startY = event.clientY;
+                const startWidth = cell.offsetWidth;
+                const startHeight = cell.offsetHeight;
+                
+                const onMouseMove = (e) => {
+                    if (direction === 'vertical') {
+                        const newWidth = startWidth + (e.clientX - startX);
+                        cell.style.width = Math.max(40, newWidth) + 'px';
+                    } else {
+                        const newHeight = startHeight + (e.clientY - startY);
+                        cell.style.height = Math.max(20, newHeight) + 'px';
+                    }
+                };
+                
+                const onMouseUp = () => {
+                    document.removeEventListener('mousemove', onMouseMove);
+                    document.removeEventListener('mouseup', onMouseUp);
+                };
+                
+                document.addEventListener('mousemove', onMouseMove);
+                document.addEventListener('mouseup', onMouseUp);
+            }
+        }
+
+        // Initialize enhanced table editor
+        function initEnhancedTableEditor(editorElement) {
+            const tableEditor = new ChonkerTableEditor(editorElement);
+            
+            // Export function globally
+            window.chonkerTableEditor = tableEditor;
+            
+            // Add a visible indicator
+            setTimeout(() => {
+                const tables = editorElement.querySelectorAll('.enhanced-table');
+                if (tables.length > 0) {
+                    console.log(`🐹 Enhanced table editor initialized with ${tables.length} table(s)`);
+                    console.log('🐹 Try clicking on any table cell to edit!');
+                    console.log('🐹 Use Tab/Enter/Arrow keys to navigate between cells');
+                } else {
+                    console.log('🐹 Enhanced table editor initialized (no tables found yet)');
+                }
+            }, 1000);
+            
+            return tableEditor;
+        }
+        
         // Initialize
         document.addEventListener('DOMContentLoaded', () => {
             console.log('CHONKER initialized');
             setupGestureSupport();
             console.log('CHONKER Natural zoom controls enabled');
+            
+            // Hide table controls when clicking outside
+            document.addEventListener('click', (e) => {
+                if (window.chonkerTableEditor && !e.target.closest('.table-controls')) {
+                    window.chonkerTableEditor.hideTableControls();
+                }
+            });
         });
     </script>
 </body>

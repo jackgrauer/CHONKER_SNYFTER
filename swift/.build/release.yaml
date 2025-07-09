@@ -1,0 +1,66 @@
+client:
+  name: basic
+  file-system: device-agnostic
+tools: {}
+targets:
+  "PackageStructure": ["<PackageStructure>"]
+  "apple_vision_ocr-arm64-apple-macosx15.0-release.exe": ["<apple_vision_ocr-arm64-apple-macosx15.0-release.exe>"]
+  "apple_vision_ocr-arm64-apple-macosx15.0-release.module": ["<apple_vision_ocr-arm64-apple-macosx15.0-release.module>"]
+  "main": ["<apple_vision_ocr-arm64-apple-macosx15.0-release.exe>","<apple_vision_ocr-arm64-apple-macosx15.0-release.module>"]
+  "test": ["<apple_vision_ocr-arm64-apple-macosx15.0-release.exe>","<apple_vision_ocr-arm64-apple-macosx15.0-release.module>"]
+default: "main"
+nodes:
+  "/Users/jack/CHONKER_SNYFTER/swift/Sources/":
+    is-directory-structure: true
+    content-exclusion-patterns: [".git",".build"]
+commands:
+  "/Users/jack/CHONKER_SNYFTER/swift/.build/arm64-apple-macosx/release/apple_vision_ocr.build/sources":
+    tool: write-auxiliary-file
+    inputs: ["<sources-file-list>","/Users/jack/CHONKER_SNYFTER/swift/Sources/main.swift"]
+    outputs: ["/Users/jack/CHONKER_SNYFTER/swift/.build/arm64-apple-macosx/release/apple_vision_ocr.build/sources"]
+    description: "Write auxiliary file /Users/jack/CHONKER_SNYFTER/swift/.build/arm64-apple-macosx/release/apple_vision_ocr.build/sources"
+
+  "/Users/jack/CHONKER_SNYFTER/swift/.build/arm64-apple-macosx/release/apple_vision_ocr.product/Objects.LinkFileList":
+    tool: write-auxiliary-file
+    inputs: ["<link-file-list>","/Users/jack/CHONKER_SNYFTER/swift/.build/arm64-apple-macosx/release/apple_vision_ocr.build/main.swift.o"]
+    outputs: ["/Users/jack/CHONKER_SNYFTER/swift/.build/arm64-apple-macosx/release/apple_vision_ocr.product/Objects.LinkFileList"]
+    description: "Write auxiliary file /Users/jack/CHONKER_SNYFTER/swift/.build/arm64-apple-macosx/release/apple_vision_ocr.product/Objects.LinkFileList"
+
+  "/Users/jack/CHONKER_SNYFTER/swift/.build/arm64-apple-macosx/release/swift-version--1AB21518FC5DEDBE.txt":
+    tool: write-auxiliary-file
+    inputs: ["<swift-get-version>","/Library/Developer/CommandLineTools/usr/bin/swiftc"]
+    outputs: ["/Users/jack/CHONKER_SNYFTER/swift/.build/arm64-apple-macosx/release/swift-version--1AB21518FC5DEDBE.txt"]
+    always-out-of-date: "true"
+    description: "Write auxiliary file /Users/jack/CHONKER_SNYFTER/swift/.build/arm64-apple-macosx/release/swift-version--1AB21518FC5DEDBE.txt"
+
+  "<apple_vision_ocr-arm64-apple-macosx15.0-release.exe>":
+    tool: phony
+    inputs: ["/Users/jack/CHONKER_SNYFTER/swift/.build/arm64-apple-macosx/release/apple_vision_ocr"]
+    outputs: ["<apple_vision_ocr-arm64-apple-macosx15.0-release.exe>"]
+
+  "<apple_vision_ocr-arm64-apple-macosx15.0-release.module>":
+    tool: phony
+    inputs: ["/Users/jack/CHONKER_SNYFTER/swift/.build/arm64-apple-macosx/release/apple_vision_ocr.build/main.swift.o","/Users/jack/CHONKER_SNYFTER/swift/.build/arm64-apple-macosx/release/Modules/apple_vision_ocr.swiftmodule"]
+    outputs: ["<apple_vision_ocr-arm64-apple-macosx15.0-release.module>"]
+
+  "C.apple_vision_ocr-arm64-apple-macosx15.0-release.exe":
+    tool: shell
+    inputs: ["/Users/jack/CHONKER_SNYFTER/swift/.build/arm64-apple-macosx/release/apple_vision_ocr.build/main.swift.o","/Users/jack/CHONKER_SNYFTER/swift/.build/arm64-apple-macosx/release/apple_vision_ocr.product/Objects.LinkFileList"]
+    outputs: ["/Users/jack/CHONKER_SNYFTER/swift/.build/arm64-apple-macosx/release/apple_vision_ocr"]
+    description: "Linking ./.build/arm64-apple-macosx/release/apple_vision_ocr"
+    args: ["/Library/Developer/CommandLineTools/usr/bin/swiftc","-L","/Users/jack/CHONKER_SNYFTER/swift/.build/arm64-apple-macosx/release","-o","/Users/jack/CHONKER_SNYFTER/swift/.build/arm64-apple-macosx/release/apple_vision_ocr","-module-name","apple_vision_ocr","-Xlinker","-no_warn_duplicate_libraries","-emit-executable","-Xlinker","-dead_strip","-Xlinker","-alias","-Xlinker","_apple_vision_ocr_main","-Xlinker","_main","-Xlinker","-rpath","-Xlinker","@loader_path","@/Users/jack/CHONKER_SNYFTER/swift/.build/arm64-apple-macosx/release/apple_vision_ocr.product/Objects.LinkFileList","-target","arm64-apple-macosx12.0","-F","/Library/Developer/CommandLineTools/Library/Developer/Frameworks","-sdk","/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk","-g","-Xlinker","-rpath","-Xlinker","/Library/Developer/CommandLineTools/Library/Developer/Frameworks"]
+
+  "C.apple_vision_ocr-arm64-apple-macosx15.0-release.module":
+    tool: shell
+    inputs: ["/Users/jack/CHONKER_SNYFTER/swift/Sources/main.swift","/Users/jack/CHONKER_SNYFTER/swift/.build/arm64-apple-macosx/release/swift-version--1AB21518FC5DEDBE.txt","/Users/jack/CHONKER_SNYFTER/swift/.build/arm64-apple-macosx/release/apple_vision_ocr.build/sources"]
+    outputs: ["/Users/jack/CHONKER_SNYFTER/swift/.build/arm64-apple-macosx/release/apple_vision_ocr.build/main.swift.o","/Users/jack/CHONKER_SNYFTER/swift/.build/arm64-apple-macosx/release/Modules/apple_vision_ocr.swiftmodule"]
+    description: "Compiling Swift Module 'apple_vision_ocr' (1 sources)"
+    args: ["/Library/Developer/CommandLineTools/usr/bin/swiftc","-module-name","apple_vision_ocr","-emit-dependencies","-emit-module","-emit-module-path","/Users/jack/CHONKER_SNYFTER/swift/.build/arm64-apple-macosx/release/Modules/apple_vision_ocr.swiftmodule","-output-file-map","/Users/jack/CHONKER_SNYFTER/swift/.build/arm64-apple-macosx/release/apple_vision_ocr.build/output-file-map.json","-whole-module-optimization","-num-threads","8","-c","@/Users/jack/CHONKER_SNYFTER/swift/.build/arm64-apple-macosx/release/apple_vision_ocr.build/sources","-I","/Users/jack/CHONKER_SNYFTER/swift/.build/arm64-apple-macosx/release/Modules","-target","arm64-apple-macosx12.0","-O","-j8","-DSWIFT_PACKAGE","-module-cache-path","/Users/jack/CHONKER_SNYFTER/swift/.build/arm64-apple-macosx/release/ModuleCache","-parseable-output","-Xfrontend","-entry-point-function-name","-Xfrontend","apple_vision_ocr_main","-parse-as-library","-color-diagnostics","-swift-version","5","-F","/Library/Developer/CommandLineTools/Library/Developer/Frameworks","-sdk","/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk","-g","-Xcc","-isysroot","-Xcc","/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk","-Xcc","-fPIC","-Xcc","-g","-package-name","swift"]
+
+  "PackageStructure":
+    tool: package-structure-tool
+    inputs: ["/Users/jack/CHONKER_SNYFTER/swift/Sources/","/Users/jack/CHONKER_SNYFTER/swift/Package.swift","/Users/jack/CHONKER_SNYFTER/swift/Package.resolved"]
+    outputs: ["<PackageStructure>"]
+    description: "Planning build"
+    allow-missing-inputs: true
+
