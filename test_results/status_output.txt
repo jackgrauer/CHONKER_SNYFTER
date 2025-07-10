@@ -1,6 +1,0 @@
-📊 CHONKER Database Status
-========================
-Documents: 0
-Total chunks: 0
-Database size: 0.00 MB
-Last updated: Never

@@ -1,0 +1,19 @@
+{
+  "name": "chonker-snyfter-tauri",
+  "version": "0.1.0",
+  "description": "Tauri backend for CHONKER_SNYFTER project",
+  "main": "src/main.rs",
+  "scripts": {
+    "dev": "tauri dev",
+    "build": "tauri build",
+    "tauri": "tauri"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^1.5.0"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^1.5.0"
+  },
+  "author": "jack",
+  "license": "MIT"
+}
