@@ -954,6 +954,12 @@
         class ChonkerTableEditor {
             constructor(editorElement) {
                 this.editor = editorElement;
+                this.selectedCells = new Set();
+                this.selectionStart = null;
+                this.selectionEnd = null;
+                this.isSelecting = false;
+                this.selectionOverlay = null;
+                this.highlightingEnabled = true;
                 this.init();
             }
 
@@ -962,8 +968,11 @@
                 this.editor.addEventListener('blur', this.handleCellEdit.bind(this), true);
                 this.editor.addEventListener('keydown', this.handleKeyNav.bind(this), true);
                 this.editor.addEventListener('input', this.handleCellInput.bind(this), true);
-                this.editor.addEventListener('contextmenu', this.handleRightClick.bind(this), true);
+                this.editor.addEventListener('contextmenu', this.handleContextMenu.bind(this), true);
                 this.editor.addEventListener('click', this.handleClick.bind(this), true);
+                this.editor.addEventListener('mousedown', this.handleMouseDown.bind(this), true);
+                this.editor.addEventListener('mousemove', this.handleMouseMove.bind(this), true);
+                this.editor.addEventListener('mouseup', this.handleMouseUp.bind(this), true);
                 
                 // Add table-specific CSS
                 this.addTableStyles();
@@ -973,6 +982,9 @@
                 
                 // Add resize handles to existing tables
                 this.addResizeHandles();
+                
+                // Initialize highlighting system (non-interfering)
+                this.initHighlightingSystem();
             }
 
             addTableStyles() {
@@ -1053,6 +1065,154 @@
                     .cell-modified {
                         background: rgba(0, 120, 212, 0.1) !important;
                         border-left: 3px solid #0078d4 !important;
+                    }
+                    
+                    .cell-selected {
+                        background: rgba(0, 120, 212, 0.3) !important;
+                        border: 2px solid #0078d4 !important;
+                    }
+                    
+                    .selection-overlay {
+                        position: absolute;
+                        background: rgba(0, 120, 212, 0.2);
+                        border: 2px dashed #0078d4;
+                        pointer-events: none;
+                        z-index: 1000;
+                        display: none;
+                    }
+                    
+                    /* Edge Marker System - Zoom Independent */
+                    .highlight-markers {
+                        position: absolute;
+                        top: 0;
+                        left: 0;
+                        right: 0;
+                        bottom: 0;
+                        pointer-events: none;
+                        z-index: 1000;
+                    }
+                    
+                    .edge-marker {
+                        position: absolute;
+                        border-radius: 50%;
+                        transition: all 0.3s ease;
+                        z-index: 1001;
+                        cursor: pointer;
+                    }
+                    
+                    /* Color coding for different interaction types */
+                    .edge-marker.editor-to-pdf {
+                        background: #ff5722;  /* Orange-red for editor→PDF */
+                        box-shadow: 0 0 8px rgba(255, 87, 34, 0.6), 0 0 16px rgba(255, 87, 34, 0.3);
+                    }
+                    
+                    .edge-marker.pdf-to-editor {
+                        background: #2196f3;  /* Blue for PDF→editor */
+                        box-shadow: 0 0 8px rgba(33, 150, 243, 0.6), 0 0 16px rgba(33, 150, 243, 0.3);
+                    }
+                    
+                    .edge-marker.left {
+                        left: 0;
+                        width: 12px;
+                        height: 12px;
+                        border-radius: 0 50% 50% 0;
+                    }
+                    
+                    .edge-marker.right {
+                        right: 0;
+                        width: 12px;
+                        height: 12px;
+                        border-radius: 50% 0 0 50%;
+                    }
+                    
+                    .edge-marker.top {
+                        top: 0;
+                        width: 12px;
+                        height: 12px;
+                        border-radius: 0 0 50% 50%;
+                    }
+                    
+                    .edge-marker.bottom {
+                        bottom: 0;
+                        width: 12px;
+                        height: 12px;
+                        border-radius: 50% 50% 0 0;
+                    }
+                    
+                    .edge-marker.pulse {
+                        animation: markerPulse 2s ease-in-out infinite;
+                    }
+                    
+                    @keyframes markerPulse {
+                        0%, 100% { 
+                            transform: scale(1);
+                            opacity: 1;
+                        }
+                        50% { 
+                            transform: scale(1.3);
+                            opacity: 0.8;
+                        }
+                    }
+                    
+                    /* Connection line between markers */
+                    .connection-line {
+                        position: fixed;
+                        pointer-events: none;
+                        z-index: 999;
+                        opacity: 0.6;
+                        transition: all 0.3s ease;
+                    }
+                    
+                    .connection-line.editor-to-pdf {
+                        background: linear-gradient(90deg, #ff5722, #ff9800, #ff5722);
+                        height: 3px;
+                        border-radius: 2px;
+                    }
+                    
+                    .connection-line.pdf-to-editor {
+                        background: linear-gradient(90deg, #2196f3, #03a9f4, #2196f3);
+                        height: 3px;
+                        border-radius: 2px;
+                    }
+                    
+                    
+                    /* Editor highlighting - enhanced */
+                    .source-highlighted {
+                        background: rgba(255, 193, 7, 0.2) !important;
+                        box-shadow: 0 0 0 2px #ffc107 !important;
+                        border-radius: 3px;
+                        transition: all 0.3s ease;
+                        position: relative;
+                    }
+                    
+                    .source-highlighted::before {
+                        content: '';
+                        position: absolute;
+                        top: -2px;
+                        left: -2px;
+                        right: -2px;
+                        bottom: -2px;
+                        background: linear-gradient(45deg, #ffc107, #ff9800);
+                        border-radius: 5px;
+                        z-index: -1;
+                        opacity: 0.3;
+                    }
+                    
+                    .source-tooltip {
+                        position: fixed;
+                        background: #2d2d2d;
+                        color: #fff;
+                        padding: 8px 12px;
+                        border-radius: 6px;
+                        font-size: 11px;
+                        font-weight: 500;
+                        pointer-events: none;
+                        opacity: 0;
+                        transition: opacity 0.2s ease;
+                        z-index: 10000;
+                        box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+                        white-space: nowrap;
+                        border: 1px solid #ffc107;
                     }
                 `;
                 document.head.appendChild(style);
@@ -1233,36 +1393,117 @@
             
             // Create table controls
             createTableControls() {
+                console.log('🐹 Creating table controls...');
                 const controls = document.createElement('div');
                 controls.className = 'table-controls';
+                controls.style.cssText = `
+                    position: absolute;
+                    background: #404040;
+                    border: 1px solid #555;
+                    border-radius: 8px;
+                    padding: 8px;
+                    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+                    z-index: 1000;
+                    display: none;
+                    font-size: 12px;
+                    min-width: 200px;
+                `;
                 
-                // Create buttons with proper event listeners
-                const buttons = [
-                    { text: 'Add Row Above', method: 'addRowAbove' },
-                    { text: 'Add Row Below', method: 'addRowBelow' },
-                    { text: 'Add Column Left', method: 'addColumnLeft' },
-                    { text: 'Add Column Right', method: 'addColumnRight' },
-                    { text: 'Delete Row', method: 'deleteRow' },
-                    { text: 'Delete Column', method: 'deleteColumn' }
-                ];
+                document.body.appendChild(controls);
+                this.tableControls = controls;
+                console.log('🐹 Table controls created and added to DOM');
+            }
+            
+            // Update table controls based on selection
+            updateTableControls() {
+                if (!this.tableControls) return;
+                
+                // Clear existing buttons
+                this.tableControls.innerHTML = '';
+                
+                const isMultipleSelection = this.selectedCells.size > 1;
+                console.log('🐹 Updating controls for', isMultipleSelection ? 'multiple' : 'single', 'selection');
+                
+                let buttons = [];
+                
+                if (isMultipleSelection) {
+                    // Multi-cell operations
+                    buttons = [
+                        { text: `Clear ${this.selectedCells.size} Cells`, method: 'clearSelectedCells' },
+                        { text: 'Copy Selection', method: 'copySelection' },
+                        { text: 'Fill Down', method: 'fillDown' },
+                        { text: 'Fill Right', method: 'fillRight' },
+                        { text: '---', method: null }, // Separator
+                        { text: 'Add Row Above', method: 'addRowAbove' },
+                        { text: 'Add Row Below', method: 'addRowBelow' },
+                        { text: 'Add Column Left', method: 'addColumnLeft' },
+                        { text: 'Add Column Right', method: 'addColumnRight' }
+                    ];
+                } else {
+                    // Single cell operations
+                    buttons = [
+                        { text: 'Add Row Above', method: 'addRowAbove' },
+                        { text: 'Add Row Below', method: 'addRowBelow' },
+                        { text: 'Add Column Left', method: 'addColumnLeft' },
+                        { text: 'Add Column Right', method: 'addColumnRight' },
+                        { text: 'Delete Row', method: 'deleteRow' },
+                        { text: 'Delete Column', method: 'deleteColumn' }
+                    ];
+                }
                 
                 buttons.forEach(buttonConfig => {
+                    if (buttonConfig.text === '---') {
+                        // Add separator
+                        const separator = document.createElement('div');
+                        separator.style.cssText = `
+                            height: 1px;
+                            background: #666;
+                            margin: 6px 0;
+                        `;
+                        this.tableControls.appendChild(separator);
+                        return;
+                    }
+                    
                     const button = document.createElement('button');
                     button.textContent = buttonConfig.text;
+                    button.style.cssText = `
+                        display: block;
+                        width: 100%;
+                        padding: 8px 12px;
+                        margin: 2px 0;
+                        background: #505050;
+                        color: white;
+                        border: 1px solid #666;
+                        border-radius: 4px;
+                        cursor: pointer;
+                        font-size: 11px;
+                        text-align: left;
+                    `;
+                    
+                    button.addEventListener('mouseenter', () => {
+                        button.style.background = '#606060';
+                    });
+                    
+                    button.addEventListener('mouseleave', () => {
+                        button.style.background = '#505050';
+                    });
+                    
                     button.addEventListener('click', (e) => {
                         e.preventDefault();
+                        e.stopPropagation();
                         console.log('🐹 Context menu button clicked:', buttonConfig.method);
                         if (this[buttonConfig.method]) {
+                            console.log('🐹 Calling method:', buttonConfig.method);
                             this[buttonConfig.method]();
                         } else {
                             console.log('🐹 Method not found:', buttonConfig.method);
                         }
+                        // Hide the menu after action
+                        this.hideTableControls();
                     });
-                    controls.appendChild(button);
+                    
+                    this.tableControls.appendChild(button);
                 });
-                
-                document.body.appendChild(controls);
-                this.tableControls = controls;
             }
             
             // Add resize handles to tables
@@ -1286,39 +1527,320 @@
                 });
             }
             
-            // Handle right-click context menu
-            handleRightClick(event) {
-                console.log('🐹 Right-click detected:', event.target);
+            // Handle mouse down for selection
+            handleMouseDown(event) {
                 const cell = event.target.closest('td, th');
-                console.log('🐹 Found cell:', cell);
-                if (cell) {
-                    event.preventDefault();
-                    this.currentCell = cell;
-                    console.log('🐹 Setting currentCell and showing controls');
-                    this.showTableControls(event.clientX, event.clientY);
+                if (!cell || event.button !== 0) return; // Only left mouse button
+                
+                console.log('🐹 ========== MOUSE DOWN START ==========');
+                console.log('🐹 Starting potential selection on cell:', cell);
+                
+                // Store initial mouse position and cell for drag detection
+                this.mouseDownX = event.clientX;
+                this.mouseDownY = event.clientY;
+                this.mouseDownCell = cell;
+                this.dragThreshold = 5; // pixels to move before starting selection
+                this.hasDraggedForSelection = false;
+                
+                // Clear previous selection if not holding Ctrl/Cmd
+                if (!event.ctrlKey && !event.metaKey) {
+                    this.clearSelection();
+                }
+                
+                // Don't prevent default yet - let normal editing work
+                // We'll only prevent default if user starts dragging
+                
+                console.log('🐹 ========== MOUSE DOWN END ==========');
+            }
+            
+            // Handle mouse move for selection
+            handleMouseMove(event) {
+                // Check if we should start selection (drag detected)
+                if (this.mouseDownCell && !this.isSelecting) {
+                    const deltaX = Math.abs(event.clientX - this.mouseDownX);
+                    const deltaY = Math.abs(event.clientY - this.mouseDownY);
+                    
+                    if (deltaX > this.dragThreshold || deltaY > this.dragThreshold) {
+                        console.log('🐹 Drag detected - starting selection mode');
+                        this.isSelecting = true;
+                        this.selectionStart = this.mouseDownCell;
+                        this.selectionEnd = this.mouseDownCell;
+                        this.hasDraggedForSelection = true;
+                        
+                        // Now prevent default to stop text selection
+                        event.preventDefault();
+                        
+                        // Create selection overlay
+                        this.createSelectionOverlay();
+                    }
+                }
+                
+                if (!this.isSelecting || !this.selectionStart) return;
+                
+                const cell = event.target.closest('td, th');
+                if (!cell) return;
+                
+                this.selectionEnd = cell;
+                this.updateSelection();
+                this.updateSelectionOverlay();
+            }
+            
+            // Handle mouse up for selection
+            handleMouseUp(event) {
+                console.log('🐹 ========== MOUSE UP START ==========');
+                
+                // If we were in selection mode
+                if (this.isSelecting) {
+                    console.log('🐹 Selection completed');
+                    console.log('🐹 Selected cells count:', this.selectedCells.size);
+                    
+                    this.isSelecting = false;
+                    this.hideSelectionOverlay();
+                    
+                    // If we have multiple cells selected, show multi-cell context options
+                    if (this.selectedCells.size > 1) {
+                        console.log('🐹 Multiple cells selected - enabling multi-cell features');
+                    }
+                } else if (this.mouseDownCell && !this.hasDraggedForSelection) {
+                    // This was a simple click, not a drag - allow normal cell editing
+                    console.log('🐹 Simple click detected - enabling cell editing');
+                    
+                    // Clear any existing selection and select just this cell
+                    this.clearSelection();
+                    this.selectedCells.add(this.mouseDownCell);
+                    this.mouseDownCell.classList.add('cell-selected');
+                    this.currentCell = this.mouseDownCell;
+                    
+                    // Focus the cell for editing
+                    setTimeout(() => {
+                        this.mouseDownCell.focus();
+                    }, 0);
+                }
+                
+                // Reset mouse tracking variables
+                this.mouseDownCell = null;
+                this.mouseDownX = null;
+                this.mouseDownY = null;
+                this.hasDraggedForSelection = false;
+                
+                console.log('🐹 ========== MOUSE UP END ==========');
+            }
+            
+            // Create selection overlay
+            createSelectionOverlay() {
+                if (!this.selectionOverlay) {
+                    this.selectionOverlay = document.createElement('div');
+                    this.selectionOverlay.className = 'selection-overlay';
+                    document.body.appendChild(this.selectionOverlay);
+                }
+                this.selectionOverlay.style.display = 'block';
+            }
+            
+            // Update selection overlay position
+            updateSelectionOverlay() {
+                if (!this.selectionOverlay || !this.selectionStart || !this.selectionEnd) return;
+                
+                const startRect = this.selectionStart.getBoundingClientRect();
+                const endRect = this.selectionEnd.getBoundingClientRect();
+                
+                const left = Math.min(startRect.left, endRect.left);
+                const top = Math.min(startRect.top, endRect.top);
+                const right = Math.max(startRect.right, endRect.right);
+                const bottom = Math.max(startRect.bottom, endRect.bottom);
+                
+                this.selectionOverlay.style.left = left + 'px';
+                this.selectionOverlay.style.top = top + 'px';
+                this.selectionOverlay.style.width = (right - left) + 'px';
+                this.selectionOverlay.style.height = (bottom - top) + 'px';
+            }
+            
+            // Hide selection overlay
+            hideSelectionOverlay() {
+                if (this.selectionOverlay) {
+                    this.selectionOverlay.style.display = 'none';
                 }
             }
             
+            // Update cell selection
+            updateSelection() {
+                if (!this.selectionStart || !this.selectionEnd) return;
+                
+                // Clear previous visual selection
+                this.selectedCells.forEach(cell => {
+                    cell.classList.remove('cell-selected');
+                });
+                this.selectedCells.clear();
+                
+                // Get table and cell positions
+                const table = this.selectionStart.closest('table');
+                if (!table) return;
+                
+                const startRow = parseInt(this.selectionStart.getAttribute('data-row') || '0');
+                const startCol = parseInt(this.selectionStart.getAttribute('data-col') || '0');
+                const endRow = parseInt(this.selectionEnd.getAttribute('data-row') || '0');
+                const endCol = parseInt(this.selectionEnd.getAttribute('data-col') || '0');
+                
+                const minRow = Math.min(startRow, endRow);
+                const maxRow = Math.max(startRow, endRow);
+                const minCol = Math.min(startCol, endCol);
+                const maxCol = Math.max(startCol, endCol);
+                
+                console.log('🐹 Selection range:', {minRow, maxRow, minCol, maxCol});
+                
+                // Select all cells in the rectangle
+                for (let row = minRow; row <= maxRow; row++) {
+                    for (let col = minCol; col <= maxCol; col++) {
+                        const cell = table.querySelector(`[data-row="${row}"][data-col="${col}"]`);
+                        if (cell) {
+                            this.selectedCells.add(cell);
+                            cell.classList.add('cell-selected');
+                        }
+                    }
+                }
+                
+                console.log('🐹 Selected', this.selectedCells.size, 'cells');
+            }
+            
+            // Clear selection
+            clearSelection() {
+                console.log('🐹 Clearing selection');
+                this.selectedCells.forEach(cell => {
+                    cell.classList.remove('cell-selected');
+                });
+                this.selectedCells.clear();
+                this.selectionStart = null;
+                this.selectionEnd = null;
+                this.hideSelectionOverlay();
+            }
+            
+            // Handle contextmenu events
+            handleContextMenu(event) {
+                console.log('🐹 ========== RIGHT-CLICK EVENT START ==========');
+                console.log('🐹 Event type:', event.type);
+                console.log('🐹 Event target:', event.target);
+                console.log('🐹 Event button:', event.button);
+                console.log('🐹 Event which:', event.which);
+                console.log('🐹 Event ctrlKey:', event.ctrlKey);
+                console.log('🐹 Event metaKey:', event.metaKey);
+                console.log('🐹 Event shiftKey:', event.shiftKey);
+                console.log('🐹 Event altKey:', event.altKey);
+                console.log('🐹 Event clientX:', event.clientX);
+                console.log('🐹 Event clientY:', event.clientY);
+                console.log('🐹 Event defaultPrevented:', event.defaultPrevented);
+                console.log('🐹 Event isTrusted:', event.isTrusted);
+                console.log('🐹 Selected cells count:', this.selectedCells.size);
+                
+                const cell = event.target.closest('td, th');
+                console.log('🐹 Found cell:', cell);
+                console.log('🐹 Cell tagName:', cell ? cell.tagName : 'none');
+                console.log('🐹 Cell classList:', cell ? Array.from(cell.classList) : 'none');
+                
+                if (cell) {
+                    console.log('🐹 PREVENTING DEFAULT AND STOPPING PROPAGATION');
+                    // Prevent default context menu
+                    event.preventDefault();
+                    event.stopPropagation();
+                    
+                    // If right-clicking on a cell that's not in the current selection, clear selection and select this cell
+                    if (!this.selectedCells.has(cell)) {
+                        this.clearSelection();
+                        this.selectedCells.add(cell);
+                        cell.classList.add('cell-selected');
+                    }
+                    
+                    this.currentCell = cell;
+                    console.log('🐹 Current cell set to:', this.currentCell);
+                    console.log('🐹 About to show controls at:', event.clientX, event.clientY);
+                    
+                    this.showTableControls(event.clientX, event.clientY);
+                    
+                    // Set a flag to prevent immediate hiding - increased timeout to prevent race condition
+                    console.log('🐹 Setting justOpenedMenu = true');
+                    this.justOpenedMenu = true;
+                    setTimeout(() => {
+                        console.log('🐹 Setting justOpenedMenu = false after timeout');
+                        this.justOpenedMenu = false;
+                    }, 200); // Increased to 200ms to prevent race condition with global click
+                } else {
+                    console.log('🐹 NO CELL FOUND - not showing controls');
+                }
+                console.log('🐹 ========== RIGHT-CLICK EVENT END ==========');
+            }
             // Handle click events
             handleClick(event) {
+                console.log('🐹 ========== CLICK EVENT START ==========');
+                console.log('🐹 Event type:', event.type);
+                console.log('🐹 Event target:', event.target);
+                console.log('🐹 Event button:', event.button);
+                console.log('🐹 Event ctrlKey:', event.ctrlKey);
+                console.log('🐹 Event metaKey:', event.metaKey);
+                console.log('🐹 Current justOpenedMenu state:', this.justOpenedMenu);
+                
                 const cell = event.target.closest('td, th');
+                const isControlsClick = event.target.closest('.table-controls');
+                
+                console.log('🐹 Found cell:', cell ? cell.tagName : 'none');
+                console.log('🐹 Is controls click:', !!isControlsClick);
+                
                 if (cell) {
+                    console.log('🐹 Setting current cell to:', cell);
                     this.currentCell = cell;
-                } else {
+                    
+                    // Add highlighting hook here (non-interfering)
+                    this.highlightCellInPDF(cell);
+                } else if (!isControlsClick) {
+                    console.log('🐹 Not a cell or controls click - hiding controls');
                     this.hideTableControls();
+                    this.clearAllHighlights();
+                } else {
+                    console.log('🐹 Controls click - not hiding');
                 }
+                console.log('🐹 ========== CLICK EVENT END ==========');
             }
             
             // Show table controls
             showTableControls(x, y) {
-                this.tableControls.style.left = x + 'px';
-                this.tableControls.style.top = y + 'px';
-                this.tableControls.style.display = 'block';
+                console.log('🐹 ========== SHOWING TABLE CONTROLS ==========');
+                console.log('🐹 Position:', x, y);
+                console.log('🐹 Table controls element exists:', !!this.tableControls);
+                console.log('🐹 Controls current display:', this.tableControls ? this.tableControls.style.display : 'undefined');
+                
+                if (this.tableControls) {
+                    // Update controls based on current selection
+                    this.updateTableControls();
+                    
+                    this.tableControls.style.left = x + 'px';
+                    this.tableControls.style.top = y + 'px';
+                    this.tableControls.style.setProperty('display', 'block', 'important');
+                    
+                    console.log('🐹 After setting styles:');
+                    console.log('🐹 Left:', this.tableControls.style.left);
+                    console.log('🐹 Top:', this.tableControls.style.top);
+                    console.log('🐹 Display:', this.tableControls.style.display);
+                    console.log('🐹 Full CSS text:', this.tableControls.style.cssText);
+                    console.log('🐹 Computed display:', window.getComputedStyle(this.tableControls).display);
+                    console.log('🐹 Computed visibility:', window.getComputedStyle(this.tableControls).visibility);
+                    console.log('🐹 Element bounds:', this.tableControls.getBoundingClientRect());
+                } else {
+                    console.log('🐹 ERROR: No table controls element found!');
+                }
+                console.log('🐹 ========== CONTROLS SHOW COMPLETE ==========');
             }
             
             // Hide table controls
             hideTableControls() {
-                this.tableControls.style.display = 'none';
+                console.log('🐹 ========== HIDING TABLE CONTROLS ==========');
+                console.log('🐹 justOpenedMenu state:', this.justOpenedMenu);
+                console.log('🐹 Controls element exists:', !!this.tableControls);
+                
+                if (this.tableControls) {
+                    console.log('🐹 Current display before hiding:', this.tableControls.style.display);
+                    this.tableControls.style.display = 'none';
+                    console.log('🐹 Display after hiding:', this.tableControls.style.display);
+                } else {
+                    console.log('🐹 No controls element to hide');
+                }
+                console.log('🐹 ========== CONTROLS HIDE COMPLETE ==========');
             }
             
             // Add row above current cell
@@ -1446,6 +1968,495 @@
                 this.hideTableControls();
             }
             
+            // Multi-cell operations
+            clearSelectedCells() {
+                console.log('🐹 Clearing', this.selectedCells.size, 'selected cells');
+                this.selectedCells.forEach(cell => {
+                    cell.textContent = '';
+                    cell.classList.add('cell-modified');
+                    // Save each cell change
+                    const row = cell.getAttribute('data-row');
+                    const col = cell.getAttribute('data-col');
+                    if (row && col) {
+                        this.saveTableChange(row, col, '');
+                    }
+                });
+                this.clearSelection();
+            }
+            
+            copySelection() {
+                console.log('🐹 Copying', this.selectedCells.size, 'selected cells');
+                const data = [];
+                this.selectedCells.forEach(cell => {
+                    data.push({
+                        row: cell.getAttribute('data-row'),
+                        col: cell.getAttribute('data-col'),
+                        content: cell.textContent.trim()
+                    });
+                });
+                
+                // Store in a simple format that could be used for pasting later
+                navigator.clipboard.writeText(
+                    data.map(item => item.content).join('\t')
+                ).then(() => {
+                    console.log('🐹 Selection copied to clipboard');
+                }).catch(err => {
+                    console.log('🐹 Could not copy to clipboard:', err);
+                });
+            }
+            
+            fillDown() {
+                if (this.selectedCells.size < 2) return;
+                
+                console.log('🐹 Filling down in selection');
+                const cellsArray = Array.from(this.selectedCells);
+                
+                // Find the top-most cell's content
+                let topCell = cellsArray[0];
+                let minRow = parseInt(topCell.getAttribute('data-row'));
+                
+                cellsArray.forEach(cell => {
+                    const row = parseInt(cell.getAttribute('data-row'));
+                    if (row < minRow) {
+                        minRow = row;
+                        topCell = cell;
+                    }
+                });
+                
+                const fillValue = topCell.textContent.trim();
+                console.log('🐹 Filling with value:', fillValue);
+                
+                // Fill all selected cells with the top cell's value
+                this.selectedCells.forEach(cell => {
+                    if (cell !== topCell) {
+                        cell.textContent = fillValue;
+                        cell.classList.add('cell-modified');
+                        const row = cell.getAttribute('data-row');
+                        const col = cell.getAttribute('data-col');
+                        if (row && col) {
+                            this.saveTableChange(row, col, fillValue);
+                        }
+                    }
+                });
+            }
+            
+            fillRight() {
+                if (this.selectedCells.size < 2) return;
+                
+                console.log('🐹 Filling right in selection');
+                const cellsArray = Array.from(this.selectedCells);
+                
+                // Find the left-most cell's content
+                let leftCell = cellsArray[0];
+                let minCol = parseInt(leftCell.getAttribute('data-col'));
+                
+                cellsArray.forEach(cell => {
+                    const col = parseInt(cell.getAttribute('data-col'));
+                    if (col < minCol) {
+                        minCol = col;
+                        leftCell = cell;
+                    }
+                });
+                
+                const fillValue = leftCell.textContent.trim();
+                console.log('🐹 Filling with value:', fillValue);
+                
+                // Fill all selected cells with the left cell's value
+                this.selectedCells.forEach(cell => {
+                    if (cell !== leftCell) {
+                        cell.textContent = fillValue;
+                        cell.classList.add('cell-modified');
+                        const row = cell.getAttribute('data-row');
+                        const col = cell.getAttribute('data-col');
+                        if (row && col) {
+                            this.saveTableChange(row, col, fillValue);
+                        }
+                    }
+                });
+            }
+            
+            // Non-interfering highlighting system
+            initHighlightingSystem() {
+                console.log('🔗 Initializing non-interfering highlighting system...');
+                
+                // Create PDF highlight overlay
+                this.createPDFHighlightOverlay();
+                
+                // Create tooltip for coordinate info
+                this.createSourceTooltip();
+                
+                // Add PDF click handler (separate from table editor)
+                this.addPDFClickHandler();
+                
+                // Global highlighting API
+                window.chonkerHighlighting = {
+                    highlightCell: (row, col) => this.highlightSpecificCell(row, col),
+                    clearHighlights: () => this.clearAllHighlights(),
+                    testHighlight: () => this.testRandomHighlight(),
+                    enabled: true
+                };
+                
+                console.log('🔗 Highlighting system ready!');
+            }
+            
+            createPDFHighlightOverlay() {
+                const pdfViewer = document.querySelector('.pane-a');
+                const editorPane = document.querySelector('.pane-b');
+                
+                if (!pdfViewer || !editorPane) {
+                    console.warn('🔗 PDF viewer or editor pane not found');
+                    return;
+                }
+                
+                // Create marker containers for both panes
+                this.pdfMarkers = document.createElement('div');
+                this.pdfMarkers.className = 'highlight-markers';
+                pdfViewer.appendChild(this.pdfMarkers);
+                
+                this.editorMarkers = document.createElement('div');
+                this.editorMarkers.className = 'highlight-markers';
+                editorPane.appendChild(this.editorMarkers);
+                
+                console.log('🔗 Edge marker system created for both panes');
+            }
+            
+            createSourceTooltip() {
+                this.sourceTooltip = document.createElement('div');
+                this.sourceTooltip.className = 'source-tooltip';
+                document.body.appendChild(this.sourceTooltip);
+                
+                // Add hover listener to editor (non-interfering)
+                this.editor.addEventListener('mouseover', (e) => {
+                    if (!window.chonkerHighlighting?.enabled) return;
+                    
+                    const cell = e.target.closest('td, th');
+                    if (cell && !cell.matches(':focus')) {
+                        const row = parseInt(cell.getAttribute('data-row'));
+                        const col = parseInt(cell.getAttribute('data-col'));
+                        
+                        if (!isNaN(row) && !isNaN(col)) {
+                            const coords = this.getMockCoordinatesForCell(row, col);
+                            this.sourceTooltip.textContent = `PDF: Page ${coords.page}, (${coords.x}, ${coords.y})`;
+                            this.sourceTooltip.style.left = e.pageX + 10 + 'px';
+                            this.sourceTooltip.style.top = e.pageY - 35 + 'px';
+                            this.sourceTooltip.style.opacity = '1';
+                        }
+                    } else {
+                        this.sourceTooltip.style.opacity = '0';
+                    }
+                });
+                
+                this.editor.addEventListener('mouseout', () => {
+                    this.sourceTooltip.style.opacity = '0';
+                });
+            }
+            
+            getMockCoordinatesForCell(row, col) {
+                // Mock realistic table coordinates
+                const baseX = 120 + (col * 140);
+                const baseY = 180 + (row * 45);
+                
+                return {
+                    x: baseX,
+                    y: baseY,
+                    width: 130,
+                    height: 40,
+                    page: 1
+                };
+            }
+            
+            highlightCellInPDF(cell) {
+                if (!window.chonkerHighlighting?.enabled || !this.pdfMarkers) return;
+                
+                const row = parseInt(cell.getAttribute('data-row'));
+                const col = parseInt(cell.getAttribute('data-col'));
+                
+                if (!isNaN(row) && !isNaN(col)) {
+                    console.log(`🔗 Editor→PDF: Adding markers for cell [${row}, ${col}]`);
+                    
+                    // Clear previous markers
+                    this.clearAllMarkers();
+                    
+                    // Get relative position using realistic PDF table bounds
+                    const relativePos = this.getRelativePositionForCell(row, col);
+                    
+                    // Create orange markers for editor→PDF highlighting
+                    this.createEdgeMarker(this.pdfMarkers, 'left', relativePos.y, 'editor-to-pdf');
+                    this.createEdgeMarker(this.pdfMarkers, 'top', relativePos.x, 'editor-to-pdf');
+                    
+                    console.log(`🔗 PDF markers at relative pos: x=${relativePos.x.toFixed(2)}, y=${relativePos.y.toFixed(2)}`);
+                    
+                    // Also highlight the cell in editor
+                    this.highlightCellInEditor(cell, 'editor-to-pdf');
+                    
+                    // Create connection line
+                    this.createConnectionLine('editor-to-pdf');
+                }
+            }
+            
+            highlightCellInEditor(cell, colorType = 'editor-to-pdf') {
+                if (!this.editorMarkers) return;
+                
+                // Get cell position relative to editor pane - use center of cell
+                const editorPane = document.querySelector('.pane-b');
+                const editorRect = editorPane.getBoundingClientRect();
+                const cellRect = cell.getBoundingClientRect();
+                
+                // Calculate relative positions using cell center
+                const cellCenterY = cellRect.top + (cellRect.height / 2);
+                const cellCenterX = cellRect.left + (cellRect.width / 2);
+                
+                const relativeTop = (cellCenterY - editorRect.top) / editorRect.height;
+                const relativeLeft = (cellCenterX - editorRect.left) / editorRect.width;
+                
+                // Clamp to valid range
+                const clampedTop = Math.max(0, Math.min(1, relativeTop));
+                const clampedLeft = Math.max(0, Math.min(1, relativeLeft));
+                
+                console.log(`🔗 Editor markers at relative pos: left=${clampedLeft.toFixed(2)}, top=${clampedTop.toFixed(2)}`);
+                
+                // Create edge markers for editor with color coding
+                this.createEdgeMarker(this.editorMarkers, 'right', clampedTop, colorType);
+                this.createEdgeMarker(this.editorMarkers, 'bottom', clampedLeft, colorType);
+                
+                // Also add the cell highlight
+                cell.classList.add('source-highlighted');
+            }
+            
+            getRelativePositionForCell(row, col) {
+                // Convert table coordinates to relative positions (0-1)
+                // Using more realistic PDF table positioning
+                
+                // Typical PDF table area: starts ~15% down the page, ends ~85%
+                const tableStartY = 0.15;  // 15% from top (after headers/title)
+                const tableEndY = 0.85;    // 85% down (before footer)
+                const tableHeight = tableEndY - tableStartY;
+                
+                // Horizontal: usually centered with margins
+                const tableStartX = 0.1;   // 10% from left margin
+                const tableEndX = 0.9;     // 90% (10% right margin)
+                const tableWidth = tableEndX - tableStartX;
+                
+                // Calculate positions within the table area
+                const maxRows = 15;
+                const maxCols = 6;
+                
+                const relativeRowInTable = (row + 0.5) / maxRows;
+                const relativeColInTable = (col + 0.5) / maxCols;
+                
+                return {
+                    x: tableStartX + (relativeColInTable * tableWidth),
+                    y: tableStartY + (relativeRowInTable * tableHeight)
+                };
+            }
+            
+            createEdgeMarker(container, edge, position, colorType = 'editor-to-pdf') {
+                const marker = document.createElement('div');
+                marker.className = `edge-marker ${edge} ${colorType} pulse`;
+                
+                // Set colors explicitly
+                if (colorType === 'pdf-to-editor') {
+                    marker.style.background = '#2196f3';
+                    marker.style.boxShadow = '0 0 8px rgba(33, 150, 243, 0.6)';
+                } else {
+                    marker.style.background = '#ff5722';
+                    marker.style.boxShadow = '0 0 8px rgba(255, 87, 34, 0.6)';
+                }
+                
+                // Position marker
+                if (edge === 'left' || edge === 'right') {
+                    marker.style.top = (position * 100) + '%';
+                    marker.style.transform = edge === 'left' 
+                        ? `translateX(-6px) translateY(-50%)`
+                        : `translateX(6px) translateY(-50%)`;
+                } else {
+                    marker.style.left = (position * 100) + '%';
+                    marker.style.transform = edge === 'top' 
+                        ? `translateY(-6px) translateX(-50%)`
+                        : `translateY(6px) translateX(-50%)`;
+                }
+                
+                container.appendChild(marker);
+                
+                // Remove pulse after animation
+                setTimeout(() => {
+                    marker.classList.remove('pulse');
+                }, 2000);
+            }
+            
+            createConnectionLine(colorType = 'editor-to-pdf') {
+                // Remove any existing connection lines
+                document.querySelectorAll('.connection-line').forEach(line => {
+                    if (line.parentNode) line.parentNode.removeChild(line);
+                });
+                
+                // Create a visual connection between the panes
+                const line = document.createElement('div');
+                line.className = `connection-line ${colorType}`;
+                
+                // Position line between the two panes
+                const pdfPane = document.querySelector('.pane-a');
+                const editorPane = document.querySelector('.pane-b');
+                
+                if (pdfPane && editorPane) {
+                    const pdfRect = pdfPane.getBoundingClientRect();
+                    const editorRect = editorPane.getBoundingClientRect();
+                    
+                    const startX = pdfRect.right;
+                    const endX = editorRect.left;
+                    const centerY = (pdfRect.top + pdfRect.bottom) / 2;
+                    
+                    line.style.left = startX + 'px';
+                    line.style.top = centerY + 'px';
+                    line.style.width = (endX - startX) + 'px';
+                }
+                
+                document.body.appendChild(line);
+                
+                // Remove line after animation
+                setTimeout(() => {
+                    if (line.parentNode) {
+                        line.parentNode.removeChild(line);
+                    }
+                }, 4000);
+            }
+            
+            clearPDFMarkers() {
+                if (this.pdfMarkers) {
+                    this.pdfMarkers.innerHTML = '';
+                }
+            }
+            
+            clearEditorMarkers() {
+                if (this.editorMarkers) {
+                    this.editorMarkers.innerHTML = '';
+                }
+            }
+            
+            highlightSpecificCell(row, col) {
+                // Clear any editor highlights
+                this.clearEditorHighlights();
+                
+                // Find and highlight the cell
+                const cell = this.editor.querySelector(`[data-row="${row}"][data-col="${col}"]`);
+                if (cell) {
+                    cell.classList.add('source-highlighted');
+                    
+                    // Scroll into view
+                    cell.scrollIntoView({
+                        behavior: 'smooth',
+                        block: 'center'
+                    });
+                    
+                    // Also highlight in PDF
+                    this.highlightCellInPDF(cell);
+                    
+                    console.log(`🔗 Highlighted cell [${row}, ${col}] in both panes`);
+                }
+            }
+            
+            clearEditorHighlights() {
+                this.editor.querySelectorAll('.source-highlighted').forEach(el => {
+                    el.classList.remove('source-highlighted');
+                });
+            }
+            
+            clearAllMarkers() {
+                this.clearPDFMarkers();
+                this.clearEditorMarkers();
+                
+                // Clear any connection lines
+                document.querySelectorAll('.connection-line').forEach(line => {
+                    if (line.parentNode) {
+                        line.parentNode.removeChild(line);
+                    }
+                });
+            }
+            
+            clearAllHighlights() {
+                this.clearEditorHighlights();
+                this.clearAllMarkers();
+            }
+            
+            addPDFClickHandler() {
+                const pdfViewer = document.querySelector('.pane-a');
+                if (!pdfViewer) return;
+                
+                pdfViewer.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    
+                    if (!window.chonkerHighlighting?.enabled) return;
+                    
+                    const rect = pdfViewer.getBoundingClientRect();
+                    const relativeX = (e.clientX - rect.left) / rect.width;
+                    const relativeY = (e.clientY - rect.top) / rect.height;
+                    
+                    // Clear previous highlights
+                    this.clearAllMarkers();
+                    this.clearEditorHighlights();
+                    
+                    // Create blue markers on PDF
+                    this.createEdgeMarker(this.pdfMarkers, 'left', relativeY, 'pdf-to-editor');
+                    this.createEdgeMarker(this.pdfMarkers, 'top', relativeX, 'pdf-to-editor');
+                    
+                    // Create corresponding markers on editor
+                    this.highlightCorrespondingEditorPosition(relativeX, relativeY);
+                    
+                    // Try to highlight specific cell if within table bounds
+                    const tableStartY = 0.15;
+                    const tableEndY = 0.85;
+                    const tableStartX = 0.1;
+                    const tableEndX = 0.9;
+                    
+                    if (relativeX >= tableStartX && relativeX <= tableEndX && 
+                        relativeY >= tableStartY && relativeY <= tableEndY) {
+                        
+                        const tableRelativeX = (relativeX - tableStartX) / (tableEndX - tableStartX);
+                        const tableRelativeY = (relativeY - tableStartY) / (tableEndY - tableStartY);
+                        
+                        const maxCols = 6;
+                        const maxRows = 15;
+                        const mockCol = Math.floor(tableRelativeX * maxCols);
+                        const mockRow = Math.floor(tableRelativeY * maxRows);
+                        
+                        if (mockRow >= 0 && mockRow < maxRows && mockCol >= 0 && mockCol < maxCols) {
+                            const cell = this.editor.querySelector(`[data-row="${mockRow}"][data-col="${mockCol}"]`);
+                            if (cell) {
+                                cell.classList.add('source-highlighted');
+                                cell.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                            }
+                            console.log(`🔗 PDF click → highlighting editor cell [${mockRow}, ${mockCol}]`);
+                        }
+                    }
+                    
+                    console.log('🔗 ==========PDF CLICK COMPLETED==========');
+                }, true); // Use capture phase to get events first
+            }
+            
+            highlightCorrespondingEditorPosition(pdfX, pdfY) {
+                // Map PDF coordinates to editor coordinates
+                const editorPane = document.querySelector('.pane-b');
+                if (!editorPane) return;
+                
+                // For now, use direct coordinate mapping
+                // In real implementation, this would use extracted coordinate data
+                const editorX = pdfX;  // Could be adjusted based on layout differences
+                const editorY = pdfY;  // Could be adjusted based on content differences
+                
+                // Create blue markers on editor at corresponding position
+                this.createEdgeMarker(this.editorMarkers, 'right', editorY, 'pdf-to-editor');
+                this.createEdgeMarker(this.editorMarkers, 'bottom', editorX, 'pdf-to-editor');
+                
+                console.log(`🔗 Editor markers positioned at relative pos: x=${editorX.toFixed(2)}, y=${editorY.toFixed(2)}`);
+            }
+            
+            testRandomHighlight() {
+                const row = Math.floor(Math.random() * 8);
+                const col = Math.floor(Math.random() * 4);
+                this.highlightSpecificCell(row, col);
+                console.log(`🔗 Test: highlighted random cell [${row}, ${col}]`);
+            }
+            
             // Start resize operation
             startResize(event, cell, direction) {
                 event.preventDefault();
@@ -1483,6 +2494,9 @@
             // Export function globally
             window.chonkerTableEditor = tableEditor;
             
+            // Bidirectional highlighting disabled temporarily
+            // initBidirectionalHighlighting(editorElement);
+            
             // Add a visible indicator
             setTimeout(() => {
                 const tables = editorElement.querySelectorAll('.enhanced-table');
@@ -1490,6 +2504,7 @@
                     console.log(`🐹 Enhanced table editor initialized with ${tables.length} table(s)`);
                     console.log('🐹 Try clicking on any table cell to edit!');
                     console.log('🐹 Use Tab/Enter/Arrow keys to navigate between cells');
+                    console.log('🐹 Bidirectional highlighting enabled (non-interfering)');
                 } else {
                     console.log('🐹 Enhanced table editor initialized (no tables found yet)');
                 }
@@ -1497,6 +2512,15 @@
             
             return tableEditor;
         }
+        
+        // Bidirectional Highlighting System - DISABLED TEMPORARILY
+        // This function was causing keyboard input issues, so it's commented out
+        // Will re-implement with a different approach that doesn't interfere with contenteditable
+        /*
+        function initBidirectionalHighlighting(editorElement) {
+            // Implementation removed to restore keyboard functionality
+        }
+        */
         
         // Initialize
         document.addEventListener('DOMContentLoaded', () => {
@@ -1506,7 +2530,55 @@
             
             // Hide table controls when clicking outside
             document.addEventListener('click', (e) => {
-                if (window.chonkerTableEditor && !e.target.closest('.table-controls')) {
+                console.log('🐹 ========== GLOBAL CLICK EVENT ==========');
+                console.log('🐹 Event target:', e.target);
+                console.log('🐹 Event button:', e.button);
+                console.log('🐹 Event ctrlKey:', e.ctrlKey);
+                console.log('🐹 Event metaKey:', e.metaKey);
+                console.log('🐹 Editor exists:', !!window.chonkerTableEditor);
+                
+                const isControlsClick = e.target.closest('.table-controls');
+                const isCellClick = e.target.closest('td, th');
+                console.log('🐹 Is controls click:', !!isControlsClick);
+                console.log('🐹 Is cell click:', !!isCellClick);
+                
+                if (window.chonkerTableEditor && !isControlsClick) {
+                    console.log('🐹 Not a controls click - checking conditions');
+                    console.log('🐹 justOpenedMenu state:', window.chonkerTableEditor.justOpenedMenu);
+                    
+                    // Hide controls if:
+                    // 1. Menu was not just opened AND not clicking on a cell (escape feature)
+                    // 2. OR clicking on a different cell (switch context)
+                    if (!window.chonkerTableEditor.justOpenedMenu) {
+                        if (!isCellClick) {
+                            console.log('🐹 Clicking outside table - hiding controls (ESCAPE)');
+                            window.chonkerTableEditor.hideTableControls();
+                        } else {
+                            // Clicking on a cell - check if it's a different cell
+                            const clickedCell = e.target.closest('td, th');
+                            if (clickedCell !== window.chonkerTableEditor.currentCell) {
+                                console.log('🐹 Clicking on different cell - switching context');
+                                window.chonkerTableEditor.hideTableControls();
+                                window.chonkerTableEditor.currentCell = clickedCell;
+                            } else {
+                                console.log('🐹 Clicking on same cell - keeping controls open');
+                            }
+                        }
+                    } else {
+                        console.log('🐹 Menu was just opened - NOT hiding controls');
+                    }
+                } else if (isControlsClick) {
+                    console.log('🐹 Controls click detected - not hiding');
+                } else {
+                    console.log('🐹 No editor found');
+                }
+                console.log('🐹 ========== GLOBAL CLICK EVENT END ==========');
+            });
+            
+            // Add keyboard escape support
+            document.addEventListener('keydown', (e) => {
+                if (e.key === 'Escape' && window.chonkerTableEditor) {
+                    console.log('🐹 ESC key pressed - hiding table controls');
                     window.chonkerTableEditor.hideTableControls();
                 }
             });
