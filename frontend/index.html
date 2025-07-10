@@ -376,9 +376,14 @@
             
             <!-- Pane B: Converted Output -->
             <div class="pane-b">
-                <div class="converted-output" id="converted-output">
-                    <div id="tiptap-editor">Ready for content...</div>
-                </div>
+                    <div class="converted-output" id="converted-output">
+                        <div id="tiptap-editor">Ready for content...</div>
+                        <div style="position: fixed; top: 10px; right: 10px; z-index: 2000; background: #222; padding: 10px; border-radius: 5px;">
+                            <button onclick="console.log('🐹 Testing table editor:', window.chonkerTableEditor); if(window.chonkerTableEditor) { console.log('🐹 Available methods:', Object.getOwnPropertyNames(window.chonkerTableEditor)); }" style="background: #444; color: white; border: none; padding: 5px; margin: 2px; border-radius: 3px; cursor: pointer;">Test Editor</button>
+                            <button onclick="if(window.chonkerTableEditor) { window.chonkerTableEditor.addRowAbove(); } else { console.log('🐹 No table editor found'); }" style="background: #444; color: white; border: none; padding: 5px; margin: 2px; border-radius: 3px; cursor: pointer;">Add Row</button>
+                            <button onclick="if(window.chonkerTableEditor) { window.chonkerTableEditor.deleteRow(); } else { console.log('🐹 No table editor found'); }" style="background: #444; color: white; border: none; padding: 5px; margin: 2px; border-radius: 3px; cursor: pointer;">Delete Row</button>
+                        </div>
+                    </div>
             </div>
         </div>
     </div>
@@ -1230,14 +1235,32 @@
             createTableControls() {
                 const controls = document.createElement('div');
                 controls.className = 'table-controls';
-                controls.innerHTML = `
-                    <button onclick="window.chonkerTableEditor.addRowAbove()">Add Row Above</button>
-                    <button onclick="window.chonkerTableEditor.addRowBelow()">Add Row Below</button>
-                    <button onclick="window.chonkerTableEditor.addColumnLeft()">Add Column Left</button>
-                    <button onclick="window.chonkerTableEditor.addColumnRight()">Add Column Right</button>
-                    <button onclick="window.chonkerTableEditor.deleteRow()">Delete Row</button>
-                    <button onclick="window.chonkerTableEditor.deleteColumn()">Delete Column</button>
-                `;
+                
+                // Create buttons with proper event listeners
+                const buttons = [
+                    { text: 'Add Row Above', method: 'addRowAbove' },
+                    { text: 'Add Row Below', method: 'addRowBelow' },
+                    { text: 'Add Column Left', method: 'addColumnLeft' },
+                    { text: 'Add Column Right', method: 'addColumnRight' },
+                    { text: 'Delete Row', method: 'deleteRow' },
+                    { text: 'Delete Column', method: 'deleteColumn' }
+                ];
+                
+                buttons.forEach(buttonConfig => {
+                    const button = document.createElement('button');
+                    button.textContent = buttonConfig.text;
+                    button.addEventListener('click', (e) => {
+                        e.preventDefault();
+                        console.log('🐹 Context menu button clicked:', buttonConfig.method);
+                        if (this[buttonConfig.method]) {
+                            this[buttonConfig.method]();
+                        } else {
+                            console.log('🐹 Method not found:', buttonConfig.method);
+                        }
+                    });
+                    controls.appendChild(button);
+                });
+                
                 document.body.appendChild(controls);
                 this.tableControls = controls;
             }
