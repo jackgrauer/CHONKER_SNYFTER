@@ -1,5 +1,4 @@
-use tauri_plugin_dialog::DialogExt;
-
+use tauri::api::dialog::FileDialogBuilder;
 
 #[tauri::command]
 async fn test_command() -> Result<String, String> {
@@ -7,40 +6,36 @@ async fn test_command() -> Result<String, String> {
 }
 
 #[tauri::command]
-async fn select_pdf_file(app: tauri::AppHandle) -> Result<serde_json::Value, String> {
-    let file_path = app.dialog()
-        .file()
+async fn select_pdf_file() -> Result<serde_json::Value, String> {
+    use std::sync::{Arc, Mutex};
+    use std::sync::mpsc;
+    
+    let (tx, rx) = mpsc::channel();
+    let tx = Arc::new(Mutex::new(Some(tx)));
+    
+    FileDialogBuilder::new()
         .add_filter("PDF files", &["pdf"])
         .set_title("Select PDF Document")
-        .blocking_pick_file();
+        .pick_file(move |file_path| {
+            if let Some(sender) = tx.lock().unwrap().take() {
+                let _ = sender.send(file_path);
+            }
+        });
     
-    match file_path {
-        Some(path) => Ok(serde_json::json!({
-            "path": path.to_string(),
+    match rx.recv() {
+        Ok(Some(path)) => Ok(serde_json::json!({
+            "path": path.to_string_lossy().to_string(),
             "success": true
         })),
-        None => Ok(serde_json::json!({
+        Ok(None) | Err(_) => Ok(serde_json::json!({
             "success": false,
             "error": "No file selected"
         }))
     }
 }
 
-
-#[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        .plugin(tauri_plugin_dialog::init())
-        .setup(|app| {
-            if cfg!(debug_assertions) {
-                app.handle().plugin(
-                    tauri_plugin_log::Builder::default()
-                        .level(log::LevelFilter::Info)
-                        .build(),
-                )?;
-            }
-            Ok(())
-        })
         .invoke_handler(tauri::generate_handler![
             test_command,
             select_pdf_file
