@@ -1265,10 +1265,13 @@
             
             // Handle right-click context menu
             handleRightClick(event) {
+                console.log('🐹 Right-click detected:', event.target);
                 const cell = event.target.closest('td, th');
+                console.log('🐹 Found cell:', cell);
                 if (cell) {
                     event.preventDefault();
                     this.currentCell = cell;
+                    console.log('🐹 Setting currentCell and showing controls');
                     this.showTableControls(event.clientX, event.clientY);
                 }
             }
@@ -1297,10 +1300,15 @@
             
             // Add row above current cell
             addRowAbove() {
-                if (!this.currentCell) return;
+                console.log('🐹 addRowAbove called, currentCell:', this.currentCell);
+                if (!this.currentCell) {
+                    console.log('🐹 No current cell selected');
+                    return;
+                }
                 const row = this.currentCell.parentElement;
                 const table = row.closest('table');
                 const newRow = row.cloneNode(true);
+                console.log('🐹 Adding row above, table:', table);
                 
                 // Clear content and update data attributes
                 newRow.querySelectorAll('td, th').forEach((cell, index) => {
@@ -1316,7 +1324,11 @@
             
             // Add row below current cell
             addRowBelow() {
-                if (!this.currentCell) return;
+                console.log('🐹 addRowBelow called, currentCell:', this.currentCell);
+                if (!this.currentCell) {
+                    console.log('🐹 No current cell selected');
+                    return;
+                }
                 const row = this.currentCell.parentElement;
                 const table = row.closest('table');
                 const newRow = row.cloneNode(true);
@@ -1377,7 +1389,11 @@
             
             // Delete current row
             deleteRow() {
-                if (!this.currentCell) return;
+                console.log('🐹 deleteRow called, currentCell:', this.currentCell);
+                if (!this.currentCell) {
+                    console.log('🐹 No current cell selected');
+                    return;
+                }
                 const row = this.currentCell.parentElement;
                 const table = row.closest('table');
                 
