@@ -21,7 +21,7 @@ tauri-build = { version = "1.5", features = [] }
 serde_json = "1.0"
 serde = { version = "1.0", features = ["derive"] }
 log = "0.4"
-tauri = { version = "1.5", features = [ "shell-open", "dialog-open"] }
+tauri = { version = "1.5", features = [ "global-shortcut-all", "shell-open", "dialog-open"] }
 
 # CHONKER dependencies
 sqlx = { version = "0.7", features = ["runtime-tokio-native-tls", "sqlite", "chrono"] }
