@@ -1,0 +1,40 @@
+{
+  "name": "@chonker/frontend",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "dev:fresh": "rm -rf node_modules/.vite && rm -rf dist && vite --force",
+    "dev:nuclear": "rm -rf node_modules/.vite && rm -rf dist && killall node 2>/dev/null || true && vite --force",
+    "build": "vite build",
+    "preview": "vite preview",
+    "check": "svelte-check --tsconfig ./tsconfig.app.json && tsc -p tsconfig.node.json"
+  },
+  "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "^4.0.0",
+    "@tailwindcss/postcss": "^4.1.11",
+    "@tailwindcss/typography": "^0.5.16",
+    "@tsconfig/svelte": "^5.0.4",
+    "autoprefixer": "^10.4.21",
+    "postcss": "^8.5.6",
+    "svelte": "^5.35.2",
+    "svelte-check": "^4.2.2",
+    "tailwindcss": "^4.1.11",
+    "typescript": "~5.8.3",
+    "vite": "^6.0.0"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.6.0",
+    "@tiptap/core": "^2.25.0",
+    "@tiptap/extension-document": "^2.25.0",
+    "@tiptap/extension-paragraph": "^2.25.0",
+    "@tiptap/extension-table": "^2.25.0",
+    "@tiptap/extension-table-cell": "^2.25.0",
+    "@tiptap/extension-table-header": "^2.25.0",
+    "@tiptap/extension-table-row": "^2.25.0",
+    "@tiptap/extension-text": "^2.25.0",
+    "@tiptap/pm": "^2.25.0",
+    "@tiptap/starter-kit": "^2.25.0"
+  }
+}

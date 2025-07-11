@@ -1,0 +1,15 @@
+{
+  "name": "@chonker/tauri-app",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Tauri backend for CHONKER SNYFTER",
+  "scripts": {
+    "dev": "cargo tauri dev",
+    "build": "cargo tauri build",
+    "test": "cargo test",
+    "lint": "cargo clippy",
+    "format": "cargo fmt"
+  },
+  "author": "jack",
+  "license": "MIT"
+}

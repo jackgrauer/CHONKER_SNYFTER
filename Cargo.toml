@@ -1,124 +1,18 @@
-[package]
-name = "chonker-tui"
-version = "10.0.0"
-edition = "2021"
-description = "CHONKER v10.0 - CLI-First Document Processing Pipeline"
-authors = ["Jack <jack@chonker.ai>"]
+[workspace]
+members = ["apps/tauri-app"]
+default-members = ["apps/tauri-app"]
+resolver = "2"
 
-[[bin]]
-name = "chonker"
-path = "src/main.rs"
-
-
-[[bin]]
-name = "extract_tables"
-path = "src/bin/extract_tables.rs"
-
-[[bin]]
-name = "pdf_viewer"
-path = "src/bin/pdf_viewer.rs"
-
-[[bin]]
-name = "chonker_gui"
-path = "src/bin/chonker_gui.rs"
-
-
-[features]
-default = ["tui"]
-debug = []
-tui = ["ratatui", "crossterm"]
-gui = ["eframe", "image", "rfd", "arboard"]
-data_export = ["polars", "arrow", "parquet"]
-advanced_pdf = ["pdfium-render"]
-mupdf = ["mupdf-sys"]
-python_bridge = ["pyo3"]
-caching = ["redis"]
-advanced_logging = ["tracing-appender"]
-
-# Convenience feature combinations
-full_gui = ["gui", "data_export", "advanced_pdf"]
-full_tui = ["tui", "data_export"]
-minimal = []
-
-[dependencies]
-# CLI framework
-clap = { version = "4.4", features = ["derive"] }
-
-# TUI framework (feature-gated)
-ratatui = { version = "0.26", optional = true }
-crossterm = { version = "0.27", optional = true }
-
-# Database and async runtime (minimal features)
-sqlx = { version = "0.7", features = ["runtime-tokio-native-tls", "sqlite", "chrono"] }
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs", "io-util"] }
-
-# Data processing (polars includes arrow/parquet)
-polars = { version = "0.35", features = ["lazy", "csv", "json", "parquet"], optional = true }
-
-# Markdown processing
-pulldown-cmark = "0.10"
-
-# Serialization (minimal)
+[workspace.dependencies]
+tauri = { version = "2.3.0", features = ["config-json5", "config-toml"] }
+tauri-build = { version = "2.3.0", features = [] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-scraper = "0.18"
+log = "0.4"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs", "io-util"] }
 chrono = { version = "0.4", features = ["serde"] }
-regex = "1.0"
-toml = "0.8"
-
-# Error handling
-anyhow = "1.0"
-thiserror = "1.0"
-
-# File system and utilities
 uuid = { version = "1.0", features = ["v4", "serde"] }
-
-# Logging (simplified)
+anyhow = "1.0"
+regex = "1.0"
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-
-# Text processing
-textwrap = "0.16"
-nom = "7.1"
-
-# Native PDF processing
-lopdf = "0.32"
-blake3 = "1.5"
-md5 = "0.7"
-
-# GUI for PDF preview (eframe includes egui)
-eframe = { version = "0.28", default-features = false, features = ["default_fonts", "glow"], optional = true }
-image = { version = "0.25", optional = true }
-
-# Processing
-rayon = "1.8"
-
-# GUI dependencies (feature-gated)
-rfd = { version = "0.14", optional = true }
-arboard = { version = "3.3", optional = true }
-
-# Optional dependencies
-pdfium-render = { version = "0.8", optional = true }
-mupdf-sys = { version = "0.5", optional = true }
-redis = { version = "0.24", optional = true }
-pyo3 = { version = "0.20", features = ["auto-initialize"], optional = true }
-tracing-appender = { version = "0.2", optional = true }
-arrow = { version = "53.0", optional = true }
-parquet = { version = "53.0", optional = true }
-
-[dev-dependencies]
-tempfile = "3.0"
-
-# Build profiles for performance and memory optimization
-[profile.release]
-strip = true
-opt-level = "z"
-lto = true
-codegen-units = 1
-panic = "abort"
-
-# Memory-optimized development profile
-[profile.dev]
-opt-level = 1
-overflow-checks = false
-strip = "symbols"
+thiserror = "1.0"

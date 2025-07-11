@@ -1,0 +1,25 @@
+{
+  "name": "chonker-snyfter",
+  "version": "1.0.0",
+  "description": "CHONKER SNYFTER - Document processing pipeline with Tauri frontend",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "turbo build",
+    "dev": "turbo dev",
+    "lint": "turbo lint",
+    "format": "turbo format",
+    "test": "turbo test",
+    "clean": "turbo clean"
+  },
+  "devDependencies": {
+    "turbo": "latest"
+  },
+  "packageManager": "npm@10.9.2",
+  "engines": {
+    "node": ">=18"
+  }
+}

@@ -1,161 +1,164 @@
-# Justfile for CHONKER_SNYFTER project automations
+# CHONKER SNYFTER - Turborepo Monorepo
+# Document processing pipeline with Tauri 2.3.0 + Turborepo
 
-# Setup Python virtual environment
-setup-venv:
-    @echo "Setting up Python virtual environment..."
-    python3 -m venv .venv
-    @echo "Virtual environment created at .venv"
-    @echo "To activate: source .venv/bin/activate"
+set shell := ["zsh", "-c"]
 
-# Install Python dependencies in virtual environment
-install-python:
-    @echo "Installing Python dependencies..."
-    .venv/bin/pip install --upgrade pip
-    .venv/bin/pip install docling requests python-dotenv
-    @echo "Python dependencies installed!"
-
-# Install all dependencies
-install: setup-venv install-python
-    @echo "Installing dependencies..."
-    # Install frontend dependencies
-    cd frontend/chonker-modern && npm install --legacy-peer-deps
-    # Install Tauri dependencies
-    cd src-tauri && npm install --legacy-peer-deps
-    @echo "All dependencies installed!"
-
-# Check the status of the project
-status:
-    @echo "Checking project status..."
-    # Check Rust backend status
-    cd src-tauri && cargo check
-    # Check frontend status
-    cd frontend/chonker-modern && npm run check || echo "Frontend check not available"
-    # Check Tauri status
-    cd src-tauri && npm run tauri info
-
-# Run development servers
-dev:
-    @echo "Starting Tauri development..."
-    cd src-tauri && npm run dev
-
-# Start backend only
-backend:
-    @echo "Starting backend server..."
-    cd src-tauri && cargo run
-
-# Start frontend only
-frontend:
-    @echo "Starting frontend server..."
-    cd frontend/chonker-modern && npm run dev
-
-# Build the project
-build:
-    @echo "Building project..."
-    cd src-tauri && npm run build
-
-# Clean build artifacts
-clean:
-    @echo "Cleaning build artifacts..."
-    cd src-tauri && cargo clean
-    cd frontend/chonker-modern && rm -rf node_modules dist
-
-# Run tests
-test:
-    @echo "Running tests..."
-    cd src-tauri && cargo test
-    cd frontend/chonker-modern && npm test || echo "Frontend tests not configured"
-
-# Format code
-fmt:
-    @echo "Formatting code..."
-    cd src-tauri && cargo fmt
-    cd frontend/chonker-modern && npm run format || echo "Frontend formatting not configured"
-
-# Run linter
-lint:
-    @echo "Running linter..."
-    cd src-tauri && cargo clippy
-    cd frontend/chonker-modern && npm run lint || echo "Frontend linting not configured"
+default:
+    @just --list
 
 # Show project info
 info:
-    @echo "=== CHONKER_SNYFTER Project Info ==="
-    @echo "Current directory: $(pwd)"
-    @echo "Rust version: $(rustc --version)"
-    @echo "Node version: $(node --version)"
-    @echo "NPM version: $(npm --version)"
-    @echo "Tauri CLI: $(npm list -g @tauri-apps/cli 2>/dev/null || echo 'Not installed globally')"
+    @echo "🐹 CHONKER SNYFTER - Turborepo Monorepo"
+    @echo "📄 Status: $(git status --porcelain | wc -l | tr -d ' ') uncommitted changes"
+    @echo "🦀 Rust: $(rustc --version)"
+    @echo "📦 Node: $(node --version)"
+    @echo "🔧 Tauri: $(cargo tauri --version)"
+    @echo "⚡ Turbo: $(turbo --version)"
+    @echo "📚 Workspaces: $(find apps packages -name package.json | wc -l | tr -d ' ') packages"
+    @echo "🏗️  Last build: $(ls -la apps/tauri-app/target/release 2>/dev/null | wc -l | tr -d ' ') files"
+    @echo "📋 Available commands: $(just --list | grep -E '^    [a-z]' | wc -l | tr -d ' ')"
+
+# Check the status of the project
+status:
+    @echo "🐹 CHONKER SNYFTER Status Check"
+    @echo "────────────────────────────"
+    @echo "📁 Working Directory: $(pwd)"
+    @echo "🦀 Rust: $(rustc --version)"
+    @echo "📦 Node: $(node --version)"
+    @echo "🔧 Tauri: $(cargo tauri --version || echo 'Not installed')"
+    @echo "📚 Frontend deps: $(ls frontend/chonker-modern/node_modules 2>/dev/null | wc -l) packages"
+    @echo "🔍 Recent activity: $(git log --oneline -5 | wc -l) recent commits"
+    @echo "🏗️  Build status: $(cargo check 2>/dev/null && echo 'OK' || echo 'Needs attention')"
+    @echo "🌐 Network: $(ping -c 1 google.com >/dev/null 2>&1 && echo 'Connected' || echo 'Offline')"
+    @echo "────────────────────────────"
+    @echo "🚀 Ready for $(just --list | grep -E '^    [a-z]' | wc -l) available commands"
+
+# Install all dependencies
+install:
+    @echo "🐹 Installing all dependencies..."
+    npm install
+    @echo "✅ All dependencies installed"
+
+# Run development servers with Turborepo
+dev:
+    @echo "🐹 Starting development servers..."
+    npm run dev
+
+# Start frontend only
+frontend:
+    @echo "🐹 Starting frontend..."
+    cd apps/frontend && npm run dev
+
+# Run tests with Turborepo
+test:
+    @echo "🐹 Running tests..."
+    npm run test
+    @echo "✅ Tests completed"
+
+# Format code with Turborepo
+fmt:
+    @echo "🐹 Formatting code..."
+    npm run format
+    @echo "✅ Code formatted"
+
+# Run linter with Turborepo
+lint:
+    @echo "🐹 Running linter..."
+    npm run lint
+    @echo "✅ Linting completed"
+
+# Build the project with Turborepo
+build:
+    @echo "🐹 Building CHONKER SNYFTER..."
+    npm run build
+    @echo "✅ Build completed"
+
+# Clean build artifacts
+clean:
+    @echo "🐹 Cleaning build artifacts..."
+    npm run clean
+    cargo clean
+    rm -rf apps/tauri-app/target/
+    find apps packages -name "dist" -type d -exec rm -rf {} + 2>/dev/null || true
+    find apps packages -name ".vite" -type d -exec rm -rf {} + 2>/dev/null || true
+    @echo "✅ Clean completed"
 
 # Fix common issues
 fix:
-    @echo "Running common fixes..."
-    cd src-tauri && cargo update
-    cd frontend/chonker-modern && npm audit fix || echo "No npm audit fixes needed"
+    @echo "🐹 Fixing common issues..."
+    @echo "🔧 Clearing frontend cache..."
+    cd frontend/chonker-modern && rm -rf node_modules/.vite dist
+    @echo "🔧 Clearing Rust cache..."
+    cargo clean
+    @echo "🔧 Reinstalling dependencies..."
+    just install
+    @echo "✅ Common issues fixed"
 
 # Git workflow commands
 git-status:
-    @echo "=== Git Status ==="
-    git status --porcelain
-    @echo "\n=== Git Log (last 5 commits) ==="
-    git log --oneline -5
+    @echo "🐹 Git Status"
+    @echo "────────────────────────────"
+    git status
+    @echo "────────────────────────────"
+    @echo "📈 Branch: $(git branch --show-current)"
+    @echo "📊 Changes: $(git status --porcelain | wc -l) files"
+    @echo "🔄 Commits ahead: $(git rev-list --count HEAD ^origin/$(git branch --show-current) 2>/dev/null || echo '0')"
+    @echo "📥 Commits behind: $(git rev-list --count origin/$(git branch --show-current) ^HEAD 2>/dev/null || echo '0')"
 
 # Add all changes to git
 git-add:
-    @echo "Adding all changes to git..."
+    @echo "🐹 Adding all changes to git..."
     git add .
-    git status --short
+    @echo "✅ Changes added"
 
 # Commit with message
 git-commit message:
-    @echo "Committing changes: {{message}}"
+    @echo "🐹 Committing changes..."
     git commit -m "{{message}}"
-
-# Quick commit with auto-generated message
-git-quick:
-    @echo "Quick commit with auto-generated message..."
-    git add .
-    git commit -m "Auto-commit: $(date +'%Y-%m-%d %H:%M:%S') - Updated project files"
-
-# Push to remote
-git-push:
-    @echo "Pushing to remote..."
-    git push origin main
+    @echo "✅ Changes committed"
 
 # Pull from remote
 git-pull:
-    @echo "Pulling from remote..."
-    git pull origin main
+    @echo "🐹 Pulling from remote..."
+    git pull
+    @echo "✅ Pull completed"
+
+# Push to remote
+git-push:
+    @echo "🐹 Pushing to remote..."
+    git push
+    @echo "✅ Push completed"
+
+# Quick commit with auto-generated message
+git-quick:
+    @echo "🐹 Quick commit..."
+    git add .
+    git commit -m "Quick update: $(date '+%Y-%m-%d %H:%M:%S')"
+    @echo "✅ Quick commit completed"
 
 # Full workflow: add, commit, push
 git-save message:
-    @echo "Saving changes: {{message}}"
+    @echo "🐹 Full git workflow..."
     git add .
     git commit -m "{{message}}"
-    git push origin main
+    git push
+    @echo "✅ Full workflow completed"
 
 # Create .gitignore entries for common files
 git-ignore:
-    @echo "Updating .gitignore..."
-    echo "\n# Virtual environment" >> .gitignore
-    echo ".venv/" >> .gitignore
-    echo "\n# Node modules" >> .gitignore
-    echo "node_modules/" >> .gitignore
-    echo "\n# Build artifacts" >> .gitignore
-    echo "target/" >> .gitignore
-    echo "dist/" >> .gitignore
-    echo "\n# IDE files" >> .gitignore
-    echo ".vscode/" >> .gitignore
-    echo ".idea/" >> .gitignore
-    echo "\n# OS files" >> .gitignore
+    @echo "🐹 Creating .gitignore entries..."
+    echo "# CHONKER SNYFTER specific" >> .gitignore
+    echo "*.db" >> .gitignore
+    echo "*.db-journal" >> .gitignore
+    echo "*.log" >> .gitignore
+    echo "# IDE and OS" >> .gitignore
     echo ".DS_Store" >> .gitignore
     echo "Thumbs.db" >> .gitignore
-    @echo "Added common ignore patterns to .gitignore"
-
-# Activate virtual environment (reminder)
-activate:
-    @echo "To activate the Python virtual environment, run:"
-    @echo "source .venv/bin/activate"
-
-# Default recipe
-default:
-    @just --list
+    echo "# Rust" >> .gitignore
+    echo "src-tauri/target/" >> .gitignore
+    echo "**/*.rs.bk" >> .gitignore
+    echo "# Node" >> .gitignore
+    echo "node_modules/" >> .gitignore
+    echo "dist/" >> .gitignore
+    echo ".vite/" >> .gitignore
+    @echo "✅ .gitignore updated"

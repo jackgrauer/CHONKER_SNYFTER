@@ -1,0 +1,12 @@
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+python-multipart==0.0.19
+docling==2.41.0
+pydantic==2.11.7
+python-dotenv==1.1.1
+aiofiles==24.1.0
+
+# Optional development dependencies
+pytest==8.3.4
+flake8==7.1.1
+black==24.10.0
