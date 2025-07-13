@@ -1,0 +1,673 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Document QC - Enhanced</title>
+    <style>
+        /* Base styles */
+        * { box-sizing: border-box; }
+        body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+        
+        .container { 
+            display: flex; 
+            height: 100vh;
+            position: relative;
+        }
+        
+        .panel { 
+            flex: 1; 
+            overflow: auto; 
+            padding: 20px;
+            position: relative;
+        }
+        
+        .pdf-panel { 
+            background: #f5f5f5;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .content-panel { 
+            background: white;
+        }
+        
+        /* PDF viewer */
+        #pdf-container {
+            position: relative;
+            overflow: auto;
+            flex: 1;
+            background: #e0e0e0;
+            display: flex;
+            justify-content: center;
+            align-items: flex-start;
+            padding: 20px;
+        }
+        
+        #pdf-canvas {
+            background: white;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        
+        /* Content blocks */
+        .content-block { 
+            margin: 10px 0; 
+            padding: 10px; 
+            border: 1px solid #eee;
+            border-radius: 4px;
+            position: relative;
+            transition: all 0.2s;
+        }
+        
+        .content-block:hover { 
+            background: #f9f9f9;
+            border-color: #ddd;
+        }
+        
+        .content-block.selected {
+            border-color: #007bff;
+            background: #e7f3ff;
+        }
+        
+        /* Confidence indicators */
+        .confidence-badge {
+            position: absolute;
+            top: 5px;
+            right: 5px;
+            font-size: 11px;
+            padding: 2px 6px;
+            border-radius: 3px;
+            background: #e0e0e0;
+        }
+        
+        .low-confidence { 
+            background: #ffebee !important;
+            border-color: #ffcdd2 !important;
+        }
+        
+        .low-confidence .confidence-badge {
+            background: #f44336;
+            color: white;
+        }
+        
+        .medium-confidence {
+            background: #fff8e1 !important;
+            border-color: #ffe082 !important;
+        }
+        
+        .medium-confidence .confidence-badge {
+            background: #ff9800;
+            color: white;
+        }
+        
+        .high-confidence .confidence-badge {
+            background: #4caf50;
+            color: white;
+        }
+        
+        /* Editing states */
+        .editing { 
+            background: #fffacd !important;
+            border-color: #ffd700 !important;
+            box-shadow: 0 0 0 2px rgba(255, 215, 0, 0.3);
+        }
+        
+        .changed {
+            border-left: 4px solid #ff9800;
+        }
+        
+        /* Tables */
+        table { 
+            width: 100%; 
+            border-collapse: collapse;
+            margin: 10px 0;
+        }
+        
+        th {
+            background: #f5f5f5;
+            padding: 8px;
+            text-align: left;
+            font-weight: 600;
+            border: 1px solid #ddd;
+        }
+        
+        td { 
+            border: 1px solid #ddd; 
+            padding: 6px;
+            font-family: monospace;
+        }
+        
+        td.editing {
+            background: #fffacd;
+            outline: 2px solid #ffd700;
+        }
+        
+        /* Controls */
+        .controls {
+            background: white;
+            border-bottom: 1px solid #ddd;
+            padding: 10px 20px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+        }
+        
+        .controls button {
+            padding: 6px 12px;
+            border: 1px solid #ddd;
+            background: white;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        
+        .controls button:hover {
+            background: #f5f5f5;
+        }
+        
+        .controls button.primary {
+            background: #007bff;
+            color: white;
+            border-color: #007bff;
+        }
+        
+        .controls button.primary:hover {
+            background: #0056b3;
+        }
+        
+        /* Page navigation */
+        .page-nav {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-left: auto;
+        }
+        
+        /* Status */
+        .status {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            padding: 10px 20px;
+            background: #4caf50;
+            color: white;
+            border-radius: 4px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .status.has-changes {
+            background: #ff9800;
+        }
+        
+        /* PDF overlays */
+        .pdf-overlay {
+            position: absolute;
+            border: 2px solid #007bff;
+            background: rgba(0, 123, 255, 0.1);
+            pointer-events: none;
+            transition: all 0.2s;
+        }
+        
+        .pdf-overlay.active {
+            background: rgba(0, 123, 255, 0.3);
+            border-color: #0056b3;
+        }
+        
+        /* Divider */
+        .divider {
+            width: 4px;
+            background: #e0e0e0;
+            cursor: col-resize;
+        }
+        
+        .divider:hover {
+            background: #bdbdbd;
+        }
+    </style>
+</head>
+<body>
+    <div class="controls">
+        <button onclick="qc.toggleEditMode()">
+            <span id="edit-mode-text">Enable Edit Mode</span>
+        </button>
+        <button onclick="qc.showChanges()">
+            Show Changes (<span id="change-count">0</span>)
+        </button>
+        <button class="primary" onclick="qc.saveChanges()">
+            Save Corrections
+        </button>
+        
+        <div class="page-nav">
+            <button onclick="qc.previousPage()">←</button>
+            <span>Page <span id="current-page">1</span> of <span id="total-pages">1</span></span>
+            <button onclick="qc.nextPage()">→</button>
+        </div>
+    </div>
+    
+    <div class="container">
+        <div class="panel pdf-panel">
+            <h3>Original PDF</h3>
+            <div id="pdf-container">
+                <canvas id="pdf-canvas"></canvas>
+            </div>
+        </div>
+        
+        <div class="divider"></div>
+        
+        <div class="panel content-panel">
+            <h3>Extracted Content</h3>
+            <div id="content">
+                <!-- Content loads here -->
+            </div>
+        </div>
+    </div>
+    
+    <div class="status" id="status">
+        <span id="status-text">Ready</span>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <script>
+        class EnhancedQCInterface {
+            constructor(basePath) {
+                this.basePath = basePath;
+                this.currentPage = 1;
+                this.totalPages = 1;
+                this.editMode = false;
+                this.changes = new Map();
+                this.pdf = null;
+                this.selectedElement = null;
+                
+                this.init();
+            }
+            
+            async init() {
+                await this.loadData();
+                this.setupEventListeners();
+                this.updateStatus('Ready');
+            }
+            
+            async loadData() {
+                try {
+                    this.updateStatus('Loading data...');
+                    
+                    // Load faithful JSON
+                    const response = await fetch(`${this.basePath}_faithful.json`);
+                    this.data = await response.json();
+                    
+                    // Load metadata
+                    const metaResponse = await fetch(`${this.basePath}_metadata.json`);
+                    this.metadata = await metaResponse.json();
+                    
+                    this.totalPages = this.metadata.page_count || 1;
+                    document.getElementById('total-pages').textContent = this.totalPages;
+                    
+                    await this.loadPDF();
+                    this.renderContent();
+                    
+                } catch (error) {
+                    console.error('Error loading data:', error);
+                    this.updateStatus('Error loading data', 'error');
+                }
+            }
+            
+            async loadPDF() {
+                const url = `${this.basePath}.pdf`;
+                this.pdf = await pdfjsLib.getDocument(url).promise;
+                await this.renderPDFPage();
+            }
+            
+            async renderPDFPage() {
+                const page = await this.pdf.getPage(this.currentPage);
+                const canvas = document.getElementById('pdf-canvas');
+                const context = canvas.getContext('2d');
+                
+                // Scale for better quality
+                const scale = 1.5;
+                const viewport = page.getViewport({ scale });
+                
+                canvas.height = viewport.height;
+                canvas.width = viewport.width;
+                
+                await page.render({
+                    canvasContext: context,
+                    viewport: viewport
+                }).promise;
+                
+                // Store page dimensions for overlay calculations
+                this.pageViewport = viewport;
+            }
+            
+            renderContent() {
+                const panel = document.getElementById('content');
+                panel.innerHTML = '';
+                
+                // Filter content for current page
+                const pageContent = this.getContentForPage(this.currentPage);
+                
+                // Render text content
+                pageContent.text.forEach((item, i) => {
+                    const block = this.createContentBlock(item, `text-${i}`);
+                    panel.appendChild(block);
+                });
+                
+                // Render tables
+                pageContent.tables.forEach((table, i) => {
+                    const block = this.createTableBlock(table, `table-${i}`);
+                    panel.appendChild(block);
+                });
+                
+                this.attachEditHandlers();
+            }
+            
+            getContentForPage(pageNum) {
+                // Filter content by page
+                const text = this.data.plain_text_content.filter(
+                    item => (item.page || 1) === pageNum
+                );
+                
+                const tables = this.data.tables.filter(
+                    table => (table.page || 1) === pageNum
+                );
+                
+                return { text, tables };
+            }
+            
+            createContentBlock(item, id) {
+                const div = document.createElement('div');
+                div.className = 'content-block';
+                div.dataset.id = id;
+                div.dataset.originalText = item.text;
+                
+                // Add confidence class
+                const confidence = this.inferConfidence(item.text);
+                if (confidence < 0.7) {
+                    div.classList.add('low-confidence');
+                } else if (confidence < 0.9) {
+                    div.classList.add('medium-confidence');
+                } else {
+                    div.classList.add('high-confidence');
+                }
+                
+                // Add confidence badge
+                const badge = document.createElement('span');
+                badge.className = 'confidence-badge';
+                badge.textContent = `${Math.round(confidence * 100)}%`;
+                div.appendChild(badge);
+                
+                // Add text content
+                const textDiv = document.createElement('div');
+                textDiv.contentEditable = this.editMode;
+                textDiv.textContent = item.text;
+                div.appendChild(textDiv);
+                
+                // Check if changed
+                if (this.changes.has(id)) {
+                    div.classList.add('changed');
+                    textDiv.textContent = this.changes.get(id).newValue;
+                }
+                
+                return div;
+            }
+            
+            createTableBlock(table, id) {
+                const div = document.createElement('div');
+                div.className = 'content-block';
+                div.dataset.id = id;
+                
+                const tableEl = document.createElement('table');
+                
+                // Headers
+                const headerRow = document.createElement('tr');
+                table.headers.forEach(header => {
+                    const th = document.createElement('th');
+                    th.textContent = header;
+                    headerRow.appendChild(th);
+                });
+                tableEl.appendChild(headerRow);
+                
+                // Data rows
+                table.data.forEach((row, rowIdx) => {
+                    const tr = document.createElement('tr');
+                    row.forEach((cell, colIdx) => {
+                        const td = document.createElement('td');
+                        td.contentEditable = this.editMode;
+                        td.textContent = cell;
+                        td.dataset.cellId = `${id}-${rowIdx}-${colIdx}`;
+                        td.dataset.originalValue = cell;
+                        
+                        // Check if changed
+                        const cellId = td.dataset.cellId;
+                        if (this.changes.has(cellId)) {
+                            td.classList.add('changed');
+                            td.textContent = this.changes.get(cellId).newValue;
+                        }
+                        
+                        tr.appendChild(td);
+                    });
+                    tableEl.appendChild(tr);
+                });
+                
+                div.appendChild(tableEl);
+                return div;
+            }
+            
+            inferConfidence(text) {
+                // Scientific notation - high confidence
+                if (/^\d+\.\d+E[+-]\d+$/.test(text)) return 0.95;
+                
+                // Detection codes - high confidence
+                if (/^(BDL|DLL|ND)$/.test(text)) return 0.95;
+                
+                // Numbers - high confidence
+                if (/^\d+\.?\d*$/.test(text)) return 0.92;
+                
+                // Empty or short text - low confidence
+                if (text.length < 3) return 0.60;
+                
+                // Default
+                return 0.85;
+            }
+            
+            attachEditHandlers() {
+                document.querySelectorAll('[contenteditable]').forEach(el => {
+                    el.addEventListener('focus', (e) => this.onEditStart(e));
+                    el.addEventListener('blur', (e) => this.onEditEnd(e));
+                    el.addEventListener('input', (e) => this.onEdit(e));
+                });
+                
+                document.querySelectorAll('.content-block').forEach(el => {
+                    el.addEventListener('click', (e) => this.selectElement(el));
+                });
+            }
+            
+            onEditStart(e) {
+                if (!this.editMode) {
+                    e.preventDefault();
+                    return;
+                }
+                e.target.classList.add('editing');
+            }
+            
+            onEditEnd(e) {
+                e.target.classList.remove('editing');
+                
+                const newValue = e.target.textContent;
+                const originalValue = e.target.dataset.originalValue || 
+                                    e.target.parentElement.dataset.originalText;
+                
+                if (newValue !== originalValue) {
+                    this.recordChange(e.target, originalValue, newValue);
+                }
+            }
+            
+            onEdit(e) {
+                // Validate table cells
+                if (e.target.tagName === 'TD') {
+                    const value = e.target.textContent;
+                    if (!this.validateTableCell(value)) {
+                        e.target.style.color = 'red';
+                    } else {
+                        e.target.style.color = '';
+                    }
+                }
+            }
+            
+            validateTableCell(value) {
+                // Allow scientific notation, detection codes, numbers, or empty
+                return /^(BDL|DLL|ND|\d*\.?\d*E?[+-]?\d*|)$/.test(value);
+            }
+            
+            recordChange(element, oldValue, newValue) {
+                const id = element.dataset.cellId || 
+                          element.parentElement.dataset.id;
+                
+                this.changes.set(id, {
+                    id: id,
+                    type: element.tagName === 'TD' ? 'table_cell' : 'text',
+                    page: this.currentPage,
+                    oldValue: oldValue,
+                    newValue: newValue,
+                    timestamp: new Date().toISOString()
+                });
+                
+                element.parentElement.classList.add('changed');
+                this.updateChangeCount();
+            }
+            
+            selectElement(element) {
+                // Remove previous selection
+                document.querySelectorAll('.selected').forEach(el => {
+                    el.classList.remove('selected');
+                });
+                
+                element.classList.add('selected');
+                this.selectedElement = element;
+                
+                // TODO: Highlight corresponding PDF region
+            }
+            
+            toggleEditMode() {
+                this.editMode = !this.editMode;
+                document.getElementById('edit-mode-text').textContent = 
+                    this.editMode ? 'Disable Edit Mode' : 'Enable Edit Mode';
+                
+                document.querySelectorAll('[contenteditable]').forEach(el => {
+                    el.contentEditable = this.editMode;
+                });
+                
+                this.updateStatus(this.editMode ? 'Edit mode enabled' : 'Edit mode disabled');
+            }
+            
+            showChanges() {
+                console.log('Changes:', Array.from(this.changes.values()));
+                // TODO: Show changes dialog
+            }
+            
+            async saveChanges() {
+                if (this.changes.size === 0) {
+                    this.updateStatus('No changes to save');
+                    return;
+                }
+                
+                const corrections = {
+                    document: this.basePath,
+                    timestamp: new Date().toISOString(),
+                    changes: Array.from(this.changes.values()),
+                    metadata: {
+                        reviewer: 'current_user',
+                        total_changes: this.changes.size
+                    }
+                };
+                
+                console.log('Saving corrections:', corrections);
+                
+                // In production, POST to server
+                // await fetch('/api/corrections', { method: 'POST', body: JSON.stringify(corrections) });
+                
+                // For now, download as JSON
+                const blob = new Blob([JSON.stringify(corrections, null, 2)], 
+                                    { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `${this.basePath}_corrections_${Date.now()}.json`;
+                a.click();
+                
+                this.updateStatus(`Saved ${this.changes.size} corrections`);
+            }
+            
+            previousPage() {
+                if (this.currentPage > 1) {
+                    this.currentPage--;
+                    this.updatePage();
+                }
+            }
+            
+            nextPage() {
+                if (this.currentPage < this.totalPages) {
+                    this.currentPage++;
+                    this.updatePage();
+                }
+            }
+            
+            async updatePage() {
+                document.getElementById('current-page').textContent = this.currentPage;
+                await this.renderPDFPage();
+                this.renderContent();
+            }
+            
+            updateChangeCount() {
+                const count = this.changes.size;
+                document.getElementById('change-count').textContent = count;
+                
+                const status = document.getElementById('status');
+                if (count > 0) {
+                    status.classList.add('has-changes');
+                } else {
+                    status.classList.remove('has-changes');
+                }
+            }
+            
+            updateStatus(message, type = 'info') {
+                const statusEl = document.getElementById('status-text');
+                statusEl.textContent = message;
+                
+                // Auto-hide after 3 seconds
+                if (type === 'info') {
+                    setTimeout(() => {
+                        if (statusEl.textContent === message) {
+                            statusEl.textContent = 'Ready';
+                        }
+                    }, 3000);
+                }
+            }
+            
+            setupEventListeners() {
+                // Panel resizing
+                const divider = document.querySelector('.divider');
+                let isResizing = false;
+                
+                divider.addEventListener('mousedown', () => isResizing = true);
+                
+                document.addEventListener('mousemove', (e) => {
+                    if (!isResizing) return;
+                    
+                    const container = document.querySelector('.container');
+                    const pdfPanel = document.querySelector('.pdf-panel');
+                    const percentage = (e.clientX / container.offsetWidth) * 100;
+                    
+                    pdfPanel.style.flex = `0 0 ${percentage}%`;
+                });
+                
+                document.addEventListener('mouseup', () => isResizing = false);
+            }
+        }
+        
+        // Initialize
+        const qc = new EnhancedQCInterface('faithful_output/EPA-HQ-OAR-2010-0682-0085_attachment_1');
+    </script>
+</body>
+</html>
