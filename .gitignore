@@ -119,3 +119,6 @@ wheels/
 .warp/local/
 .warp/cache/
 .warp/.env
+
+# Turbo cache
+.turbo/
