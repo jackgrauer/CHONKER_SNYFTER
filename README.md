@@ -123,3 +123,26 @@ just backend
 4. **Process next document** → Repeat
 
 That's it! No complex setup, no GUI maintenance, just document processing that works.
+
+### Updates in CHONKER 🐹
+
+The `chonker.py` script has been significantly enhanced with the following features:
+
+- **Base64 PDF Encoding**: Documents are now embedded directly as base64 data URLs to circumvent CORS issues, allowing for seamless local file access.
+- **WYSIWYG Editor with PDF.js**: Enhanced editor with a PDF viewer on the left and editable content on the right, supporting all major editing functionalities.
+- **Native File Picker for macOS**: Uses a native macOS file picker for better user experience.
+- **Resizing and Fullscreen Capabilities**: The interface supports dynamic resizing of panes and an improved fullscreen mode.
+- **Optimized Auto-Save**: Auto-save to `localStorage` with debouncing, ensuring minimal data loss.
+- **Improved Toolbar and Custom Controls**: New toolbar with options for navigation, zoom, and document optimization.
+- **Advanced Interaction**: Supports keyboard shortcuts, Apple trackpad gestures, and includes a customizable context menu for table editing.
+- **Error Handling and Performance**: Better error handling, and performance improvements with lazy loading and resource optimization.
+- **Platform Agnostic Browser Launching**: Tries to launch in Chrome app mode on macOS, with fallbacks to Safari and other system defaults.
+
+### Usage
+
+After processing, the HTML editor automatically launches with:
+
+- **PDF Viewer Controls**: Navigate, zoom, and more using the toolbar.
+- **Editable Content**: Click-to-edit functionality for document content.
+- **Easy File Management**: Open new documents easily from the interface.
+- **Customizable Interface**: Users can edit the HTML and JavaScript embedded in `chonker.py` for customization.
