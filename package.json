@@ -24,7 +24,7 @@
   "author": "Jack",
   "license": "MIT",
   "devDependencies": {
-    "turbo": "^1.10.0"
+    "turbo": "^2.5.4"
   },
   "workspaces": [
     "apps/*",
@@ -32,5 +32,6 @@
   ],
   "engines": {
     "node": ">=18.0.0"
-  }
+  },
+  "packageManager": "npm@10.0.0"
 }
