@@ -24,27 +24,65 @@ chonker:
     @echo "📋 Git Status: $(git status --porcelain | wc -l | tr -d ' ') uncommitted changes"
     @echo "────────────────────────────────────────────────────────────"
     @echo "\n🎯 Quick Commands:"
-    @echo "  just dev      - Start development environment"
-    @echo "  just service  - Start document processing service"
-    @echo "  just process  - Process a document"
-    @echo "  just status   - Check system status"
-    @echo "  just --list   - Show all available commands"
+    @echo "  just service    - Start service (foreground)"
+    @echo "  just service-bg - Start service (background)"
+    @echo "  just stop       - Stop service"
+    @echo "  just restart    - Restart service"
+    @echo "  just status     - Check system status"
+    @echo "  just --list     - Show all available commands"
     @echo "\n💡 Activating virtual environment..."
     @cd apps/doc-service && source venv/bin/activate && exec zsh
+
+# Kill any existing service on port 8000
+kill-service:
+    @echo "🐹 Checking for existing service on port 8000..."
+    @lsof -ti:8000 | xargs kill -9 2>/dev/null || echo "No existing service found"
+    @echo "✅ Port 8000 is now free"
 
 # Start development environment
 dev:
     @echo "🐹 Starting CHONKER development environment..."
+    @echo "🛑 Stopping any existing service..."
+    @lsof -ti:8000 | xargs kill -9 2>/dev/null || echo "No existing service found"
     @echo "🐍 Activating virtual environment..."
     cd apps/doc-service && source venv/bin/activate && python main.py
 
 # Start document processing service
 service:
     @echo "🐹 Starting CHONKER document processing service..."
+    @echo "🛑 Stopping any existing service..."
+    @lsof -ti:8000 | xargs kill -9 2>/dev/null || echo "No existing service found"
+    @sleep 1
     @echo "🚀 Service will be available at http://localhost:8000"
     @echo "📚 API docs at http://localhost:8000/docs"
     @echo "💾 Press Ctrl+C to stop"
     cd apps/doc-service && source venv/bin/activate && python main.py
+
+# Start service in background
+service-bg:
+    @echo "🐹 Starting CHONKER service in background..."
+    @echo "🛑 Stopping any existing service..."
+    @lsof -ti:8000 | xargs kill -9 2>/dev/null || echo "No existing service found"
+    @sleep 1
+    @echo "🚀 Starting service in background..."
+    @cd apps/doc-service && source venv/bin/activate && nohup python main.py > service.log 2>&1 &
+    @sleep 2
+    @echo "✅ Service started in background (PID: $(lsof -ti:8000))"
+    @echo "📋 Check logs: tail -f apps/doc-service/service.log"
+    @echo "🛑 Stop with: just stop"
+
+# Stop background service
+stop:
+    @echo "🐹 Stopping CHONKER service..."
+    @lsof -ti:8000 | xargs kill -9 2>/dev/null || echo "No service running"
+    @echo "✅ Service stopped"
+
+# Restart service
+restart:
+    @echo "🐹 Restarting CHONKER service..."
+    @just stop
+    @sleep 1
+    @just service-bg
 
 # Show system status
 status:
