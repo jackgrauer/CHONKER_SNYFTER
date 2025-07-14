@@ -1,98 +1,119 @@
-# CHONKER SNYFTER - Turborepo Monorepo
-# Document processing pipeline with Tauri 2.3.0 + Turborepo
+# CHONKER SNYFTER - Document Processing Pipeline
+# Python + Docling + HTML viewer generation
 
 set shell := ["zsh", "-c"]
 
 default:
     @just --list
 
+# 🐹 CHONKER - Main command with splash screen
+chonker:
+    @echo "\n"
+    @echo "██████╗██╗  ██╗ ██████╗ ███╗   ██╗██╗  ██╗███████╗██████╗ "
+    @echo "██╔════╝██║  ██║██╔═══██╗████╗  ██║██║ ██╔╝██╔════╝██╔══██╗"
+    @echo "██║     ███████║██║   ██║██╔██╗ ██║█████╔╝ █████╗  ██████╔╝"
+    @echo "██║     ██╔══██║██║   ██║██║╚██╗██║██╔═██╗ ██╔══╝  ██╔══██╗"
+    @echo "╚██████╗██║  ██║╚██████╔╝██║ ╚████║██║  ██╗███████╗██║  ██║"
+    @echo " ╚═════╝╚═╝  ╚═╝ ╚═════╝ ╚═╝  ╚═══╝╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝"
+    @echo "\n🚀 SNYFTER - Document Processing Pipeline"
+    @echo "════════════════════════════════════════════════════════════"
+    @echo "🐍 Python Environment: $(cd apps/doc-service && source venv/bin/activate && python --version 2>/dev/null || echo 'Virtual env not found')"
+    @echo "📦 Docling Status: $(cd apps/doc-service && source venv/bin/activate && python -c 'import docling; print("✅ Ready")' 2>/dev/null || echo '❌ Not installed')"
+    @echo "📁 Processed Docs: $(ls -1 apps/doc-service/processed_documents/ 2>/dev/null | wc -l | tr -d ' ') files"
+    @echo "🌐 Service Status: $(curl -s http://localhost:8000/health >/dev/null 2>&1 && echo '✅ Running' || echo '❌ Stopped')"
+    @echo "📋 Git Status: $(git status --porcelain | wc -l | tr -d ' ') uncommitted changes"
+    @echo "────────────────────────────────────────────────────────────"
+    @echo "\n🎯 Quick Commands:"
+    @echo "  just dev      - Start development environment"
+    @echo "  just service  - Start document processing service"
+    @echo "  just process  - Process a document"
+    @echo "  just status   - Check system status"
+    @echo "  just --list   - Show all available commands"
+    @echo "\n💡 Activating virtual environment..."
+    @cd apps/doc-service && source venv/bin/activate && exec zsh
+
+# Start development environment
+dev:
+    @echo "🐹 Starting CHONKER development environment..."
+    @echo "🐍 Activating virtual environment..."
+    cd apps/doc-service && source venv/bin/activate && python main.py
+
+# Start document processing service
+service:
+    @echo "🐹 Starting CHONKER document processing service..."
+    @echo "🚀 Service will be available at http://localhost:8000"
+    @echo "📚 API docs at http://localhost:8000/docs"
+    @echo "💾 Press Ctrl+C to stop"
+    cd apps/doc-service && source venv/bin/activate && python main.py
+
+# Show system status
+status:
+    @echo "🐹 CHONKER System Status"
+    @echo "════════════════════════════════════════════════════════════"
+    @echo "🐍 Python: $(cd apps/doc-service && source venv/bin/activate && python --version 2>/dev/null || echo 'Virtual env not found')"
+    @echo "📦 Docling: $(cd apps/doc-service && source venv/bin/activate && python -c 'import docling; print("✅ Installed")' 2>/dev/null || echo '❌ Not installed')"
+    @echo "🌐 Service: $(curl -s http://localhost:8000/health >/dev/null 2>&1 && echo '✅ Running on port 8000' || echo '❌ Not running')"
+    @echo "📁 Output dir: $(ls -la apps/doc-service/processed_documents/ 2>/dev/null | wc -l | tr -d ' ') files"
+    @echo "🔄 Git: $(git status --porcelain | wc -l | tr -d ' ') uncommitted changes"
+    @echo "🌐 Network: $(ping -c 1 google.com > /dev/null 2>&1 && echo '✅ Connected' || echo '❌ Offline')"
+    @echo "────────────────────────────────────────────────────────────"
+
 # Show project info
 info:
-    @echo "🐹 CHONKER SNYFTER - Turborepo Monorepo"
+    @echo "🐹 CHONKER SNYFTER - Document Processing Pipeline"
     @echo "📄 Status: $(git status --porcelain | wc -l | tr -d ' ') uncommitted changes"
-    @echo "🦀 Rust: $(rustc --version)"
-    @echo "📦 Node: $(node --version)"
-    @echo "🔧 Tauri: $(cargo tauri --version)"
-    @echo "⚡ Turbo: $(turbo --version)"
-    @echo "📚 Workspaces: $(find apps packages -name package.json | wc -l | tr -d ' ') packages"
-    @echo "🏗️  Last build: $(ls -la apps/tauri-app/target/release 2>/dev/null | wc -l | tr -d ' ') files"
+    @echo "🐍 Python: $(python --version 2>/dev/null || echo 'Not found')"
+    @echo "📦 Docling: $(python -c 'import docling; print("Installed")' 2>/dev/null || echo 'Not installed')"
+    @echo "📁 Processed docs: $(ls -1 apps/doc-service/processed_documents/ 2>/dev/null | wc -l | tr -d ' ') files"
+    @echo "🌐 HTML viewers: $(ls -1 *.html 2>/dev/null | wc -l | tr -d ' ') files"
     @echo "📋 Available commands: $(just --list | grep -E '^    [a-z]' | wc -l | tr -d ' ')"
 
-# Check the status of the project
-status:
-    @echo "🐹 CHONKER SNYFTER Status Check"
+# Check Python environment
+check:
+    @echo "🐹 CHONKER Environment Check"
     @echo "────────────────────────────"
     @echo "📁 Working Directory: $(pwd)"
-    @echo "🦀 Rust: $(rustc --version)"
-    @echo "📦 Node: $(node --version)"
-    @echo "🔧 Tauri: $(cargo tauri --version || echo 'Not installed')"
-    @echo "📚 Frontend deps: $(ls frontend/chonker-modern/node_modules 2>/dev/null | wc -l) packages"
-    @echo "🔍 Recent activity: $(git log --oneline -5 | wc -l) recent commits"
-    @echo "🏗️  Build status: $(cargo check 2>/dev/null && echo 'OK' || echo 'Needs attention')"
-    @echo "🌐 Network: $(ping -c 1 google.com >/dev/null 2>&1 && echo 'Connected' || echo 'Offline')"
+    @echo "🐍 Python: $(python --version 2>/dev/null || echo 'Not found')"
+    @echo "📦 Docling: $(python -c 'import docling; print("✅ Installed")' 2>/dev/null || echo '❌ Not installed')"
+    @echo "📁 Output directory: $(ls -la apps/doc-service/processed_documents/ 2>/dev/null | wc -l | tr -d ' ') files"
+    @echo "🌐 Network: $(ping -c 1 google.com > /dev/null 2>&1 && echo 'Connected' || echo 'Offline')"
     @echo "────────────────────────────"
-    @echo "🚀 Ready for $(just --list | grep -E '^    [a-z]' | wc -l) available commands"
 
-# Install all dependencies
+# Install Python dependencies
 install:
-    @echo "🐹 Installing all dependencies..."
-    npm install
-    @echo "✅ All dependencies installed"
+    @echo "🐹 Installing Python dependencies..."
+    cd apps/doc-service && pip install -r requirements.txt
+    @echo "✅ Dependencies installed"
 
-# Run development servers with Turborepo
-dev:
-    @echo "🐹 Starting development servers..."
-    npm run dev
+# Process a document (usage: just process document.pdf)
+process FILE:
+    @echo "🐹 Processing document: {{FILE}}"
+    python process_document.py "{{FILE}}"
 
-# Start frontend only
-frontend:
-    @echo "🐹 Starting frontend..."
-    cd apps/frontend && npm run dev
+# Generate viewer for already processed document
+viewer BASENAME:
+    @echo "🐹 Generating viewer for: {{BASENAME}}"
+    python generate_viewer.py "{{BASENAME}}"
 
-# Run tests with Turborepo
-test:
-    @echo "🐹 Running tests..."
-    npm run test
-    @echo "✅ Tests completed"
+# List processed documents
+list:
+    @echo "🐹 Processed Documents:"
+    @ls -la apps/doc-service/processed_documents/ 2>/dev/null || echo "No processed documents found"
+    @echo ""
+    @echo "🌐 HTML Viewers:"
+    @ls -la *.html 2>/dev/null || echo "No HTML viewers found"
 
-# Format code with Turborepo
-fmt:
-    @echo "🐹 Formatting code..."
-    npm run format
-    @echo "✅ Code formatted"
-
-# Run linter with Turborepo
-lint:
-    @echo "🐹 Running linter..."
-    npm run lint
-    @echo "✅ Linting completed"
-
-# Build the project with Turborepo
-build:
-    @echo "🐹 Building CHONKER SNYFTER..."
-    npm run build
-    @echo "✅ Build completed"
-
-# Clean build artifacts
+# Clean processed files
 clean:
-    @echo "🐹 Cleaning build artifacts..."
-    npm run clean
-    cargo clean
-    rm -rf apps/tauri-app/target/
-    find apps packages -name "dist" -type d -exec rm -rf {} + 2>/dev/null || true
-    find apps packages -name ".vite" -type d -exec rm -rf {} + 2>/dev/null || true
+    @echo "🐹 Cleaning processed files..."
+    rm -rf apps/doc-service/processed_documents/*
+    rm -f *.html
     @echo "✅ Clean completed"
 
-# Fix common issues
-fix:
-    @echo "🐹 Fixing common issues..."
-    @echo "🔧 Clearing frontend cache..."
-    cd frontend/chonker-modern && rm -rf node_modules/.vite dist
-    @echo "🔧 Clearing Rust cache..."
-    cargo clean
-    @echo "🔧 Reinstalling dependencies..."
-    just install
-    @echo "✅ Common issues fixed"
+# Start Python backend service
+backend:
+    @echo "🐹 Starting Python backend service..."
+    cd apps/doc-service && python main.py
 
 # Git workflow commands
 git-status:

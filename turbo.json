@@ -1,34 +1,20 @@
 {
   "$schema": "https://turbo.build/schema.json",
-  "ui": "tui",
-  "tasks": {
+  "pipeline": {
     "build": {
       "dependsOn": ["^build"],
-      "outputs": [
-        "dist/**",
-        "build/**",
-        "target/**",
-        ".next/**",
-        "!.next/cache/**"
-      ]
+      "outputs": ["dist/**", "build/**", "*.html"]
     },
     "dev": {
       "cache": false,
       "persistent": true
     },
-    "@chonker/doc-service#dev": {
-      "cache": false,
-      "persistent": true,
-      "env": ["PYTHONPATH"]
-    },
     "lint": {
-      "dependsOn": ["^build"]
+      "dependsOn": ["^lint"]
     },
     "test": {
-      "dependsOn": ["^build"]
-    },
-    "format": {
-      "cache": false
+      "dependsOn": ["^test"],
+      "outputs": ["coverage/**"]
     },
     "clean": {
       "cache": false

@@ -1,25 +1,36 @@
 {
   "name": "chonker-snyfter",
   "version": "1.0.0",
-  "description": "CHONKER SNYFTER - Document processing pipeline with Tauri frontend",
+  "description": "🐹 CHONKER SNYFTER - Document Processing Pipeline",
   "private": true,
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "turbo run dev",
+    "lint": "turbo run lint",
+    "test": "turbo run test",
+    "clean": "turbo run clean",
+    "chonker": "just chonker",
+    "service": "just service",
+    "status": "just status"
+  },
+  "keywords": [
+    "document-processing",
+    "docling",
+    "python",
+    "fastapi",
+    "html-editor",
+    "turborepo"
+  ],
+  "author": "Jack",
+  "license": "MIT",
+  "devDependencies": {
+    "turbo": "^1.10.0"
+  },
   "workspaces": [
     "apps/*",
     "packages/*"
   ],
-  "scripts": {
-    "build": "turbo build",
-    "dev": "turbo dev",
-    "lint": "turbo lint",
-    "format": "turbo format",
-    "test": "turbo test",
-    "clean": "turbo clean"
-  },
-  "devDependencies": {
-    "turbo": "latest"
-  },
-  "packageManager": "npm@10.9.2",
   "engines": {
-    "node": ">=18"
+    "node": ">=18.0.0"
   }
 }

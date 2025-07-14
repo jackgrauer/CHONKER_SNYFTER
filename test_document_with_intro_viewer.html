@@ -1,0 +1,653 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>None - CHONKER Document Viewer</title>
+    <style>
+        body {
+            font-family: 'Times New Roman', serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f8f8f8;
+            line-height: 1.2;
+            font-size: 12px;
+        }
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            background: white;
+            padding: 30px;
+            border: 1px solid #ccc;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+            padding-bottom: 20px;
+            border-bottom: 2px solid #000;
+        }
+        .document-title {
+            font-size: 18px;
+            font-weight: bold;
+            color: #000;
+            margin-bottom: 10px;
+        }
+        .document-meta {
+            font-size: 11px;
+            color: #666;
+            margin-bottom: 15px;
+        }
+        .editing-controls {
+            position: sticky;
+            top: 0;
+            background: #f0f0f0;
+            padding: 10px;
+            border-bottom: 1px solid #ccc;
+            margin-bottom: 20px;
+            z-index: 100;
+        }
+        .edit-btn {
+            background: #4CAF50;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+            margin-right: 10px;
+        }
+        .edit-btn:hover {
+            background: #45a049;
+        }
+        .edit-btn.active {
+            background: #ff9800;
+        }
+        .save-btn {
+            background: #2196F3;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+        }
+        .save-btn:hover {
+            background: #1976D2;
+        }
+        .faithful-document {
+            background: white;
+            border: 1px solid #000;
+            min-height: 800px;
+            padding: 40px;
+            font-family: 'Times New Roman', serif;
+            font-size: 11px;
+            line-height: 1.1;
+        }
+        .document-content {
+            white-space: pre-wrap;
+            font-family: 'Times New Roman', serif;
+            font-size: 11px;
+            line-height: 1.1;
+        }
+        .editable-section {
+            position: relative;
+            margin: 5px 0;
+            padding: 2px;
+            border: 1px solid transparent;
+            min-height: 20px;
+        }
+        .editable-section:hover {
+            border: 1px dashed #3498db;
+            background-color: #f8f9fa;
+        }
+        .editable-section.editing {
+            border: 2px solid #3498db;
+            background-color: #fff;
+        }
+        .edit-overlay {
+            display: none; /* Hide edit overlays since tables are always editable */
+        }
+        .edit-textarea {
+            width: 100%;
+            min-height: 100px;
+            font-family: 'Times New Roman', serif;
+            font-size: 11px;
+            line-height: 1.1;
+            border: 1px solid #ccc;
+            padding: 5px;
+            resize: vertical;
+        }
+        .faithful-table {
+            border-collapse: collapse;
+            width: 100%;
+            margin: 10px 0;
+            font-size: 10px;
+            border: 1px solid #000;
+        }
+        .faithful-table th, .faithful-table td {
+            border: 1px solid #000;
+            padding: 4px;
+            text-align: left;
+            vertical-align: top;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            position: relative;
+        }
+        .faithful-table th {
+            background-color: #f0f0f0;
+            font-weight: bold;
+        }
+        .faithful-table td.editable-cell {
+            cursor: pointer;
+        }
+        .faithful-table td.editable-cell:hover {
+            background-color: #e3f2fd;
+            outline: 2px solid #2196F3;
+        }
+        .faithful-table td.editing {
+            background-color: #fff;
+            outline: 2px solid #4CAF50;
+        }
+        .cell-input {
+            width: 100%;
+            height: 100%;
+            border: none;
+            background: transparent;
+            font-family: inherit;
+            font-size: inherit;
+            padding: 0;
+            margin: 0;
+            outline: none;
+        }
+        .editable-table {
+            position: relative;
+        }
+        .editable-table:hover {
+            background-color: #f8f9fa;
+        }
+        .table-edit-btn {
+            position: absolute;
+            top: 5px;
+            right: 5px;
+            background: #ff9800;
+            color: white;
+            border: none;
+            padding: 3px 8px;
+            font-size: 10px;
+            border-radius: 3px;
+            cursor: pointer;
+            opacity: 0;
+            transition: opacity 0.2s;
+        }
+        .editable-table:hover .table-edit-btn {
+            opacity: 1;
+        }
+        .changes-summary {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: #fff;
+            border: 1px solid #ccc;
+            padding: 15px;
+            border-radius: 5px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            max-width: 300px;
+            z-index: 1000;
+            display: none;
+        }
+        .changes-summary.visible {
+            display: block;
+        }
+        .change-item {
+            margin: 5px 0;
+            padding: 5px;
+            background: #f8f9fa;
+            border-radius: 3px;
+            font-size: 11px;
+        }
+        .toggle-section {
+            margin: 20px 0;
+            padding: 10px;
+            background: #f0f0f0;
+            border-radius: 5px;
+        }
+        .section-toggle {
+            background: #666;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+            margin-right: 10px;
+        }
+        .section-toggle:hover {
+            background: #555;
+        }
+        .section-toggle.active {
+            background: #2196F3;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="document-title">None</div>
+            <div class="document-meta">
+                <div class="meta-item">
+                    <span class="meta-label">Author:</span> None
+                </div>
+                <div class="meta-item">
+                    <span class="meta-label">Pages:</span> None
+                </div>
+                <div class="meta-item">
+                    <span class="meta-label">Processed:</span> 2025-07-13 20:48:32
+                </div>
+                <div class="meta-item">
+                    <span class="meta-label">Processed by:</span> CHONKER Document Processor
+                </div>
+            </div>
+        </div>
+
+        <div class="editing-controls">
+            <button class="save-btn" onclick="saveChanges()" id="save-btn">💾 Save Changes</button>
+            <button class="section-toggle" onclick="toggleSection('faithful-view')" id="faithful-toggle">📄 Faithful View</button>
+            <button class="section-toggle" onclick="toggleSection('raw-view')" id="raw-toggle">📝 Raw Text</button>
+            <button class="section-toggle" onclick="toggleSection('tables-view')" id="tables-toggle">📊 Tables (2)</button>
+        </div>
+
+        <div class="changes-summary" id="changes-summary">
+            <h4>📝 Changes Made</h4>
+            <div id="changes-list"></div>
+        </div>
+
+        <div class="content-section" id="faithful-view">
+            <div class="faithful-document">
+                <div class="document-content" id="faithful-content">
+                    
+                <div class="editable-section" data-section="text-0">
+                    <div class="edit-overlay" onclick="editSection('text-0')">Edit</div>
+                    <div class="section-content" id="text-0"># Environmental Impact Assessment Report</div>
+                </div>
+                
+                <div class="editable-section" data-section="text-1">
+                    <div class="edit-overlay" onclick="editSection('text-1')">Edit</div>
+                    <div class="section-content" id="text-1">## Executive Summary</div>
+                </div>
+                
+                <div class="editable-section" data-section="text-2">
+                    <div class="edit-overlay" onclick="editSection('text-2')">Edit</div>
+                    <div class="section-content" id="text-2">This report presents findings from our comprehensive environmental impact assessment conducted across multiple industrial facilities. The study examined air quality emissions, water discharge parameters, and waste management practices over a 12-month period from January 2023 to December 2023.</div>
+                </div>
+                
+                <div class="editable-section" data-section="text-3">
+                    <div class="edit-overlay" onclick="editSection('text-3')">Edit</div>
+                    <div class="section-content" id="text-3">### Key Findings</div>
+                </div>
+                
+                <div class="editable-section" data-section="text-4">
+                    <div class="edit-overlay" onclick="editSection('text-4')">Edit</div>
+                    <div class="section-content" id="text-4">Our analysis reveals significant variations in emission levels across different facility types. Manufacturing plants showed the highest levels of particulate matter emissions, while chemical processing facilities demonstrated elevated volatile organic compound (VOC) concentrations. The data presented below provides detailed measurements for regulatory compliance evaluation.</div>
+                </div>
+                
+                <div class="editable-section" data-section="text-5">
+                    <div class="edit-overlay" onclick="editSection('text-5')">Edit</div>
+                    <div class="section-content" id="text-5">## Methodology</div>
+                </div>
+                
+                <div class="editable-section" data-section="text-6">
+                    <div class="edit-overlay" onclick="editSection('text-6')">Edit</div>
+                    <div class="section-content" id="text-6">The assessment was conducted using EPA-approved sampling methods and analytical procedures. All measurements were taken quarterly, with additional sampling during peak operational periods. Quality assurance protocols were implemented throughout the data collection process.</div>
+                </div>
+                
+                <div class="editable-section" data-section="text-7">
+                    <div class="edit-overlay" onclick="editSection('text-7')">Edit</div>
+                    <div class="section-content" id="text-7">## Results</div>
+                </div>
+                
+                <div class="editable-section" data-section="text-8">
+                    <div class="edit-overlay" onclick="editSection('text-8')">Edit</div>
+                    <div class="section-content" id="text-8">The following tables present the comprehensive data collected during our assessment:</div>
+                </div>
+                
+                <div class="editable-section" data-section="table-9">
+                    <div class="edit-overlay" onclick="editSection('table-9')">Edit</div>
+                    <div class="section-content" id="table-9">
+                        <div class="table-container">
+                            <table class="faithful-table"><thead><tr><th>Facility ID</th><th>Facility Type</th><th>Location</th><th>PM2.5 (μg/m³)</th><th>NOx (ppm)</th><th>SO2 (ppm)</th></tr></thead><tbody><tr><td>FAC-001</td><td>Manufacturing</td><td>Detroit, MI</td><td>45.2</td><td>0.12</td><td>0.08</td></tr><tr><td>FAC-002</td><td>Chemical Processing</td><td>Houston, TX</td><td>38.7</td><td>0.18</td><td>0.15</td></tr><tr><td>FAC-003</td><td>Power Generation</td><td>Chicago, IL</td><td>52.1</td><td>0.22</td><td>0.19</td></tr><tr><td>FAC-004</td><td>Oil Refinery</td><td>Baton Rouge, LA</td><td>41.3</td><td>0.16</td><td>0.12</td></tr></tbody></table>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="editable-section" data-section="text-10">
+                    <div class="edit-overlay" onclick="editSection('text-10')">Edit</div>
+                    <div class="section-content" id="text-10">### Water Quality Parameters</div>
+                </div>
+                
+                <div class="editable-section" data-section="table-11">
+                    <div class="edit-overlay" onclick="editSection('table-11')">Edit</div>
+                    <div class="section-content" id="table-11">
+                        <div class="table-container">
+                            <table class="faithful-table"><thead><tr><th>Facility ID</th><th>pH</th><th>BOD (mg/L)</th><th>COD (mg/L)</th><th>Heavy Metals (mg/L)</th></tr></thead><tbody><tr><td>FAC-001</td><td>7.2</td><td>25.4</td><td>89.2</td><td>0.003</td></tr><tr><td>FAC-002</td><td>6.8</td><td>31.7</td><td>124.5</td><td>0.007</td></tr><tr><td>FAC-003</td><td>7.1</td><td>28.9</td><td>95.8</td><td>0.002</td></tr><tr><td>FAC-004</td><td>6.9</td><td>33.2</td><td>142.1</td><td>0.009</td></tr></tbody></table>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="editable-section" data-section="text-12">
+                    <div class="edit-overlay" onclick="editSection('text-12')">Edit</div>
+                    <div class="section-content" id="text-12">## Conclusions</div>
+                </div>
+                
+                <div class="editable-section" data-section="text-13">
+                    <div class="edit-overlay" onclick="editSection('text-13')">Edit</div>
+                    <div class="section-content" id="text-13">The data indicates that while most facilities are operating within regulatory limits, there are opportunities for improvement in emission control technologies. We recommend implementing enhanced monitoring systems and considering upgraded filtration equipment for facilities exceeding the 75th percentile in any measured parameter.</div>
+                </div>
+                
+                <div class="editable-section" data-section="text-14">
+                    <div class="edit-overlay" onclick="editSection('text-14')">Edit</div>
+                    <div class="section-content" id="text-14">Future assessments should focus on seasonal variations and the impact of operational changes on emission profiles.</div>
+                </div>
+                
+                </div>
+            </div>
+        </div>
+
+        <div class="content-section" id="raw-view" style="display: none;">
+            <div class="section-title">Raw Extracted Content</div>
+            <div class="editable-section" data-section="raw-text">
+                <div class="edit-overlay" onclick="editSection('raw-text')">Edit</div>
+                <div class="document-content" id="raw-content"># Environmental Impact Assessment Report
+
+## Executive Summary
+
+This report presents findings from our comprehensive environmental impact assessment conducted across multiple industrial facilities. The study examined air quality emissions, water discharge parameters, and waste management practices over a 12-month period from January 2023 to December 2023.
+
+### Key Findings
+
+Our analysis reveals significant variations in emission levels across different facility types. Manufacturing plants showed the highest levels of particulate matter emissions, while chemical processing facilities demonstrated elevated volatile organic compound (VOC) concentrations. The data presented below provides detailed measurements for regulatory compliance evaluation.
+
+## Methodology
+
+The assessment was conducted using EPA-approved sampling methods and analytical procedures. All measurements were taken quarterly, with additional sampling during peak operational periods. Quality assurance protocols were implemented throughout the data collection process.
+
+## Results
+
+The following tables present the comprehensive data collected during our assessment:
+
+| Facility ID   | Facility Type       | Location        |   PM2.5 (μg/m³) |   NOx (ppm) |   SO2 (ppm) |
+|---------------|---------------------|-----------------|-----------------|-------------|-------------|
+| FAC-001       | Manufacturing       | Detroit, MI     |            45.2 |        0.12 |        0.08 |
+| FAC-002       | Chemical Processing | Houston, TX     |            38.7 |        0.18 |        0.15 |
+| FAC-003       | Power Generation    | Chicago, IL     |            52.1 |        0.22 |        0.19 |
+| FAC-004       | Oil Refinery        | Baton Rouge, LA |            41.3 |        0.16 |        0.12 |
+
+### Water Quality Parameters
+
+| Facility ID   |   pH |   BOD (mg/L) |   COD (mg/L) |   Heavy Metals (mg/L) |
+|---------------|------|--------------|--------------|-----------------------|
+| FAC-001       |  7.2 |         25.4 |         89.2 |                 0.003 |
+| FAC-002       |  6.8 |         31.7 |        124.5 |                 0.007 |
+| FAC-003       |  7.1 |         28.9 |         95.8 |                 0.002 |
+| FAC-004       |  6.9 |         33.2 |        142.1 |                 0.009 |
+
+## Conclusions
+
+The data indicates that while most facilities are operating within regulatory limits, there are opportunities for improvement in emission control technologies. We recommend implementing enhanced monitoring systems and considering upgraded filtration equipment for facilities exceeding the 75th percentile in any measured parameter.
+
+Future assessments should focus on seasonal variations and the impact of operational changes on emission profiles.</div>
+            </div>
+        </div>
+
+        <div class="content-section" id="tables-view" style="display: none;">
+
+                <div class="table-title">Table 1</div>
+                <div class="table-container">
+                    <table>
+
+                    </table>
+                </div>
+
+                <div class="table-title">Table 2</div>
+                <div class="table-container">
+                    <table>
+
+                    </table>
+                </div>
+
+            </div>
+        </div>
+
+        <div class="footer">
+            Generated by CHONKER Document Processor • 2025-07-13 20:49:43
+        </div>
+    </div>
+
+
+    <script>
+        let editMode = true; // Always in edit mode
+        let changes = [];
+        
+        function toggleSection(sectionId) {
+            const sections = ['faithful-view', 'raw-view', 'tables-view'];
+            const buttons = ['faithful-toggle', 'raw-toggle', 'tables-toggle'];
+            
+            // Hide all sections
+            sections.forEach(id => {
+                const section = document.getElementById(id);
+                if (section) section.style.display = 'none';
+            });
+            
+            // Remove active class from all buttons
+            buttons.forEach(id => {
+                const button = document.getElementById(id);
+                if (button) button.classList.remove('active');
+            });
+            
+            // Show selected section
+            const targetSection = document.getElementById(sectionId);
+            if (targetSection) {
+                targetSection.style.display = 'block';
+                // Find corresponding button
+                const buttonId = sectionId.replace('-view', '-toggle');
+                const button = document.getElementById(buttonId);
+                if (button) button.classList.add('active');
+            }
+        }
+        
+        function editSection(sectionId) {
+            const section = document.getElementById(sectionId);
+            if (!section) return;
+            
+            // Check if this section contains a table
+            const tableElement = section.querySelector('table');
+            
+            if (tableElement) {
+                // For tables, enable cell-level editing
+                enableTableCellEditing(tableElement, sectionId);
+            } else {
+                // For non-table content, use text editing
+                editTextContent(section, sectionId);
+            }
+        }
+        
+        function enableTableCellEditing(table, sectionId) {
+            // Make all table cells editable
+            const cells = table.querySelectorAll('td');
+            cells.forEach(cell => {
+                cell.classList.add('editable-cell');
+                cell.onclick = function() {
+                    editCell(cell, sectionId);
+                };
+            });
+        }
+        
+        function disableTableCellEditing(table) {
+            const cells = table.querySelectorAll('td');
+            cells.forEach(cell => {
+                cell.classList.remove('editable-cell');
+                cell.onclick = null;
+            });
+        }
+        
+        function editCell(cell, sectionId) {
+            if (cell.classList.contains('editing')) return;
+            
+            const originalText = cell.textContent;
+            cell.classList.add('editing');
+            
+            const input = document.createElement('input');
+            input.type = 'text';
+            input.className = 'cell-input';
+            input.value = originalText;
+            
+            cell.innerHTML = '';
+            cell.appendChild(input);
+            input.focus();
+            input.select();
+            
+            function saveCell() {
+                const newText = input.value;
+                cell.textContent = newText;
+                cell.classList.remove('editing');
+                
+                if (newText !== originalText) {
+                    changes.push({
+                        section: sectionId + '-cell',
+                        original: originalText,
+                        modified: newText,
+                        timestamp: new Date().toLocaleString()
+                    });
+                    updateChangesDisplay();
+                }
+            }
+            
+            function cancelEdit() {
+                cell.textContent = originalText;
+                cell.classList.remove('editing');
+            }
+            
+            input.onblur = saveCell;
+            input.onkeydown = function(e) {
+                if (e.key === 'Enter') {
+                    saveCell();
+                } else if (e.key === 'Escape') {
+                    cancelEdit();
+                }
+            };
+        }
+        
+        function editTextContent(section, sectionId) {
+            const originalText = section.innerText;
+            const textarea = document.createElement('textarea');
+            textarea.className = 'edit-textarea';
+            textarea.value = originalText;
+            
+            const saveBtn = document.createElement('button');
+            saveBtn.textContent = 'Save';
+            saveBtn.className = 'save-btn';
+            saveBtn.style.marginTop = '10px';
+            
+            const cancelBtn = document.createElement('button');
+            cancelBtn.textContent = 'Cancel';
+            cancelBtn.className = 'edit-btn';
+            cancelBtn.style.marginTop = '10px';
+            cancelBtn.style.marginLeft = '10px';
+            
+            const container = section.parentElement;
+            const originalContainerHTML = container.innerHTML;
+            container.innerHTML = '';
+            container.appendChild(textarea);
+            container.appendChild(saveBtn);
+            container.appendChild(cancelBtn);
+            
+            saveBtn.onclick = function() {
+                const newText = textarea.value;
+                if (newText !== originalText) {
+                    changes.push({
+                        section: sectionId,
+                        original: originalText,
+                        modified: newText,
+                        timestamp: new Date().toLocaleString()
+                    });
+                    updateChangesDisplay();
+                }
+                
+                container.innerHTML = `
+                    <div class="edit-overlay" onclick="editSection('` + sectionId + `')">Edit</div>
+                    <div class="section-content" id="` + sectionId + `">` + escapeHtml(newText) + `</div>
+                `;
+            };
+            
+            cancelBtn.onclick = function() {
+                container.innerHTML = originalContainerHTML;
+            };
+            
+            textarea.focus();
+        }
+        
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+        
+        function updateChangesDisplay() {
+            const changesList = document.getElementById('changes-list');
+            changesList.innerHTML = '';
+            
+            changes.forEach((change, index) => {
+                const changeItem = document.createElement('div');
+                changeItem.className = 'change-item';
+                changeItem.innerHTML = `
+                    <strong>Section ` + change.section + `:</strong><br>
+                    <small>` + change.timestamp + `</small><br>
+                    <small>Changed ` + change.original.length + ` → ` + change.modified.length + ` chars</small>
+                `;
+                changesList.appendChild(changeItem);
+            });
+        }
+        
+        function saveChanges() {
+            if (changes.length === 0) {
+                alert('No changes to save!');
+                return;
+            }
+            
+            const data = {
+                document_title: document.querySelector('.document-title').textContent,
+                changes: changes,
+                saved_at: new Date().toISOString()
+            };
+            
+            // Create download link
+            const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = document.querySelector('.document-title').textContent + '_changes.json';
+            a.click();
+            URL.revokeObjectURL(url);
+            
+            alert('Saved ' + changes.length + ' changes to file!');
+        }
+        
+        // Initialize on page load
+        window.onload = function() {
+            // Show faithful view by default
+            toggleSection('faithful-view');
+            // Show changes summary since we're always in edit mode
+            const changesSummary = document.getElementById('changes-summary');
+            if (changesSummary) changesSummary.classList.add('visible');
+            
+            // Auto-enable table editing for all tables
+            const tables = document.querySelectorAll('.faithful-table');
+            tables.forEach((table, index) => {
+                enableTableCellEditing(table, 'table-' + index);
+            });
+        }
+    </script>
+    
+</body>
+</html>

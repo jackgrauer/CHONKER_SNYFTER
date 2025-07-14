@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>test_doc - Editable Document</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            line-height: 1.6;
+        }
+        [contenteditable] {
+            outline: none;
+        }
+        [contenteditable]:focus {
+            outline: none;
+        }
+    </style>
+</head>
+<body contenteditable="true">
+    
+<div class='page'>
+<h1>Test Document</h1>
+<span class='inline-group'>This is a <strong>test document</strong> for the CHONKER document processing service.</span>
+<h2>Features to Test</h2>
+<ul>
+<li>Text extraction</li>
+<li>Table processing</li>
+<li>Metadata extraction</li>
+</ul>
+<h3>Sample Table</h3>
+<table><tbody><tr><th>Column 1</th><th>Column 2</th><th>Column 3</th></tr><tr><td>Data A</td><td>Data B</td><td>Data C</td></tr><tr><td>Value 1</td><td>Value 2</td><td>Value 3</td></tr></tbody></table>
+<h2>Conclusion</h2>
+<p>This document should be successfully processed by the service.</p>
+</div>
+
+</body>
+</html>

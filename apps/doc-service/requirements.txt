@@ -5,6 +5,7 @@ docling==2.41.0
 pydantic==2.11.7
 python-dotenv==1.1.1
 aiofiles==24.1.0
+websockets==13.1
 
 # Optional development dependencies
 pytest==8.3.4

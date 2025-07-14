@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Test Document - Editable</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            line-height: 1.6;
+        }
+        .edit-toolbar {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: white;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            padding: 10px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+        .edit-btn {
+            background: #007cba;
+            color: white;
+            border: none;
+            padding: 5px 10px;
+            margin: 2px;
+            border-radius: 3px;
+            cursor: pointer;
+        }
+        .edit-btn:hover {
+            background: #005a8b;
+        }
+        .edit-btn.active {
+            background: #dc3545;
+        }
+        [contenteditable]:focus {
+            outline: 2px solid #007cba;
+            background-color: #f8f9fa;
+        }
+    </style>
+</head>
+<body>
+    <div class="edit-toolbar">
+        <button class="edit-btn" onclick="toggleEdit()" id="editToggle">✏️ Edit</button>
+        <button class="edit-btn" onclick="saveDocument()">💾 Save</button>
+    </div>
+    
+    <div id="document-content">
+        # Test Document<br><br>This is a **test document** for the CHONKER document processing service.<br><br>## Features to Test<br><br>- Text extraction<br>- Table processing<br>- Metadata extraction<br><br>### Sample Table<br><br>| Column 1   | Column 2   | Column 3   |<br>|------------|------------|------------|<br>| Data A     | Data B     | Data C     |<br>| Value 1    | Value 2    | Value 3    |<br><br>## Conclusion<br><br>This document should be successfully processed by the service.
+    </div>
+    
+    <script>
+        let editMode = false;
+        
+        function toggleEdit() {
+            const content = document.getElementById('document-content');
+            const toggle = document.getElementById('editToggle');
+            
+            editMode = !editMode;
+            
+            if (editMode) {
+                content.contentEditable = true;
+                toggle.textContent = '👁️ View';
+                toggle.classList.add('active');
+            } else {
+                content.contentEditable = false;
+                toggle.textContent = '✏️ Edit';
+                toggle.classList.remove('active');
+            }
+        }
+        
+        function saveDocument() {
+            const content = document.getElementById('document-content');
+            const blob = new Blob([document.documentElement.outerHTML], {type: 'text/html'});
+            const url = URL.createObjectURL(blob);
+            
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'test_edited.html';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            
+            alert('Document saved!');
+        }
+    </script>
+</body>
+</html>
