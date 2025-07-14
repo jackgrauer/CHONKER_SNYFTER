@@ -138,11 +138,24 @@ The `chonker.py` script has been significantly enhanced with the following featu
 - **Error Handling and Performance**: Better error handling, and performance improvements with lazy loading and resource optimization.
 - **Platform Agnostic Browser Launching**: Tries to launch in Chrome app mode on macOS, with fallbacks to Safari and other system defaults.
 
+#### Latest Improvements (July 14, 2025)
+
+- **Enhanced Trackpad Support**: Improved two-finger scrolling for horizontal navigation in PDF viewer
+- **Responsive Editor Pane**: Added comprehensive text wrapping and responsive design to the right editor pane:
+  - Automatic word wrapping for long text
+  - Responsive tables with horizontal scrolling when needed
+  - Images that scale to fit the pane width
+  - Code blocks with proper wrapping and overflow handling
+  - URL breaking to prevent horizontal overflow
+- **Initial Zoom Settings**: PDF now starts at 200% zoom for better visibility and scrolling
+- **Debug Logging**: Added console logging for scroll events to help diagnose issues
+
 ### Usage
 
 After processing, the HTML editor automatically launches with:
 
 - **PDF Viewer Controls**: Navigate, zoom, and more using the toolbar.
-- **Editable Content**: Click-to-edit functionality for document content.
+- **Editable Content**: Click-to-edit functionality for document content with responsive text wrapping.
 - **Easy File Management**: Open new documents easily from the interface.
 - **Customizable Interface**: Users can edit the HTML and JavaScript embedded in `chonker.py` for customization.
+- **Trackpad Gestures**: Two-finger scroll for navigation, pinch-to-zoom for PDF scaling.

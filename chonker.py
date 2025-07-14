@@ -2,6 +2,7 @@
 """
 🐹 CHONKER - Consolidated WYSIWYG Document Editor
 A complete document processing and editing pipeline in one file.
+Fixed version with working trackpad scrolling support.
 """
 
 import os
@@ -57,42 +58,25 @@ def encode_pdf_as_base64(pdf_path: str) -> str:
 
 
 def generate_wysiwyg_editor(document_text: str, tables: List[Dict], metadata: Dict, output_path: str, native_html: str = None, pdf_file: str = None) -> str:
-    """Generate a minimal WYSIWYG editor with PDF.js viewer."""
+    """Generate a minimal WYSIWYG editor with PDF.js viewer and fixed trackpad support."""
     
-    # Get document title
     doc_title = metadata.get('title', 'Document')
+    pdf_data_url = encode_pdf_as_base64(pdf_file) if pdf_file and os.path.exists(pdf_file) else ""
     
-    # Encode PDF as base64 data URL to avoid CORS issues
-    pdf_data_url = ""
-    if pdf_file and os.path.exists(pdf_file):
+    if pdf_data_url:
         print("Encoding PDF as base64...")
-        pdf_data_url = encode_pdf_as_base64(pdf_file)
     
-    # Use native HTML if available, otherwise use a simple fallback
+    # Process HTML content
     if native_html:
-        # Clean up the HTML but preserve all formatting
         from bs4 import BeautifulSoup
-        
         soup = BeautifulSoup(native_html, 'html.parser')
-        
-        # Single pass with set lookup for better performance
-        tags_to_remove = {'html', 'head', 'body', 'meta', 'title', 'style', 'script'}
-        for tag in soup.find_all(tags_to_remove):
-            if tag.name in {'style', 'script'}:
-                tag.decompose()
-            else:
-                tag.unwrap()
-        
-        content_html = str(soup).strip()
-        
-        # If we still have nothing, fallback to text
-        if not content_html:
-            content_html = f"<div>{document_text}</div>"
+        for tag in soup.find_all({'html', 'head', 'body', 'meta', 'title', 'style', 'script'}):
+            tag.decompose() if tag.name in {'style', 'script'} else tag.unwrap()
+        content_html = str(soup).strip() or f"<div>{document_text}</div>"
     else:
-        # Simple fallback
         content_html = f"<div>{document_text}</div>"
     
-    # Create the minimal WYSIWYG editor HTML with PDF.js viewer
+    # Create the minimal WYSIWYG editor HTML with fixed trackpad support
     html_content = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -102,11 +86,7 @@ def generate_wysiwyg_editor(document_text: str, tables: List[Dict], metadata: Di
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="dns-prefetch" href="https://fonts.googleapis.com">
     <style>
-        * {{
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }}
+        * {{ margin: 0; padding: 0; box-sizing: border-box; }}
         
         body {{
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
@@ -164,29 +144,12 @@ def generate_wysiwyg_editor(document_text: str, tables: List[Dict], metadata: Di
             transform: none;
         }}
         
-        .toolbar-container button.primary {{
-            background: #3498db;
-        }}
-        
-        .toolbar-container button.primary:hover {{
-            background: #2980b9;
-        }}
-        
-        .toolbar-container button.danger {{
-            background: #e74c3c;
-        }}
-        
-        .toolbar-container button.danger:hover {{
-            background: #c0392b;
-        }}
-        
-        .toolbar-container button.accent {{
-            background: #9b59b6;
-        }}
-        
-        .toolbar-container button.accent:hover {{
-            background: #8e44ad;
-        }}
+        .toolbar-container button.primary {{ background: #3498db; }}
+        .toolbar-container button.primary:hover {{ background: #2980b9; }}
+        .toolbar-container button.danger {{ background: #e74c3c; }}
+        .toolbar-container button.danger:hover {{ background: #c0392b; }}
+        .toolbar-container button.accent {{ background: #9b59b6; }}
+        .toolbar-container button.accent:hover {{ background: #8e44ad; }}
         
         .page-info {{
             font-size: 14px;
@@ -222,10 +185,10 @@ def generate_wysiwyg_editor(document_text: str, tables: List[Dict], metadata: Di
             min-width: 300px;
             border-right: 1px solid #2c3e50;
             position: relative;
-            overflow: hidden;
+            overflow: auto;
             background: #1a1a1a;
-            display: flex;
-            flex-direction: column;
+            height: 100%;
+            display: block;
         }}
         
         .resizer {{
@@ -245,22 +208,23 @@ def generate_wysiwyg_editor(document_text: str, tables: List[Dict], metadata: Di
         }}
         
         .pdf-container {{
-            flex: 1;
-            overflow: auto;
-            display: flex;
-            justify-content: center;
-            align-items: flex-start;
-            padding: 20px;
+            display: block;
+            text-align: center;
+            padding: 40px;
             background: #2d2d2d;
+            position: relative;
+            width: auto;
+            height: auto;
+            min-width: 100%;
         }}
         
         #pdfCanvas {{
             box-shadow: 0 4px 20px rgba(0, 0, 0, 0.8);
             background: white;
-            max-width: 100%;
-            height: auto;
-            display: block;
+            display: inline-block;
             margin: 0 auto;
+            pointer-events: auto;
+            touch-action: auto;
         }}
         
         .pane-right {{
@@ -278,10 +242,14 @@ def generate_wysiwyg_editor(document_text: str, tables: List[Dict], metadata: Di
             font-size: 14px;
             line-height: 1.8;
             color: #333;
-            max-width: none;
+            max-width: 100%;
             margin: 0;
             border: none;
             box-shadow: none;
+            word-wrap: break-word;
+            word-break: break-word;
+            overflow-wrap: break-word;
+            white-space: pre-wrap;
         }}
         
         .editor:focus {{
@@ -301,8 +269,12 @@ def generate_wysiwyg_editor(document_text: str, tables: List[Dict], metadata: Di
         .editor table {{
             border-collapse: collapse;
             width: 100%;
+            max-width: 100%;
             margin: 20px 0;
             border: 1px solid #ccc;
+            table-layout: fixed;
+            overflow-x: auto;
+            display: block;
         }}
         
         .editor th, .editor td {{
@@ -337,6 +309,34 @@ def generate_wysiwyg_editor(document_text: str, tables: List[Dict], metadata: Di
             padding-left: 20px;
             margin: 20px 0;
             color: #666;
+            max-width: 100%;
+            overflow-wrap: break-word;
+        }}
+        
+        /* Responsive images */
+        .editor img {{
+            max-width: 100%;
+            height: auto;
+            display: block;
+            margin: 10px 0;
+        }}
+        
+        /* Responsive code blocks */
+        .editor pre {{
+            max-width: 100%;
+            overflow-x: auto;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            background: #f5f5f5;
+            padding: 10px;
+            border-radius: 4px;
+            margin: 10px 0;
+        }}
+        
+        /* Long URLs and text */
+        .editor a {{
+            word-break: break-all;
+            overflow-wrap: break-word;
         }}
         
         .status {{
@@ -388,6 +388,7 @@ def generate_wysiwyg_editor(document_text: str, tables: List[Dict], metadata: Di
             background: #e0e0e0;
             margin: 5px 0;
         }}
+        
         .loading {{
             position: absolute;
             top: 50%;
@@ -399,12 +400,9 @@ def generate_wysiwyg_editor(document_text: str, tables: List[Dict], metadata: Di
             padding: 20px 30px;
             border-radius: 8px;
         }}
-        
-        
     </style>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 </head>
-<body>
 <body>
     <div class="toolbar-container">
         <button class="primary" onclick="openNewDocument()">📄 Open New</button>
@@ -538,26 +536,28 @@ def generate_wysiwyg_editor(document_text: str, tables: List[Dict], metadata: Di
         
         // Render the page
         function renderPage(num) {{
-            if (!pdfDoc) return;
+            if (!pdfDoc) {{
+                console.log('No PDF document loaded');
+                return;
+            }}
             
+            console.log('Rendering page', num);
             pageRendering = true;
             
             pdfDoc.getPage(num).then(function(page) {{
                 const viewport = page.getViewport({{ scale: scale }});
                 
-                // Calculate scale to fit container
-                const container = document.getElementById('pdfContainer');
-                const maxWidth = container.clientWidth - 40;
-                const maxHeight = container.clientHeight - 40;
-                
-                let fitWidthScale = maxWidth / viewport.width;
-                let fitHeightScale = maxHeight / viewport.height;
-                let autoScale = Math.min(fitWidthScale, fitHeightScale, scale);
-                
-                const scaledViewport = page.getViewport({{ scale: autoScale }});
+                // Use the scale directly without auto-fitting
+                const scaledViewport = page.getViewport({{ scale: scale }});
                 
                 canvas.height = scaledViewport.height;
                 canvas.width = scaledViewport.width;
+                
+                console.log('Canvas dimensions:', canvas.width, 'x', canvas.height);
+                
+                // Force the canvas to display at its actual pixel dimensions
+                canvas.style.width = canvas.width + 'px';
+                canvas.style.height = canvas.height + 'px';
                 
                 const renderContext = {{
                     canvasContext: ctx,
@@ -567,13 +567,20 @@ def generate_wysiwyg_editor(document_text: str, tables: List[Dict], metadata: Di
                 const renderTask = page.render(renderContext);
                 
                 renderTask.promise.then(function() {{
+                    console.log('Page rendered successfully');
                     pageRendering = false;
                     
                     if (pageNumPending !== null) {{
                         renderPage(pageNumPending);
                         pageNumPending = null;
                     }}
+                }}).catch(function(error) {{
+                    console.error('Error rendering page:', error);
+                    pageRendering = false;
                 }});
+            }}).catch(function(error) {{
+                console.error('Error getting page:', error);
+                pageRendering = false;
             }});
             
             // Update page counter
@@ -594,22 +601,21 @@ def generate_wysiwyg_editor(document_text: str, tables: List[Dict], metadata: Di
         }}
         
         // Change page
-        function changePage(delta) {{
+        const changePage = (delta) => {{
             if (!pdfDoc) return;
-            
             const newPage = pageNum + delta;
             if (newPage >= 1 && newPage <= pdfDoc.numPages) {{
                 pageNum = newPage;
                 queueRenderPage(pageNum);
             }}
-        }}
+        }};
         
         // Change zoom
-        function changeZoom(delta) {{
+        const changeZoom = (delta) => {{
             scale = Math.max(0.5, Math.min(3.0, scale + delta));
             document.getElementById('zoomLevel').textContent = Math.round(scale * 100) + '%';
             queueRenderPage(pageNum);
-        }}
+        }};
         
         // Fit to width
         function fitToWidth() {{
@@ -642,18 +648,176 @@ def generate_wysiwyg_editor(document_text: str, tables: List[Dict], metadata: Di
             }}
         }});
         
-        // Apple trackpad gestures
-        let startX = 0;
-        let startY = 0;
+        // FIXED: Enhanced trackpad and mouse wheel support
+        const pdfContainer = document.getElementById('pdfContainer');
+        
+        // Variables for touch tracking
+        let touchStartX = 0;
+        let touchStartY = 0;
+        let lastTouchX = 0;
+        let lastTouchY = 0;
+        let isTwoFingerTouch = false;
+        let touchStartTime = 0;
+        let velocityX = 0;
+        let velocityY = 0;
+        let lastMoveTime = 0;
+        
+        // Variables for pinch zoom
         let startScale = 1;
         
-        // Pinch to zoom
-        canvas.addEventListener('gesturestart', function(e) {{
-            e.preventDefault();
-            startScale = scale;
+        // Enhanced wheel handler for trackpad support
+        const pdfPane = document.getElementById('pdfPane');
+        
+        // Debug logging
+        console.log('Setting up wheel handlers...');
+        
+        // Attach wheel handler to the scrollable pane
+        pdfPane.addEventListener('wheel', function(e) {{
+            const beforeScroll = {{
+                scrollTop: pdfPane.scrollTop,
+                scrollLeft: pdfPane.scrollLeft
+            }};
+            
+            console.log('Wheel event on pdfPane:', {{
+                deltaX: e.deltaX,
+                deltaY: e.deltaY,
+                ctrlKey: e.ctrlKey,
+                metaKey: e.metaKey,
+                target: e.target.id || e.target.className,
+                scrollTopBefore: beforeScroll.scrollTop,
+                scrollLeftBefore: beforeScroll.scrollLeft
+            }});
+            
+            // For pinch-to-zoom gestures
+            if (e.ctrlKey || e.metaKey) {{
+                e.preventDefault();
+                const delta = e.deltaY > 0 ? -0.1 : 0.1;
+                changeZoom(delta);
+                return;
+            }}
+            
+            // For normal scrolling - manually apply the scroll
+            if (!e.ctrlKey && !e.metaKey) {{
+                e.preventDefault(); // Prevent default to control scrolling manually
+                
+                pdfPane.scrollLeft += e.deltaX;
+                pdfPane.scrollTop += e.deltaY;
+                
+                // Log if scroll actually happened
+                setTimeout(() => {{
+                    console.log('After scroll:', {{
+                        scrollTop: pdfPane.scrollTop,
+                        scrollLeft: pdfPane.scrollLeft,
+                        didScrollVertically: pdfPane.scrollTop !== beforeScroll.scrollTop,
+                        didScrollHorizontally: pdfPane.scrollLeft !== beforeScroll.scrollLeft
+                    }});
+                }}, 0);
+            }}
+        }}, {{ passive: false }}); // Need passive: false to preventDefault
+        
+        // Also add a wheel handler to the canvas to ensure events bubble up
+        canvas.addEventListener('wheel', function(e) {{
+            console.log('Wheel event on canvas - letting it bubble');
+            // Don't prevent default or stop propagation - let it bubble to pdfPane
+        }}, {{ passive: true }});
+        
+        // Touch events for iOS devices and touch screens
+        pdfContainer.addEventListener('touchstart', function(e) {{
+            if (e.touches.length === 2) {{
+                e.preventDefault();
+                isTwoFingerTouch = true;
+                touchStartTime = Date.now();
+                
+                touchStartX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+                touchStartY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+                lastTouchX = touchStartX;
+                lastTouchY = touchStartY;
+                
+                velocityX = 0;
+                velocityY = 0;
+                lastMoveTime = touchStartTime;
+            }}
+        }}, {{ passive: false }});
+        
+        pdfContainer.addEventListener('touchmove', function(e) {{
+            if (e.touches.length === 2 && isTwoFingerTouch) {{
+                e.preventDefault();
+                
+                const currentTime = Date.now();
+                const currentX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+                const currentY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+                
+                const deltaX = currentX - lastTouchX;
+                const deltaY = currentY - lastTouchY;
+                const deltaTime = currentTime - lastMoveTime;
+                
+                // Calculate velocity for momentum scrolling
+                if (deltaTime > 0) {{
+                    velocityX = deltaX / deltaTime * 16; // Convert to pixels per frame
+                    velocityY = deltaY / deltaTime * 16;
+                }}
+                
+                // Natural scrolling (inverted)
+                pdfContainer.scrollLeft -= deltaX;
+                pdfContainer.scrollTop -= deltaY;
+                
+                lastTouchX = currentX;
+                lastTouchY = currentY;
+                lastMoveTime = currentTime;
+            }}
+        }}, {{ passive: false }});
+        
+        pdfContainer.addEventListener('touchend', function(e) {{
+            if (isTwoFingerTouch) {{
+                const touchEndTime = Date.now();
+                const touchDuration = touchEndTime - touchStartTime;
+                const totalDeltaX = lastTouchX - touchStartX;
+                const totalDeltaY = lastTouchY - touchStartY;
+                
+                // Check for quick swipe gesture for page navigation
+                if (touchDuration < 300 && Math.abs(totalDeltaX) > Math.abs(totalDeltaY) && Math.abs(totalDeltaX) > 50) {{
+                    // Quick horizontal swipe for page change
+                    if (totalDeltaX > 0) {{
+                        changePage(-1); // Swipe right = previous page
+                    }} else {{
+                        changePage(1); // Swipe left = next page
+                    }}
+                }} else {{
+                    // Apply momentum scrolling
+                    applyMomentum();
+                }}
+                
+                isTwoFingerTouch = false;
+            }}
         }});
         
-        canvas.addEventListener('gesturechange', function(e) {{
+        // Momentum scrolling function
+        function applyMomentum() {{
+            const friction = 0.95;
+            const minVelocity = 0.5;
+            
+            function momentumStep() {{
+                if (Math.abs(velocityX) > minVelocity || Math.abs(velocityY) > minVelocity) {{
+                    pdfContainer.scrollLeft -= velocityX;
+                    pdfContainer.scrollTop -= velocityY;
+                    
+                    velocityX *= friction;
+                    velocityY *= friction;
+                    
+                    requestAnimationFrame(momentumStep);
+                }}
+            }}
+            
+            requestAnimationFrame(momentumStep);
+        }}
+        
+        // Pinch to zoom with gesturestart/gesturechange (Safari)
+        pdfContainer.addEventListener('gesturestart', function(e) {{
+            e.preventDefault();
+            startScale = scale;
+        }}, {{ passive: false }});
+        
+        pdfContainer.addEventListener('gesturechange', function(e) {{
             e.preventDefault();
             const newScale = Math.max(0.5, Math.min(3.0, startScale * e.scale));
             if (newScale !== scale) {{
@@ -661,73 +825,7 @@ def generate_wysiwyg_editor(document_text: str, tables: List[Dict], metadata: Di
                 document.getElementById('zoomLevel').textContent = Math.round(scale * 100) + '%';
                 queueRenderPage(pageNum);
             }}
-        }});
-        
-        // Two-finger swipe for page navigation and scrolling
-        let touchStartX = 0;
-        let touchStartY = 0;
-        let lastTouchX = 0;
-        let lastTouchY = 0;
-        let isTwoFingerTouch = false;
-        
-        const pdfContainer = document.getElementById('pdfContainer');
-        
-        pdfContainer.addEventListener('touchstart', function(e) {{
-            if (e.touches.length === 2) {{
-                e.preventDefault();
-                isTwoFingerTouch = true;
-                touchStartX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
-                touchStartY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
-                lastTouchX = touchStartX;
-                lastTouchY = touchStartY;
-            }}
-        }});
-        
-        pdfContainer.addEventListener('touchmove', function(e) {{
-            if (e.touches.length === 2 && isTwoFingerTouch) {{
-                e.preventDefault();
-                
-                const currentX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
-                const currentY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
-                
-                const deltaX = currentX - lastTouchX;
-                const deltaY = currentY - lastTouchY;
-                
-                // Scroll the container
-                pdfContainer.scrollLeft -= deltaX;
-                pdfContainer.scrollTop -= deltaY;
-                
-                lastTouchX = currentX;
-                lastTouchY = currentY;
-            }}
-        }});
-        
-        pdfContainer.addEventListener('touchend', function(e) {{
-            if (isTwoFingerTouch) {{
-                const totalDeltaX = lastTouchX - touchStartX;
-                const totalDeltaY = lastTouchY - touchStartY;
-                
-                // If horizontal swipe is dominant and significant, change pages
-                if (Math.abs(totalDeltaX) > Math.abs(totalDeltaY) && Math.abs(totalDeltaX) > 100) {{
-                    if (totalDeltaX > 0) {{
-                        changePage(-1); // Swipe right = previous page
-                    }} else {{
-                        changePage(1); // Swipe left = next page
-                    }}
-                }}
-                
-                isTwoFingerTouch = false;
-            }}
-        }});
-        
-        // Mouse wheel zoom with Ctrl/Cmd
-        canvas.addEventListener('wheel', function(e) {{
-            if (e.ctrlKey || e.metaKey) {{
-                e.preventDefault();
-                const delta = e.deltaY > 0 ? -0.1 : 0.1;
-                changeZoom(delta);
-            }}
-        }});
+        }}, {{ passive: false }});
         
         // Resizable panes
         const resizer = document.getElementById('resizer');
@@ -769,99 +867,54 @@ def generate_wysiwyg_editor(document_text: str, tables: List[Dict], metadata: Di
             contextMenu.style.display = 'none';
         }});
         
-        // Table manipulation functions
-        function addRowAbove() {{
+        // Unified table manipulation
+        function tableAction(action) {{
             if (!currentCell) return;
-            const row = currentCell.parentElement;
-            const newRow = row.cloneNode(true);
-            // Clear content in new row
-            newRow.querySelectorAll('td, th').forEach(cell => {{
-                cell.textContent = '';
-            }});
-            row.parentElement.insertBefore(newRow, row);
             contextMenu.style.display = 'none';
-        }}
-        
-        function addRowBelow() {{
-            if (!currentCell) return;
+            
             const row = currentCell.parentElement;
-            const newRow = row.cloneNode(true);
-            // Clear content in new row
-            newRow.querySelectorAll('td, th').forEach(cell => {{
-                cell.textContent = '';
-            }});
-            row.parentElement.insertBefore(newRow, row.nextSibling);
-            contextMenu.style.display = 'none';
-        }}
-        
-        function deleteRow() {{
-            if (!currentCell) return;
-            const row = currentCell.parentElement;
-            const tbody = row.parentElement;
-            if (tbody.children.length > 1) {{
-                row.remove();
-            }} else {{
-                alert('Cannot delete the last row');
+            const table = currentCell.closest('table');
+            const cellIndex = Array.from(row.children).indexOf(currentCell);
+            
+            switch(action) {{
+                case 'addRowAbove':
+                case 'addRowBelow': {{
+                    const newRow = row.cloneNode(true);
+                    newRow.querySelectorAll('td, th').forEach(c => c.textContent = '');
+                    row.parentElement.insertBefore(newRow, action === 'addRowAbove' ? row : row.nextSibling);
+                    break;
+                }}
+                case 'deleteRow': {{
+                    if (row.parentElement.children.length > 1) row.remove();
+                    else alert('Cannot delete the last row');
+                    break;
+                }}
+                case 'addColumnLeft':
+                case 'addColumnRight': {{
+                    table.querySelectorAll('tr').forEach(r => {{
+                        const newCell = document.createElement(r.children[cellIndex].tagName);
+                        Object.assign(newCell.style, {{border: '1px solid #ccc', padding: '12px'}});
+                        r.insertBefore(newCell, r.children[cellIndex + (action === 'addColumnLeft' ? 0 : 1)]);
+                    }});
+                    break;
+                }}
+                case 'deleteColumn': {{
+                    if (row.children.length > 1) {{
+                        table.querySelectorAll('tr').forEach(r => r.children[cellIndex].remove());
+                    }} else alert('Cannot delete the last column');
+                    break;
+                }}
             }}
-            contextMenu.style.display = 'none';
         }}
         
-        function addColumnLeft() {{
-            if (!currentCell) return;
-            const cellIndex = Array.from(currentCell.parentElement.children).indexOf(currentCell);
-            const table = currentCell.closest('table');
-            const rows = table.querySelectorAll('tr');
-            
-            rows.forEach(row => {{
-                const newCell = document.createElement(row.children[cellIndex].tagName);
-                newCell.style.border = '1px solid #ccc';
-                newCell.style.padding = '12px';
-                row.insertBefore(newCell, row.children[cellIndex]);
-            }});
-            contextMenu.style.display = 'none';
-        }}
-        
-        function addColumnRight() {{
-            if (!currentCell) return;
-            const cellIndex = Array.from(currentCell.parentElement.children).indexOf(currentCell);
-            const table = currentCell.closest('table');
-            const rows = table.querySelectorAll('tr');
-            
-            rows.forEach(row => {{
-                const newCell = document.createElement(row.children[cellIndex].tagName);
-                newCell.style.border = '1px solid #ccc';
-                newCell.style.padding = '12px';
-                row.insertBefore(newCell, row.children[cellIndex + 1]);
-            }});
-            contextMenu.style.display = 'none';
-        }}
-        
-        function deleteColumn() {{
-            if (!currentCell) return;
-            const cellIndex = Array.from(currentCell.parentElement.children).indexOf(currentCell);
-            const table = currentCell.closest('table');
-            const rows = table.querySelectorAll('tr');
-            
-            if (currentCell.parentElement.children.length > 1) {{
-                rows.forEach(row => {{
-                    row.children[cellIndex].remove();
-                }});
-            }} else {{
-                alert('Cannot delete the last column');
-            }}
-            contextMenu.style.display = 'none';
-        }}
-        
-        // Make context menu functions global
-        window.addRowAbove = addRowAbove;
-        window.addRowBelow = addRowBelow;
-        window.deleteRow = deleteRow;
-        window.addColumnLeft = addColumnLeft;
-        window.addColumnRight = addColumnRight;
-        window.deleteColumn = deleteColumn;
+        // Make functions global
+        ['addRowAbove', 'addRowBelow', 'deleteRow', 'addColumnLeft', 'addColumnRight', 'deleteColumn'].forEach(fn => {{
+            window[fn] = () => tableAction(fn);
+        }});
         
         // Cache localStorage key
         const STORAGE_KEY = 'chonker_document_{doc_title}';
+        const DISABLE_AUTOSAVE = false; // Set to true to disable auto-save
         
         // Auto-save functionality with optimized debouncing
         let autoSaveTimer;
@@ -877,10 +930,18 @@ def generate_wysiwyg_editor(document_text: str, tables: List[Dict], metadata: Di
             editor.focus();
             
             // Load from localStorage if available
-            const saved = localStorage.getItem(STORAGE_KEY);
-            if (saved && confirm('Found auto-saved version. Load it?')) {{
-                editor.innerHTML = saved;
-                lastSavedContent = saved;
+            const saved = !DISABLE_AUTOSAVE ? localStorage.getItem(STORAGE_KEY) : null;
+            
+            if (saved) {{
+                if (confirm('Found auto-saved version. Load it?')) {{
+                    editor.innerHTML = saved;
+                    lastSavedContent = saved;
+                }} else {{
+                    // User chose not to load - clear it
+                    localStorage.removeItem(STORAGE_KEY);
+                    lastSavedContent = editor.innerHTML;
+                    console.log('Cleared auto-saved content');
+                }}
             }} else {{
                 lastSavedContent = editor.innerHTML;
             }}
@@ -911,16 +972,59 @@ def generate_wysiwyg_editor(document_text: str, tables: List[Dict], metadata: Di
                 }}
             }});
             
-            // Initial fit to width after a short delay
+            // Initial render at 200% zoom to ensure both vertical and horizontal scrolling
             setTimeout(() => {{
                 if (pdfDoc) {{
-                    fitToWidth();
+                    scale = 2.0; // Start at 200% zoom for both directions
+                    document.getElementById('zoomLevel').textContent = '200%';
+                    queueRenderPage(pageNum);
+                    
+                    // Check if scrollbars are present
+                    setTimeout(() => {{
+                        const pdfPane = document.getElementById('pdfPane');
+                        const scrollInfo = {{
+                            scrollHeight: pdfPane.scrollHeight,
+                            clientHeight: pdfPane.clientHeight,
+                            scrollWidth: pdfPane.scrollWidth,
+                            clientWidth: pdfPane.clientWidth,
+                            hasVerticalScroll: pdfPane.scrollHeight > pdfPane.clientHeight,
+                            hasHorizontalScroll: pdfPane.scrollWidth > pdfPane.clientWidth,
+                            scrollTop: pdfPane.scrollTop,
+                            scrollLeft: pdfPane.scrollLeft
+                        }};
+                        console.log('PDF Pane scroll info:', scrollInfo);
+                        
+                        // Force a layout recalculation
+                        pdfPane.style.display = 'none';
+                        pdfPane.offsetHeight; // Force reflow
+                        pdfPane.style.display = '';
+                        
+                        // Re-check after reflow
+                        const updatedInfo = {{
+                            scrollHeight: pdfPane.scrollHeight,
+                            clientHeight: pdfPane.clientHeight,
+                            hasVerticalScroll: pdfPane.scrollHeight > pdfPane.clientHeight,
+                            pdfContainerHeight: pdfContainer.offsetHeight,
+                            canvasHeight: canvas.height
+                        }};
+                        console.log('Updated scroll info after reflow:', updatedInfo);
+                        
+                        // Center the view initially
+                        if (scrollInfo.hasHorizontalScroll) {{
+                            pdfPane.scrollLeft = (pdfPane.scrollWidth - pdfPane.clientWidth) / 2;
+                        }}
+                        if (scrollInfo.hasVerticalScroll) {{
+                            pdfPane.scrollTop = (pdfPane.scrollHeight - pdfPane.clientHeight) / 2;
+                        }}
+                    }}, 500);
                 }}
             }}, 100);
         }});
         
         // Save to localStorage with redundancy check
         function saveToLocalStorage() {{
+            if (DISABLE_AUTOSAVE) return;
+            
             const editor = document.getElementById('editor');
             const content = editor.innerHTML;
             if (content !== lastSavedContent) {{
@@ -930,45 +1034,25 @@ def generate_wysiwyg_editor(document_text: str, tables: List[Dict], metadata: Di
             }}
         }}
         
-        // Save document
-        function saveDocument() {{
+        // Save/Export document
+        function saveDocument(exportOnly = false) {{
             const editor = document.getElementById('editor');
-            const content = editor.innerHTML;
-            const blob = new Blob([document.documentElement.outerHTML], {{
-                type: 'text/html'
-            }});
+            const content = exportOnly ? editor.innerHTML : document.documentElement.outerHTML;
+            const blob = new Blob([content], {{ type: 'text/html' }});
             const url = URL.createObjectURL(blob);
             
             const a = document.createElement('a');
             a.href = url;
-            a.download = '{doc_title}_edited.html';
+            a.download = `{doc_title}_${{exportOnly ? 'content' : 'edited'}}.html`;
             document.body.appendChild(a);
             a.click();
             document.body.removeChild(a);
             URL.revokeObjectURL(url);
             
-            showStatus('Saved!');
+            showStatus(exportOnly ? 'Exported!' : 'Saved!');
         }}
         
-        // Export as HTML
-        function exportDocument() {{
-            const editor = document.getElementById('editor');
-            const content = editor.innerHTML;
-            const blob = new Blob([content], {{
-                type: 'text/html'
-            }});
-            const url = URL.createObjectURL(blob);
-            
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = '{doc_title}_content.html';
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            URL.revokeObjectURL(url);
-            
-            showStatus('Exported!');
-        }}
+        const exportDocument = () => saveDocument(true);
         
         // Print document
         function printDocument() {{
@@ -1018,6 +1102,9 @@ def generate_wysiwyg_editor(document_text: str, tables: List[Dict], metadata: Di
             }}
         }});
         
+        // Log for debugging
+        console.log('CHONKER: Enhanced trackpad scrolling initialized');
+        
     </script>
 </body>
 </html>"""
@@ -1053,21 +1140,10 @@ def launch_browser(html_file_path: str):
                 "--window-size=1470,956",
                 "--disable-web-security",
                 "--allow-file-access-from-files",
-                "--disable-features=VizDisplayCompositor",
                 "--no-first-run",
-                "--no-default-browser-check",
                 "--disable-default-apps",
                 "--disable-popup-blocking",
-                "--disable-extensions",
-                "--disable-plugins",
-                "--disable-background-timer-throttling",
-                "--disable-backgrounding-occluded-windows",
-                "--disable-renderer-backgrounding",
-                "--disable-features=TranslateUI",
-                "--disable-ipc-flooding-protection",
-                "--disable-session-crashed-bubble",
-                "--disable-infobars",
-                "--hide-scrollbars"
+                "--disable-infobars"
             ])
             return True
         
@@ -1181,6 +1257,9 @@ def main():
             print("- PDF viewer with custom controls on the left")
             print("- Editable content on the right")
             print("- Use arrow keys or buttons to navigate PDF")
+            print("- Two-finger trackpad scrolling (vertical and horizontal)")
+            print("- Pinch to zoom on trackpad")
+            print("- Natural scrolling with momentum")
             print("- Click 'Fullscreen' button to enter fullscreen mode")
             print("- Ctrl+S to save, Ctrl+B for bold, etc.")
             print("- Click 'Open New Document' to load another PDF")
