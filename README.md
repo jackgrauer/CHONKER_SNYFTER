@@ -1,6 +1,6 @@
-# CHONKER Document Processor
+# 🐹 CHONKER - Comprehensive Document Processing and Editing Suite
 
-A streamlined document processing pipeline using **Python + Docling + HTML viewer generation**.
+CHONKER is a powerful document processing toolkit that provides multiple approaches for extracting, viewing, and editing PDF documents with advanced table preservation and WYSIWYG capabilities. Originally a streamlined document processing pipeline using **Python + Docling + HTML viewer generation**, CHONKER has evolved into a comprehensive suite of tools.
 
 ## 🚀 Quick Start
 
@@ -124,38 +124,193 @@ just backend
 
 That's it! No complex setup, no GUI maintenance, just document processing that works.
 
-### Updates in CHONKER 🐹
+## 🏗️ Architecture
 
-The `chonker.py` script has been significantly enhanced with the following features:
+```
+CHONKER_SNYFTER/
+├── chonker.py              # Main web-based editor (primary version)
+├── chonker_simple.py       # Simplified two-window version
+├── chonker_qt.py          # Qt native desktop application
+├── chonker_qt_faithful.py  # Chunk-based faithful editor
+├── chonker_qt_mixed.py    # Mixed content renderer
+├── apps/
+│   └── doc-service/       # FastAPI document processing service
+│       ├── main.py        # WebSocket-enabled API endpoints
+│       ├── requirements.txt
+│       └── processed_documents/  # Document output directory
+├── requirements.txt        # Python dependencies for web versions
+├── requirements_qt.txt     # Additional Qt dependencies
+├── Justfile               # Task automation
+└── turbo.json            # Turborepo configuration
+```
 
-- **Base64 PDF Encoding**: Documents are now embedded directly as base64 data URLs to circumvent CORS issues, allowing for seamless local file access.
-- **WYSIWYG Editor with PDF.js**: Enhanced editor with a PDF viewer on the left and editable content on the right, supporting all major editing functionalities.
-- **Native File Picker for macOS**: Uses a native macOS file picker for better user experience.
-- **Resizing and Fullscreen Capabilities**: The interface supports dynamic resizing of panes and an improved fullscreen mode.
-- **Optimized Auto-Save**: Auto-save to `localStorage` with debouncing, ensuring minimal data loss.
-- **Improved Toolbar and Custom Controls**: New toolbar with options for navigation, zoom, and document optimization.
-- **Advanced Interaction**: Supports keyboard shortcuts, Apple trackpad gestures, and includes a customizable context menu for table editing.
-- **Error Handling and Performance**: Better error handling, and performance improvements with lazy loading and resource optimization.
-- **Platform Agnostic Browser Launching**: Tries to launch in Chrome app mode on macOS, with fallbacks to Safari and other system defaults.
+## 📈 Recent Development
 
-#### Latest Improvements (July 14, 2025)
+Recent commits show active development on CHONKER:
+- **July 2025**: Added responsive text wrapping to editor pane
+- **July 2025**: Enhanced WYSIWYG editor with PDF.js integration
+- **July 2025**: Added base64 PDF embedding and improved editor
+- **July 2025**: Turborepo integration completed
+- **July 2025**: Made service command default to background mode
 
-- **Enhanced Trackpad Support**: Improved two-finger scrolling for horizontal navigation in PDF viewer
-- **Responsive Editor Pane**: Added comprehensive text wrapping and responsive design to the right editor pane:
-  - Automatic word wrapping for long text
-  - Responsive tables with horizontal scrolling when needed
-  - Images that scale to fit the pane width
-  - Code blocks with proper wrapping and overflow handling
-  - URL breaking to prevent horizontal overflow
-- **Initial Zoom Settings**: PDF now starts at 200% zoom for better visibility and scrolling
-- **Debug Logging**: Added console logging for scroll events to help diagnose issues
+## 🎯 Use Cases
 
-### Usage
+1. **Document Review**: View PDF while editing extracted content
+2. **Table Extraction**: Complex tables preserved and editable
+3. **Research Notes**: Extract and annotate academic papers
+4. **Legal Documents**: Maintain formatting while editing
+5. **Technical Documentation**: Process and update manuals
+6. **Report Generation**: Extract data and create new reports
 
-After processing, the HTML editor automatically launches with:
+## 🐹 CHONKER Versions
 
-- **PDF Viewer Controls**: Navigate, zoom, and more using the toolbar.
-- **Editable Content**: Click-to-edit functionality for document content with responsive text wrapping.
-- **Easy File Management**: Open new documents easily from the interface.
-- **Customizable Interface**: Users can edit the HTML and JavaScript embedded in `chonker.py` for customization.
-- **Trackpad Gestures**: Two-finger scroll for navigation, pinch-to-zoom for PDF scaling.
+### 1. **chonker.py** - Main Web-Based Editor (Primary Version)
+The flagship CHONKER implementation featuring:
+- **Dual-pane interface** with PDF viewer and WYSIWYG editor
+- **Base64 PDF Encoding**: Documents embedded directly as base64 data URLs to circumvent CORS issues
+- **PDF.js Integration**: Full-featured PDF viewer with navigation controls
+- **CKEditor 5**: Rich text editing with table support
+- **Responsive Design**: Adjustable pane sizing with drag-to-resize
+- **Native File Picker**: macOS native file selection dialog
+- **Auto-Save**: Optimized auto-save to localStorage with debouncing
+- **Trackpad Support**: Two-finger scrolling and pinch-to-zoom
+- **Zoom Controls**: PDF zoom from 25% to 800%
+- **Platform-Agnostic Launching**: Chrome app mode with fallbacks
+
+**Latest Improvements (July 2025):**
+- Enhanced trackpad support for horizontal PDF navigation
+- Responsive editor pane with automatic text wrapping
+- Tables with horizontal scrolling when needed
+- Images that scale to fit pane width
+- Code blocks with proper overflow handling
+- Initial zoom at 200% for better visibility
+
+**Usage:**
+```bash
+python chonker.py [pdf_file]
+# Or use the native file picker:
+python chonker.py
+```
+
+### 2. **chonker_simple.py** - Streamlined Two-Window Version
+A minimalist approach that:
+- Opens PDF in system's native PDF viewer
+- Displays extracted content in CKEditor
+- Reduced dependencies and complexity
+- Quick editing without dual-pane complexity
+
+**Usage:**
+```bash
+python chonker_simple.py [pdf_file]
+```
+
+### 3. **chonker_qt.py** - Native Qt Desktop Application
+PyQt-based native application featuring:
+- Native PDF viewer widget (no web browser needed)
+- Integrated text editor with syntax highlighting
+- Native OS scrolling and UI controls
+- True desktop application experience
+- No JavaScript or web dependencies
+
+**Usage:**
+```bash
+python chonker_qt.py [pdf_file]
+```
+
+### 4. **chonker_qt_faithful.py** - Chunk-Based Structure Preservation
+Advanced editor that maintains document fidelity:
+- Each document element (paragraph, table, heading) as separate widget
+- Preserves document hierarchy and structure
+- Individual editing of document components
+- Faithful representation of original layout
+- Best for documents with complex structure
+
+**Usage:**
+```bash
+python chonker_qt_faithful.py [pdf_file]
+```
+
+### 5. **chonker_qt_mixed.py** - Mixed Content Renderer
+Full-featured mixed content support:
+- WebEngine integration for rich content
+- Interactive table editing
+- Media embedding support
+- Advanced formatting preservation
+
+**Usage:**
+```bash
+python chonker_qt_mixed.py [pdf_file]
+```
+
+## 📦 Installation Requirements
+
+### Basic Web Version
+```bash
+pip install -r requirements.txt
+```
+
+### Qt Desktop Versions
+```bash
+pip install -r requirements_qt.txt
+```
+
+## 🎯 Feature Comparison
+
+| Feature | chonker.py | simple | qt | qt_faithful | qt_mixed |
+|---------|------------|--------|-------|-------------|----------|
+| PDF Viewing | PDF.js | Native | Qt Widget | Qt Widget | WebEngine |
+| Editor | CKEditor 5 | CKEditor 5 | Qt Text | Custom | WebEngine |
+| Tables | ✓ | ✓ | Basic | ✓ | ✓ |
+| Auto-save | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Trackpad | ✓ | - | Native | Native | Native |
+| Dependencies | Minimal | Minimal | PyQt | PyQt | PyQt |
+| Structure Preservation | Good | Good | Basic | Excellent | Excellent |
+
+## 🛠️ Service Mode
+
+Run CHONKER as a background service:
+```bash
+just service       # Start in background
+just service-logs  # View service logs
+just service-stop  # Stop service
+```
+
+API Endpoints:
+- `POST /process-document`: Upload and process PDF
+- `GET /documents/{doc_id}`: Retrieve processed document
+- `WebSocket /ws/{session_id}`: Real-time processing updates
+
+## 🚀 Future Roadmap
+
+- [ ] Cloud storage integration
+- [ ] Collaborative editing features
+- [ ] Export to multiple formats
+- [ ] OCR for scanned documents
+- [ ] Plugin system for custom extractors
+- [ ] Mobile-responsive editor
+- [ ] Batch processing capabilities
+
+## 🤝 Contributing
+
+Contributions are welcome! Please:
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
+
+## 📄 License
+
+This project is part of the CHONKER_SNYFTER suite. See LICENSE file for details.
+
+## 🙏 Acknowledgments
+
+- **Docling** for powerful document extraction
+- **PDF.js** for PDF rendering capabilities
+- **CKEditor 5** for rich text editing
+- **PyQt** for native desktop applications
+- **FastAPI** for the service backend
+
+---
+
+**CHONKER**: Making document processing chunky and delightful! 🐹

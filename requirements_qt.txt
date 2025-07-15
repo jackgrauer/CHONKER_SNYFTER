@@ -1,0 +1,14 @@
+# Core Qt requirements
+PyQt6>=6.5.0
+PyQt6-Qt6>=6.5.0
+PyQt6-WebEngine>=6.5.0
+
+# PDF handling
+PyMuPDF>=1.23.0  # For PDF optimization and text extraction
+
+# Document processing
+docling>=0.1.0  # For advanced text extraction
+beautifulsoup4>=4.12.0  # For HTML cleanup
+
+# Optional but recommended
+ocrmypdf>=15.0.0  # For OCR functionality (requires system dependencies)

@@ -24,6 +24,7 @@ chonker:
     @echo "📋 Git Status: $(git status --porcelain | wc -l | tr -d ' ') uncommitted changes"
     @echo "────────────────────────────────────────────────────────────"
     @echo "\n🎯 Quick Commands:"
+    @echo "  just tui        - Launch Terminal UI 💻"
     @echo "  just service    - Start service (background)"
     @echo "  just service-fg - Start service (foreground)"
     @echo "  just stop       - Stop service"
@@ -85,6 +86,12 @@ restart:
     @just stop
     @sleep 1
     @just service
+
+# Launch CHONKER Terminal UI
+tui:
+    @echo "🐹 Launching CHONKER Terminal UI..."
+    @echo "💻 Starting terminal interface for document processing"
+    cd apps/doc-service && source venv/bin/activate && python chonker_terminal_ui.py
 
 # Show system status
 status:
