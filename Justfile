@@ -24,13 +24,14 @@ chonker:
     @echo "📋 Git Status: $(git status --porcelain | wc -l | tr -d ' ') uncommitted changes"
     @echo "────────────────────────────────────────────────────────────"
     @echo "\n🎯 Quick Commands:"
-    @echo "  just tui        - Launch Terminal UI 💻"
-    @echo "  just service    - Start service (background)"
-    @echo "  just service-fg - Start service (foreground)"
-    @echo "  just stop       - Stop service"
-    @echo "  just restart    - Restart service"
-    @echo "  just status     - Check system status"
-    @echo "  just --list     - Show all available commands"
+    @echo "  just tui             - Launch Terminal UI 💻"
+    @echo "  just chonker-web     - Launch Web Editor 🌐"
+    @echo "  just chonker-simple  - Launch Simple Mode 📄"
+    @echo "  just chonker-qt      - Launch Qt Desktop 🖥️"
+    @echo "  just chonker-faithful- Launch Faithful Editor 📋"
+    @echo "  just chonker-mixed   - Launch Mixed Content 🎨"
+    @echo "  just service         - Start service (background)"
+    @echo "  just --list          - Show all available commands"
     @echo "\n💡 Activating virtual environment..."
     @cd apps/doc-service && source venv/bin/activate && exec zsh
 
@@ -93,6 +94,36 @@ tui:
     @echo "💻 Starting terminal interface for document processing"
     cd apps/doc-service && source venv/bin/activate && python chonker_terminal_ui.py
 
+# Launch CHONKER Web-based Editor
+chonker-web:
+    @echo "🐹 Launching CHONKER Web Editor..."
+    @echo "🌐 Opening PDF viewer with WYSIWYG editor"
+    source ../chonksnyft-env/bin/activate && python chonker.py
+
+# Launch CHONKER Simple (Two Windows)
+chonker-simple:
+    @echo "🐹 Launching CHONKER Simple..."
+    @echo "📄 Opening PDF and editor in separate windows"
+    source ../chonksnyft-env/bin/activate && python chonker_simple.py
+
+# Launch CHONKER Qt Desktop
+chonker-qt:
+    @echo "🐹 Launching CHONKER Qt Desktop..."
+    @echo "🖥️ Starting native desktop application"
+    ./chonker_qt.py
+
+# Launch CHONKER Qt Faithful
+chonker-faithful:
+    @echo "🐹 Launching CHONKER Qt Faithful..."
+    @echo "📋 Starting chunk-based document editor"
+    ./chonker_qt_faithful.py
+
+# Launch CHONKER Qt Mixed Content
+chonker-mixed:
+    @echo "🐹 Launching CHONKER Qt Mixed Content..."
+    @echo "🎨 Starting advanced mixed content editor"
+    ./chonker_qt_mixed.py
+
 # Show system status
 status:
     @echo "🐹 CHONKER System Status"
@@ -103,6 +134,13 @@ status:
     @echo "📁 Output dir: $(ls -la apps/doc-service/processed_documents/ 2>/dev/null | wc -l | tr -d ' ') files"
     @echo "🔄 Git: $(git status --porcelain | wc -l | tr -d ' ') uncommitted changes"
     @echo "🌐 Network: $(ping -c 1 google.com > /dev/null 2>&1 && echo '✅ Connected' || echo '❌ Offline')"
+    @echo "────────────────────────────────────────────────────────────"
+    @echo "📋 CHONKER Versions Available:"
+    @echo "  ✅ Web Editor (chonker.py)"
+    @echo "  ✅ Simple Mode (chonker_simple.py)"
+    @echo "  ✅ Qt Desktop (chonker_qt.py)"
+    @echo "  ✅ Qt Faithful (chonker_qt_faithful.py)"
+    @echo "  ✅ Qt Mixed Content (chonker_qt_mixed.py)"
     @echo "────────────────────────────────────────────────────────────"
 
 # Show project info
