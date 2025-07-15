@@ -1,124 +1,59 @@
-# Rust
-target/
-Cargo.lock
-
 # Python
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
 .Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-share/python-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
-PIPFILE.lock
-
-# Database files
-*.db
-*.db-shm
-*.db-wal
-*.sqlite
-*.sqlite3
-
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
-
-# macOS
-.DS_Store
-.AppleDouble
-.LSOverride
-
-# Test outputs
-test_results/
-demo_reports/
-reports/
-*.parquet
-*.csv
-output.*
-
-# Temporary files
-*.tmp
-*.temp
-*.log
-*.md.bak
-*.old
-*.backup
-
-# Environment
-.env
-.venv/
 env/
 venv/
+.venv
+pip-log.txt
+pip-delete-this-directory.txt
+.pytest_cache/
+.ruff_cache/
 
-# Documentation artifacts
-benchmark*.md
-corrected_*.md
-demo*.md
-mascot_test.md
-neon_test.md
-page1_*.md
-pipeline_demo*.md
-test*.md
-test-*.txt
-TEST_*.md
-TESTING_*.md
-IMPROVEMENT_*.md
-WARP_DRIVE_*.md
-TEXT_SELECTION_*.md
-README_backup.md
+# Virtual environments
+chonksnyft-env/
+../chonksnyft-env/
 
-/target
-
-# Python
-__pycache__/
-*.py[cod]
-*.pyo
-*.pyd
-.Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
+# CHONKER & SNYFTER specific
+snyfter_archives.db
+chonker_documents.db
+*.db-journal
+extracted/
+archives/
+temp_pdfs/
+*.pdf.tmp
+*_cleaned.pdf
 
 # IDE
 .vscode/
 .idea/
 *.swp
 *.swo
-*~
+.DS_Store
 
-# Warp Drive - exclude local data but keep config
-.warp/local/
-.warp/cache/
-.warp/.env
-
-# Turbo cache
+# Turborepo
 .turbo/
+dist/
+node_modules/
+
+# Test artifacts
+htmlcov/
+.coverage
+.coverage.*
+coverage.xml
+*.cover
+
+# Logs
+*.log
+logs/
+
+# Backups
+backups/
+*.backup
+
+# Local config
+.env
+.env.local
+config.local.json

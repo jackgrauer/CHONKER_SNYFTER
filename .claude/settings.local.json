@@ -18,7 +18,12 @@
       "Bash(grep:*)",
       "Bash(rm:*)",
       "Bash(git add:*)",
-      "Bash(git rm:*)"
+      "Bash(git rm:*)",
+      "Bash(git reset:*)",
+      "Bash(git push:*)",
+      "Bash(echo:*)",
+      "Bash(git commit:*)",
+      "Bash(just:*)"
     ],
     "deny": []
   }

@@ -1,270 +1,90 @@
-# CHONKER SNYFTER - Document Processing Pipeline
-# Python + Docling + HTML viewer generation
+# 🐹 CHONKER & 🐁 SNYFTER Development Commands
+# Character-driven development with just
 
-set shell := ["zsh", "-c"]
-
+# Default recipe shows available commands
 default:
-    @just --list
+    @just --list --unsorted
 
-# 🐹 CHONKER - Main command with splash screen
-chonker:
-    @echo "\n"
-    @echo "██████╗██╗  ██╗ ██████╗ ███╗   ██╗██╗  ██╗███████╗██████╗ "
-    @echo "██╔════╝██║  ██║██╔═══██╗████╗  ██║██║ ██╔╝██╔════╝██╔══██╗"
-    @echo "██║     ███████║██║   ██║██╔██╗ ██║█████╔╝ █████╗  ██████╔╝"
-    @echo "██║     ██╔══██║██║   ██║██║╚██╗██║██╔═██╗ ██╔══╝  ██╔══██╗"
-    @echo "╚██████╗██║  ██║╚██████╔╝██║ ╚████║██║  ██╗███████╗██║  ██║"
-    @echo " ╚═════╝╚═╝  ╚═╝ ╚═════╝ ╚═╝  ╚═══╝╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝"
-    @echo "\n🚀 SNYFTER - Document Processing Pipeline"
-    @echo "════════════════════════════════════════════════════════════"
-    @echo "🐍 Python Environment: $(cd apps/doc-service && source venv/bin/activate && python --version 2>/dev/null || echo 'Virtual env not found')"
-    @echo "📦 Docling Status: $(cd apps/doc-service && source venv/bin/activate && python -c 'import docling; print("✅ Ready")' 2>/dev/null || echo '❌ Not installed')"
-    @echo "📁 Processed Docs: $(ls -1 apps/doc-service/processed_documents/ 2>/dev/null | wc -l | tr -d ' ') files"
-    @echo "🌐 Service Status: $(curl -s http://localhost:8000/health >/dev/null 2>&1 && echo '✅ Running' || echo '❌ Stopped')"
-    @echo "📋 Git Status: $(git status --porcelain | wc -l | tr -d ' ') uncommitted changes"
-    @echo "────────────────────────────────────────────────────────────"
-    @echo "\n🎯 Quick Commands:"
-    @echo "  just tui             - Launch Terminal UI 💻"
-    @echo "  just chonker-web     - Launch Web Editor 🌐"
-    @echo "  just chonker-simple  - Launch Simple Mode 📄"
-    @echo "  just chonker-qt      - Launch Qt Desktop 🖥️"
-    @echo "  just chonker-faithful- Launch Faithful Editor 📋"
-    @echo "  just chonker-mixed   - Launch Mixed Content 🎨"
-    @echo "  just service         - Start service (background)"
-    @echo "  just --list          - Show all available commands"
-    @echo "\n💡 Activating virtual environment..."
-    @cd apps/doc-service && source venv/bin/activate && exec zsh
+# 🐹 CHONKER Commands
+chonker-feed pdf_path:
+    #!/usr/bin/env bash
+    echo "🐹 *sniff sniff* Feeding {{pdf_path}} to CHONKER..."
+    python chonker_snyfter.py --mode chonker --input "{{pdf_path}}"
 
-# Kill any existing service on port 8000
-kill-service:
-    @echo "🐹 Checking for existing service on port 8000..."
-    @lsof -ti:8000 | xargs kill -9 2>/dev/null || echo "No existing service found"
-    @echo "✅ Port 8000 is now free"
+chonker-test:
+    #!/usr/bin/env bash
+    echo "🐹 Testing CHONKER's digestion system..."
+    pytest tests/test_chonker.py -v
 
-# Start development environment
+# 🐁 SNYFTER Commands  
+snyfter-search query:
+    #!/usr/bin/env bash
+    echo "🐁 *adjusts glasses* Searching archives for: {{query}}"
+    python chonker_snyfter.py --mode snyfter --search "{{query}}"
+
+snyfter-catalog:
+    #!/usr/bin/env bash
+    echo "🐁 Cataloging recent additions..."
+    python chonker_snyfter.py --mode snyfter --catalog
+
+# Development Commands
 dev:
-    @echo "🐹 Starting CHONKER development environment..."
-    @echo "🛑 Stopping any existing service..."
-    @lsof -ti:8000 | xargs kill -9 2>/dev/null || echo "No existing service found"
-    @echo "🐍 Activating virtual environment..."
-    cd apps/doc-service && source venv/bin/activate && python main.py
+    #!/usr/bin/env bash
+    echo "🐹🐁 Starting development mode..."
+    source ../chonksnyft-env/bin/activate
+    python chonker_snyfter.py
 
-# Start document processing service (background mode)
-service:
-    @echo "🐹 Starting CHONKER document processing service..."
-    @echo "🛑 Stopping any existing service..."
-    @lsof -ti:8000 | xargs kill -9 2>/dev/null || echo "No existing service found"
-    @sleep 1
-    @echo "🚀 Starting service in background..."
-    @cd apps/doc-service && source venv/bin/activate && nohup python main.py > service.log 2>&1 &
-    @sleep 2
-    @echo "✅ Service started in background (PID: $(lsof -ti:8000))"
-    @echo "🌐 Service URL: http://localhost:8000"
-    @echo "📚 API docs: http://localhost:8000/docs"
-    @echo "📋 View logs: tail -f apps/doc-service/service.log"
-    @echo "🛑 Stop with: just stop"
-
-# Start service in foreground (for debugging)
-service-fg:
-    @echo "🐹 Starting CHONKER service in foreground..."
-    @echo "🛑 Stopping any existing service..."
-    @lsof -ti:8000 | xargs kill -9 2>/dev/null || echo "No existing service found"
-    @sleep 1
-    @echo "🚀 Service will be available at http://localhost:8000"
-    @echo "📚 API docs at http://localhost:8000/docs"
-    @echo "💾 Press Ctrl+C to stop"
-    cd apps/doc-service && source venv/bin/activate && python main.py
-
-# Stop background service
-stop:
-    @echo "🐹 Stopping CHONKER service..."
-    @lsof -ti:8000 | xargs kill -9 2>/dev/null || echo "No service running"
-    @echo "✅ Service stopped"
-
-# Restart service
-restart:
-    @echo "🐹 Restarting CHONKER service..."
-    @just stop
-    @sleep 1
-    @just service
-
-# Launch CHONKER Terminal UI
-tui:
-    @echo "🐹 Launching CHONKER Terminal UI..."
-    @echo "💻 Starting terminal interface for document processing"
-    cd apps/doc-service && source venv/bin/activate && python chonker_terminal_ui.py
-
-# Launch CHONKER Web-based Editor
-chonker-web:
-    @echo "🐹 Launching CHONKER Web Editor..."
-    @echo "🌐 Opening PDF viewer with WYSIWYG editor"
-    source ../chonksnyft-env/bin/activate && python chonker.py
-
-# Launch CHONKER Simple (Two Windows)
-chonker-simple:
-    @echo "🐹 Launching CHONKER Simple..."
-    @echo "📄 Opening PDF and editor in separate windows"
-    source ../chonksnyft-env/bin/activate && python chonker_simple.py
-
-# Launch CHONKER Qt Desktop
-chonker-qt:
-    @echo "🐹 Launching CHONKER Qt Desktop..."
-    @echo "🖥️ Starting native desktop application"
-    ./chonker_qt.py
-
-# Launch CHONKER Qt Faithful
-chonker-faithful:
-    @echo "🐹 Launching CHONKER Qt Faithful..."
-    @echo "📋 Starting chunk-based document editor"
-    ./chonker_qt_faithful.py
-
-# Launch CHONKER Qt Mixed Content
-chonker-mixed:
-    @echo "🐹 Launching CHONKER Qt Mixed Content..."
-    @echo "🎨 Starting advanced mixed content editor"
-    ./chonker_qt_mixed.py
-
-# Show system status
-status:
-    @echo "🐹 CHONKER System Status"
-    @echo "════════════════════════════════════════════════════════════"
-    @echo "🐍 Python: $(cd apps/doc-service && source venv/bin/activate && python --version 2>/dev/null || echo 'Virtual env not found')"
-    @echo "📦 Docling: $(cd apps/doc-service && source venv/bin/activate && python -c 'import docling; print("✅ Installed")' 2>/dev/null || echo '❌ Not installed')"
-    @echo "🌐 Service: $(curl -s http://localhost:8000/health >/dev/null 2>&1 && echo '✅ Running on port 8000' || echo '❌ Not running')"
-    @echo "📁 Output dir: $(ls -la apps/doc-service/processed_documents/ 2>/dev/null | wc -l | tr -d ' ') files"
-    @echo "🔄 Git: $(git status --porcelain | wc -l | tr -d ' ') uncommitted changes"
-    @echo "🌐 Network: $(ping -c 1 google.com > /dev/null 2>&1 && echo '✅ Connected' || echo '❌ Offline')"
-    @echo "────────────────────────────────────────────────────────────"
-    @echo "📋 CHONKER Versions Available:"
-    @echo "  ✅ Web Editor (chonker.py)"
-    @echo "  ✅ Simple Mode (chonker_simple.py)"
-    @echo "  ✅ Qt Desktop (chonker_qt.py)"
-    @echo "  ✅ Qt Faithful (chonker_qt_faithful.py)"
-    @echo "  ✅ Qt Mixed Content (chonker_qt_mixed.py)"
-    @echo "────────────────────────────────────────────────────────────"
-
-# Show project info
-info:
-    @echo "🐹 CHONKER SNYFTER - Document Processing Pipeline"
-    @echo "📄 Status: $(git status --porcelain | wc -l | tr -d ' ') uncommitted changes"
-    @echo "🐍 Python: $(python --version 2>/dev/null || echo 'Not found')"
-    @echo "📦 Docling: $(python -c 'import docling; print("Installed")' 2>/dev/null || echo 'Not installed')"
-    @echo "📁 Processed docs: $(ls -1 apps/doc-service/processed_documents/ 2>/dev/null | wc -l | tr -d ' ') files"
-    @echo "🌐 HTML viewers: $(ls -1 *.html 2>/dev/null | wc -l | tr -d ' ') files"
-    @echo "📋 Available commands: $(just --list | grep -E '^    [a-z]' | wc -l | tr -d ' ')"
-
-# Check Python environment
-check:
-    @echo "🐹 CHONKER Environment Check"
-    @echo "────────────────────────────"
-    @echo "📁 Working Directory: $(pwd)"
-    @echo "🐍 Python: $(python --version 2>/dev/null || echo 'Not found')"
-    @echo "📦 Docling: $(python -c 'import docling; print("✅ Installed")' 2>/dev/null || echo '❌ Not installed')"
-    @echo "📁 Output directory: $(ls -la apps/doc-service/processed_documents/ 2>/dev/null | wc -l | tr -d ' ') files"
-    @echo "🌐 Network: $(ping -c 1 google.com > /dev/null 2>&1 && echo 'Connected' || echo 'Offline')"
-    @echo "────────────────────────────"
-
-# Install Python dependencies
 install:
-    @echo "🐹 Installing Python dependencies..."
-    cd apps/doc-service && pip install -r requirements.txt
-    @echo "✅ Dependencies installed"
+    #!/usr/bin/env bash
+    echo "📦 Installing dependencies for our furry friends..."
+    source ../chonksnyft-env/bin/activate
+    pip install -r requirements.txt
 
-# Process a document (usage: just process document.pdf)
-process FILE:
-    @echo "🐹 Processing document: {{FILE}}"
-    python process_document.py "{{FILE}}"
+# Git Commands with Character Flair
+commit message:
+    #!/usr/bin/env bash
+    echo "💾 Committing with message: {{message}}"
+    git add -A
+    git commit -m "{{message}} 🐹🐁"
 
-# Generate viewer for already processed document
-viewer BASENAME:
-    @echo "🐹 Generating viewer for: {{BASENAME}}"
-    python generate_viewer.py "{{BASENAME}}"
+push:
+    #!/usr/bin/env bash
+    echo "📤 Pushing to hamster burrow (remote repo)..."
+    git push
 
-# List processed documents
-list:
-    @echo "🐹 Processed Documents:"
-    @ls -la apps/doc-service/processed_documents/ 2>/dev/null || echo "No processed documents found"
-    @echo ""
-    @echo "🌐 HTML Viewers:"
-    @ls -la *.html 2>/dev/null || echo "No HTML viewers found"
-
-# Clean processed files
-clean:
-    @echo "🐹 Cleaning processed files..."
-    rm -rf apps/doc-service/processed_documents/*
-    rm -f *.html
-    @echo "✅ Clean completed"
-
-# Start Python backend service
-backend:
-    @echo "🐹 Starting Python backend service..."
-    cd apps/doc-service && python main.py
-
-# Git workflow commands
-git-status:
-    @echo "🐹 Git Status"
-    @echo "────────────────────────────"
+status:
+    #!/usr/bin/env bash
+    echo "📊 Checking what CHONKER and SNYFTER have been up to..."
     git status
-    @echo "────────────────────────────"
-    @echo "📈 Branch: $(git branch --show-current)"
-    @echo "📊 Changes: $(git status --porcelain | wc -l) files"
-    @echo "🔄 Commits ahead: $(git rev-list --count HEAD ^origin/$(git branch --show-current) 2>/dev/null || echo '0')"
-    @echo "📥 Commits behind: $(git rev-list --count origin/$(git branch --show-current) ^HEAD 2>/dev/null || echo '0')"
 
-# Add all changes to git
-git-add:
-    @echo "🐹 Adding all changes to git..."
-    git add .
-    @echo "✅ Changes added"
+# Testing & Quality
+test-all:
+    #!/usr/bin/env bash
+    echo "🧪 Running all tests..."
+    just chonker-test
+    just snyfter-test
+    just test-integration
 
-# Commit with message
-git-commit message:
-    @echo "🐹 Committing changes..."
-    git commit -m "{{message}}"
-    @echo "✅ Changes committed"
+lint:
+    #!/usr/bin/env bash
+    echo "🧹 Tidying up the code..."
+    ruff check .
+    ruff format .
 
-# Pull from remote
-git-pull:
-    @echo "🐹 Pulling from remote..."
-    git pull
-    @echo "✅ Pull completed"
+# Character Consistency Checks
+check-characters:
+    #!/usr/bin/env bash
+    echo "🎭 Checking character consistency..."
+    python scripts/check_character_consistency.py
 
-# Push to remote
-git-push:
-    @echo "🐹 Pushing to remote..."
-    git push
-    @echo "✅ Push completed"
+# Database Management
+db-init:
+    #!/usr/bin/env bash
+    echo "🗄️ Initializing SNYFTER's card catalog..."
+    python -c "from chonker_snyfter import SnyfterDatabase; SnyfterDatabase().init_archives()"
 
-# Quick commit with auto-generated message
-git-quick:
-    @echo "🐹 Quick commit..."
-    git add .
-    git commit -m "Quick update: $(date '+%Y-%m-%d %H:%M:%S')"
-    @echo "✅ Quick commit completed"
-
-# Full workflow: add, commit, push
-git-save message:
-    @echo "🐹 Full git workflow..."
-    git add .
-    git commit -m "{{message}}"
-    git push
-    @echo "✅ Full workflow completed"
-
-# Create .gitignore entries for common files
-git-ignore:
-    @echo "🐹 Creating .gitignore entries..."
-    echo "# CHONKER SNYFTER specific" >> .gitignore
-    echo "*.db" >> .gitignore
-    echo "*.db-journal" >> .gitignore
-    echo "*.log" >> .gitignore
-    echo "# IDE and OS" >> .gitignore
-    echo ".DS_Store" >> .gitignore
-    echo "Thumbs.db" >> .gitignore
-    echo "# Rust" >> .gitignore
-    echo "src-tauri/target/" >> .gitignore
-    echo "**/*.rs.bk" >> .gitignore
-    echo "# Node" >> .gitignore
-    echo "node_modules/" >> .gitignore
-    echo "dist/" >> .gitignore
-    echo ".vite/" >> .gitignore
-    @echo "✅ .gitignore updated"
+# Quick Commands
+run: dev
+test: test-all
+clean:
+    rm -rf __pycache__ .pytest_cache *.pyc

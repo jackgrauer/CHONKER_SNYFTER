@@ -1,615 +1,689 @@
 #!/usr/bin/env python3
 """
-🐹 CHONKER - Consolidated WYSIWYG Document Editor
-A complete document processing and editing pipeline using iframes for independent scrolling.
+🐹 CHONKER - PDF Document Extraction & Quality Control System
+A focused tool for extracting content from PDFs with human-in-the-loop QC and database storage.
 """
 
-import os
 import sys
-import subprocess
-import platform
-import re
+import os
+import sqlite3
 import json
+import hashlib
 import tempfile
-import base64
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
+from datetime import datetime
+
+from PyQt6.QtWidgets import (
+    QApplication, QMainWindow, QSplitter, QVBoxLayout, QHBoxLayout,
+    QWidget, QPushButton, QFileDialog, QMessageBox, QTextEdit,
+    QLabel, QComboBox, QScrollArea, QFrame, QProgressBar,
+    QTableWidget, QTableWidgetItem, QTabWidget, QStatusBar, QTextBrowser
+)
+from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer, QPointF, QRectF, QObject, QEvent
+from PyQt6.QtGui import QFont, QPalette, QColor, QTextCharFormat, QTextCursor, QPainter, QPen, QBrush
+from PyQt6.QtPdf import QPdfDocument, QPdfSelection
+from PyQt6.QtPdfWidgets import QPdfView
+
+try:
+    from docling.document_converter import DocumentConverter
+    import fitz  # PyMuPDF
+    DEPENDENCIES_AVAILABLE = True
+except ImportError:
+    DEPENDENCIES_AVAILABLE = False
 
 
-def create_native_file_picker() -> Optional[str]:
-    """Use native macOS file picker to select a PDF file."""
+class DatabaseManager:
+    """Handles all database operations for document storage and retrieval."""
     
-    if platform.system() != "Darwin":
-        # Fallback for non-macOS systems
-        return None
+    def __init__(self, db_path: str = "chonker_documents.db"):
+        self.db_path = db_path
+        self.init_database()
     
-    # AppleScript to show native file picker
-    applescript = """
-    set theFile to choose file with prompt "Select a PDF document to edit:" of type {"com.adobe.pdf"} without multiple selections allowed
-    return POSIX path of theFile
-    """
-    
-    try:
-        result = subprocess.run(
-            ["osascript", "-e", applescript],
-            capture_output=True,
-            text=True
-        )
+    def init_database(self):
+        """Initialize the database with schema."""
+        # Check if database exists
+        db_exists = os.path.exists(self.db_path)
         
-        if result.returncode == 0:
-            # Remove trailing newline and return the file path
-            return result.stdout.strip()
-        else:
-            # User cancelled
-            return None
-            
-    except Exception as e:
-        print(f"Error showing file picker: {e}")
-        return None
-
-
-def encode_pdf_as_base64(pdf_path: str) -> str:
-    """Encode PDF file as base64 data URL."""
-    with open(pdf_path, 'rb') as f:
-        pdf_data = f.read()
-        base64_data = base64.b64encode(pdf_data).decode('utf-8')
-        return f"data:application/pdf;base64,{base64_data}"
-
-
-def generate_pdf_viewer(pdf_file: str, output_path: str) -> str:
-    """Generate standalone PDF viewer HTML."""
-    pdf_data_url = encode_pdf_as_base64(pdf_file) if pdf_file and os.path.exists(pdf_file) else ""
-    
-    html_content = f"""<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>PDF Viewer</title>
-    <style>
-        * {{ margin: 0; padding: 0; box-sizing: border-box; }}
-        body {{
-            background: #2d2d2d;
-            overflow: auto;
-            height: 100vh;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }}
-        #pdfCanvas {{
-            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.8);
-            background: white;
-            display: block;
-            margin: 40px;
-        }}
-    </style>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-</head>
-<body>
-    <canvas id="pdfCanvas"></canvas>
-    
-    <script>
-        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
-        let pdfDoc = null;
-        let pageNum = 1;
-        let scale = 1.5;
-        const canvas = document.getElementById('pdfCanvas');
-        const ctx = canvas.getContext('2d');
-        
-        const pdfData = '{pdf_data_url}';
-        
-        if (pdfData && pdfData !== 'data:application/pdf;base64,') {{
-            pdfjsLib.getDocument(pdfData).promise.then(function(pdf) {{
-                pdfDoc = pdf;
-                renderPage(pageNum);
-            }});
-        }}
-        
-        function renderPage(num) {{
-            pdfDoc.getPage(num).then(function(page) {{
-                const viewport = page.getViewport({{ scale: scale }});
-                canvas.height = viewport.height;
-                canvas.width = viewport.width;
+        if not db_exists:
+            # Read and execute schema for new database
+            schema_path = Path(__file__).parent / "database_schema.sql"
+            if schema_path.exists():
+                with open(schema_path, 'r') as f:
+                    schema = f.read()
                 
-                const renderContext = {{
-                    canvasContext: ctx,
-                    viewport: viewport
-                }};
-                
-                page.render(renderContext);
-            }});
-        }}
-        
-        // Listen for messages from parent
-        window.addEventListener('message', function(e) {{
-            if (e.data.action === 'nextPage' && pageNum < pdfDoc.numPages) {{
-                pageNum++;
-                renderPage(pageNum);
-            }} else if (e.data.action === 'prevPage' && pageNum > 1) {{
-                pageNum--;
-                renderPage(pageNum);
-            }} else if (e.data.action === 'zoom') {{
-                scale = Math.max(0.5, Math.min(3.0, scale + e.data.delta));
-                renderPage(pageNum);
-            }}
-        }});
-    </script>
-</body>
-</html>"""
+                with sqlite3.connect(self.db_path) as conn:
+                    conn.executescript(schema)
+            else:
+                # Fallback minimal schema
+                with sqlite3.connect(self.db_path) as conn:
+                    conn.execute("""
+                        CREATE TABLE IF NOT EXISTS documents (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            filename TEXT NOT NULL,
+                            file_hash TEXT UNIQUE NOT NULL,
+                            processed_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                            status TEXT DEFAULT 'pending'
+                        )
+                    """)
     
-    with open(output_path, 'w', encoding='utf-8') as f:
-        f.write(html_content)
-    return output_path
+    def add_document(self, filename: str, file_path: str, file_hash: str) -> int:
+        """Add a new document to the database."""
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.execute(
+                "INSERT INTO documents (filename, file_path, file_hash) VALUES (?, ?, ?)",
+                (filename, file_path, file_hash)
+            )
+            return cursor.lastrowid
+    
+    def get_document_by_hash(self, file_hash: str) -> Optional[Dict]:
+        """Check if document already exists."""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.execute(
+                "SELECT * FROM documents WHERE file_hash = ?", (file_hash,)
+            )
+            row = cursor.fetchone()
+            return dict(row) if row else None
+    
+    def save_extracted_content(self, document_id: int, content_type: str, content: str):
+        """Save extracted content to database."""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute(
+                "INSERT INTO extracted_content (document_id, content_type, content) VALUES (?, ?, ?)",
+                (document_id, content_type, content)
+            )
+    
+    def get_recent_documents(self, limit: int = 20) -> List[Dict]:
+        """Get recently processed documents."""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.execute(
+                "SELECT * FROM documents ORDER BY processed_date DESC LIMIT ?", (limit,)
+            )
+            return [dict(row) for row in cursor.fetchall()]
 
 
-def generate_editor(content_html: str, output_path: str) -> str:
-    """Generate standalone CKEditor HTML."""
-    html_content = f"""<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Editor</title>
-    <script src="https://cdn.ckeditor.com/ckeditor5/41.0.0/classic/ckeditor.js"></script>
-    <style>
-        * {{ margin: 0; padding: 0; box-sizing: border-box; }}
-        body {{ background: white; height: 100vh; overflow: hidden; }}
-        #editor {{ height: 100%; }}
-        .ck-editor__editable {{
-            height: calc(100vh - 100px);
-            overflow-y: auto !important;
-        }}
-    </style>
-</head>
-<body>
-    <div id="editor">
-        {content_html}
-    </div>
+class PDFPreprocessor:
+    """Handles PDF cleaning and preprocessing for better extraction."""
     
-    <script>
-        ClassicEditor
-            .create(document.querySelector('#editor'), {{
-                toolbar: {{
-                    items: [
-                        'heading', '|',
-                        'bold', 'italic', 'underline', 'strikethrough', '|',
-                        'link', 'blockQuote', 'codeBlock', '|',
-                        'bulletedList', 'numberedList', 'outdent', 'indent', '|',
-                        'insertTable', 'tableColumn', 'tableRow', 'mergeTableCells', '|',
-                        'undo', 'redo', '|',
-                        'findAndReplace'
-                    ]
-                }},
-                table: {{
-                    contentToolbar: [
-                        'tableColumn', 'tableRow', 'mergeTableCells',
-                        'tableCellProperties', 'tableProperties'
-                    ]
-                }}
-            }})
-            .then(editor => {{
-                window.editor = editor;
-                
-                // Listen for save commands from parent
-                window.addEventListener('message', function(e) {{
-                    if (e.data.action === 'getData') {{
-                        parent.postMessage({{
-                            action: 'editorData',
-                            data: editor.getData()
-                        }}, '*');
-                    }}
-                }});
-            }})
-            .catch(error => {{
-                console.error('Error initializing CKEditor:', error);
-            }});
-    </script>
-</body>
-</html>"""
-    
-    with open(output_path, 'w', encoding='utf-8') as f:
-        f.write(html_content)
-    return output_path
-
-
-def generate_wysiwyg_editor(document_text: str, tables: List[Dict], metadata: Dict, output_path: str, native_html: str = None, pdf_file: str = None) -> str:
-    """Generate main container with iframes."""
-    doc_title = metadata.get('title', 'Document')
-    
-    # Process HTML content
-    if native_html:
-        from bs4 import BeautifulSoup
-        soup = BeautifulSoup(native_html, 'html.parser')
-        for tag in soup.find_all({'html', 'head', 'body', 'meta', 'title', 'style', 'script'}):
-            tag.decompose() if tag.name in {'style', 'script'} else tag.unwrap()
-        content_html = str(soup).strip() or f"<div>{document_text}</div>"
-    else:
-        content_html = f"<div>{document_text}</div>"
-    
-    # Generate separate HTML files
-    pdf_viewer_path = generate_pdf_viewer(pdf_file, "chonker_pdf.html")
-    editor_path = generate_editor(content_html, "chonker_editor.html")
-    
-    # Create the main container HTML with iframes
-    html_content = f"""<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{doc_title}</title>
-    <style>
-        * {{ margin: 0; padding: 0; box-sizing: border-box; }}
-        
-        body {{
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: #1a1a1a;
-            height: 100vh;
-            overflow: hidden;
-            display: flex;
-            flex-direction: column;
-        }}
-        
-        .toolbar-container {{
-            background: #2c3e50;
-            color: white;
-            padding: 10px;
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
-            border-bottom: 2px solid #34495e;
-        }}
-        
-        .toolbar-container button {{
-            background: #34495e;
-            color: white;
-            border: none;
-            padding: 8px 16px;
-            cursor: pointer;
-            border-radius: 4px;
-            font-size: 13px;
-            transition: all 0.2s;
-            min-width: 100px;
-            height: 32px;
-        }}
-        
-        .toolbar-container button:hover {{
-            background: #4a5f7a;
-        }}
-        
-        .toolbar-container button:disabled {{
-            opacity: 0.5;
-            cursor: not-allowed;
-        }}
-        
-        .page-info {{
-            font-size: 14px;
-            padding: 0 15px;
-            color: #ecf0f1;
-        }}
-        
-        .zoom-controls {{
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            margin-left: auto;
-        }}
-        
-        .main-container {{
-            flex: 1;
-            display: flex;
-            overflow: hidden;
-            position: relative;
-        }}
-        
-        .iframe-pane {{
-            flex: 1;
-            min-width: 300px;
-            height: 100%;
-            position: relative;
-        }}
-        
-        .iframe-pane iframe {{
-            width: 100%;
-            height: 100%;
-            border: none;
-        }}
-        
-        .iframe-pane.left {{
-            border-right: 2px solid #2c3e50;
-        }}
-        
-        .resizer {{
-            width: 5px;
-            background: #ddd;
-            cursor: col-resize;
-            position: relative;
-        }}
-        
-        .resizer:hover {{
-            background: #bbb;
-        }}
-        
-        .status {{
-            position: fixed;
-            top: 20px;
-            right: 20px;
-            background: #28a745;
-            color: white;
-            padding: 8px 16px;
-            border-radius: 4px;
-            font-size: 14px;
-            z-index: 1000;
-            transition: opacity 0.3s ease;
-            opacity: 0;
-            pointer-events: none;
-        }}
-        
-        .status.show {{
-            opacity: 1;
-        }}
-    </style>
-</head>
-<body>
-    <div class="toolbar-container">
-        <button id="prevPage" onclick="sendToPDF('prevPage')">← Previous</button>
-        <span class="page-info">
-            Page <span id="pageNum">1</span> of <span id="pageCount">-</span>
-        </span>
-        <button id="nextPage" onclick="sendToPDF('nextPage')">Next →</button>
-        
-        <div class="zoom-controls">
-            <button onclick="sendToPDF('zoom', -0.2)">➖ Zoom Out</button>
-            <span class="zoom-level" id="zoomLevel">150%</span>
-            <button onclick="sendToPDF('zoom', 0.2)">➕ Zoom In</button>
-            <button onclick="saveDocument()">💾 Save</button>
-        </div>
-    </div>
-    
-    <div class="main-container">
-        <div class="iframe-pane left">
-            <iframe id="pdfFrame" src="chonker_pdf.html"></iframe>
-        </div>
-        <div class="resizer" id="resizer"></div>
-        <div class="iframe-pane right">
-            <iframe id="editorFrame" src="chonker_editor.html"></iframe>
-        </div>
-    </div>
-    
-    <div class="status" id="status">Saved!</div>
-    
-    <script>
-        // Send messages to PDF iframe
-        function sendToPDF(action, value) {{
-            const pdfFrame = document.getElementById('pdfFrame');
-            if (action === 'zoom') {{
-                pdfFrame.contentWindow.postMessage({{ action: 'zoom', delta: value }}, '*');
-            }} else {{
-                pdfFrame.contentWindow.postMessage({{ action: action }}, '*');
-            }}
-        }}
-        
-        // Save document
-        function saveDocument() {{
-            const editorFrame = document.getElementById('editorFrame');
-            editorFrame.contentWindow.postMessage({{ action: 'getData' }}, '*');
-        }}
-        
-        // Listen for messages from iframes
-        window.addEventListener('message', function(e) {{
-            if (e.data.action === 'editorData') {{
-                const blob = new Blob([e.data.data], {{ type: 'text/html' }});
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = '{doc_title}_edited.html';
-                document.body.appendChild(a);
-                a.click();
-                document.body.removeChild(a);
-                URL.revokeObjectURL(url);
-                showStatus('Saved!');
-            }}
-        }});
-        
-        // Show status
-        function showStatus(message) {{
-            const status = document.getElementById('status');
-            status.textContent = message;
-            status.classList.add('show');
-            setTimeout(() => {{
-                status.classList.remove('show');
-            }}, 1500);
-        }}
-        
-        // Resizable panes
-        const resizer = document.getElementById('resizer');
-        const leftPane = document.querySelector('.iframe-pane.left');
-        const rightPane = document.querySelector('.iframe-pane.right');
-        let isResizing = false;
-        
-        resizer.addEventListener('mousedown', function(e) {{
-            isResizing = true;
-            document.body.style.cursor = 'col-resize';
-            e.preventDefault();
-        }});
-        
-        document.addEventListener('mousemove', function(e) {{
-            if (!isResizing) return;
+    @staticmethod
+    def clean_pdf(input_path: str, output_path: str) -> bool:
+        """Clean PDF to improve extraction quality."""
+        try:
+            doc = fitz.open(input_path)
             
-            const containerWidth = document.querySelector('.main-container').offsetWidth;
-            const newLeftWidth = e.clientX;
-            const leftPercent = (newLeftWidth / containerWidth) * 100;
-            const rightPercent = 100 - leftPercent;
+            # Basic cleaning operations
+            for page in doc:
+                # Remove annotations that might interfere
+                annot = page.first_annot
+                while annot:
+                    next_annot = annot.next
+                    page.delete_annot(annot)
+                    annot = next_annot
+                
+                # Ensure text is selectable (basic check)
+                text = page.get_text()
+                if not text.strip():
+                    # Page might be image-based, could add OCR here
+                    pass
             
-            if (leftPercent > 20 && leftPercent < 80) {{
-                leftPane.style.flex = `0 0 ${{leftPercent}}%`;
-                rightPane.style.flex = `0 0 ${{rightPercent}}%`;
-            }}
-        }});
+            doc.save(output_path)
+            doc.close()
+            return True
+            
+        except Exception as e:
+            print(f"PDF preprocessing failed: {e}")
+            return False
+
+
+class BidirectionalSelector(QObject):
+    """Handles bidirectional selection between PDF and extracted content."""
+    
+    def __init__(self, pdf_view: QPdfView, content_tabs: QTabWidget, chunks_table: QTableWidget):
+        super().__init__()
+        self.pdf_view = pdf_view
+        self.content_tabs = content_tabs
+        self.chunks_table = chunks_table
+        self.chunk_map = {}  # chunk_id -> {page, bbox, content}
+        self.current_highlight = None
         
-        document.addEventListener('mouseup', function() {{
-            isResizing = false;
-            document.body.style.cursor = 'default';
-        }});
-    </script>
-</body>
-</html>"""
+        # Install event filter for PDF clicks
+        self.pdf_view.viewport().installEventFilter(self)
+        
+        # Connect table selection
+        self.chunks_table.itemSelectionChanged.connect(self.on_chunk_selected)
     
-    # Write the HTML file
-    with open(output_path, 'w', encoding='utf-8') as f:
-        f.write(html_content)
+    def set_chunks(self, chunks: List[Dict]):
+        """Update chunk mapping when new content is extracted."""
+        self.chunk_map.clear()
+        for chunk in chunks:
+            chunk_id = chunk['index']
+            self.chunk_map[chunk_id] = {
+                'page': chunk.get('page', 0),
+                'bbox': chunk.get('bbox', {}),
+                'content': chunk.get('content', ''),
+                'type': chunk.get('type', '')
+            }
     
-    return output_path
-
-
-def launch_browser(html_file_path: str):
-    """Launch the HTML file in the browser."""
-    
-    if not os.path.exists(html_file_path):
-        print(f"Error: HTML file not found at {html_file_path}")
+    def eventFilter(self, obj, event):
+        """Handle mouse clicks on PDF view."""
+        if obj == self.pdf_view.viewport() and event.type() == QEvent.Type.MouseButtonPress:
+            if event.button() == Qt.MouseButton.LeftButton:
+                self.on_pdf_click(event.pos())
         return False
     
-    # Convert to absolute path
-    html_file_path = os.path.abspath(html_file_path)
-    file_url = f"file://{html_file_path}"
-    
-    system = platform.system()
-    
-    if system == "Darwin":  # macOS
-        # Try Chrome first (app mode - no browser chrome)
-        chrome_path = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
-        if os.path.exists(chrome_path):
-            print("Launching editor in Chrome app mode...")
-            subprocess.Popen([
-                chrome_path,
-                f"--app={file_url}",
-                "--window-size=1470,956",
-                "--disable-web-security",
-                "--allow-file-access-from-files",
-                "--no-first-run",
-                "--disable-default-apps",
-                "--disable-popup-blocking",
-                "--disable-infobars"
-            ])
-            return True
+    def on_pdf_click(self, pos):
+        """Handle click on PDF - find and highlight corresponding chunk."""
+        # Get current page
+        nav = self.pdf_view.pageNavigator()
+        if not nav:
+            return
+            
+        current_page = nav.currentPage()
         
-        # Try Safari if Chrome isn't available
+        # For now, just cycle through chunks on the current page when clicked
+        # (Full coordinate mapping would require more complex PDF rendering info)
+        page_chunks = []
+        for chunk_id, chunk_data in self.chunk_map.items():
+            if chunk_data['page'] == current_page:
+                page_chunks.append(chunk_id)
+        
+        if page_chunks:
+            # Find next chunk to highlight
+            if self.current_highlight in page_chunks:
+                current_idx = page_chunks.index(self.current_highlight)
+                next_idx = (current_idx + 1) % len(page_chunks)
+            else:
+                next_idx = 0
+            
+            self.highlight_chunk(page_chunks[next_idx])
+    
+    def point_in_bbox(self, point: QPointF, bbox: Dict) -> bool:
+        """Check if point is within bounding box."""
+        if not bbox or not all(k in bbox for k in ['x', 'y', 'width', 'height']):
+            return False
+        
+        x, y = point.x(), point.y()
+        return (bbox['x'] <= x <= bbox['x'] + bbox['width'] and
+                bbox['y'] <= y <= bbox['y'] + bbox['height'])
+    
+    def on_chunk_selected(self):
+        """Handle selection in chunks table."""
+        selected_items = self.chunks_table.selectedItems()
+        if selected_items:
+            # Get row of first selected item
+            row = selected_items[0].row()
+            self.highlight_chunk(row)
+            
+            # Scroll PDF to show the chunk
+            chunk_data = self.chunk_map.get(row, {})
+            if chunk_data and 'page' in chunk_data:
+                nav = self.pdf_view.pageNavigator()
+                if nav and chunk_data['page'] != nav.currentPage():
+                    nav.jump(chunk_data['page'], QPointF())
+    
+    def highlight_chunk(self, chunk_id: int):
+        """Highlight chunk in both views."""
+        chunk_data = self.chunk_map.get(chunk_id)
+        if not chunk_data:
+            return
+        
+        # Highlight in chunks table
+        self.chunks_table.selectRow(chunk_id)
+        
+        # Highlight in content views
+        content = chunk_data['content']
+        
+        # HTML viewer
+        if self.content_tabs.currentIndex() == 0:  # HTML tab
+            html_viewer = self.content_tabs.widget(0)
+            if isinstance(html_viewer, QTextEdit):
+                self.highlight_text_in_viewer(html_viewer, content)
+        
+        # Markdown viewer  
+        elif self.content_tabs.currentIndex() == 1:  # Markdown tab
+            md_viewer = self.content_tabs.widget(1)
+            if isinstance(md_viewer, QTextEdit):
+                self.highlight_text_in_viewer(md_viewer, content)
+        
+        # Store current highlight for clearing
+        self.current_highlight = chunk_id
+    
+    def highlight_text_in_viewer(self, viewer: QTextEdit, text: str):
+        """Highlight text in a QTextEdit viewer."""
+        if not text:
+            return
+            
+        # Clear previous highlights
+        cursor = viewer.textCursor()
+        cursor.select(QTextCursor.SelectionType.Document)
+        cursor.setCharFormat(QTextCharFormat())
+        
+        # Find and highlight text
+        cursor = viewer.document().find(text[:50])  # Use first 50 chars to find
+        if not cursor.isNull():
+            # Highlight format
+            fmt = QTextCharFormat()
+            fmt.setBackground(QColor(255, 255, 0, 100))  # Light yellow
+            cursor.mergeCharFormat(fmt)
+            
+            # Scroll to position
+            viewer.setTextCursor(cursor)
+            viewer.ensureCursorVisible()
+    
+    def clear_highlights(self):
+        """Clear all highlights."""
+        self.current_highlight = None
+        # Clear table selection
+        self.chunks_table.clearSelection()
+
+
+class ExtractionWorker(QThread):
+    """Background thread for PDF content extraction."""
+    
+    finished = pyqtSignal(dict)  # Emits extraction results
+    progress = pyqtSignal(str)   # Status updates
+    error = pyqtSignal(str)      # Error messages
+    
+    def __init__(self, pdf_path: str):
+        super().__init__()
+        self.pdf_path = pdf_path
+    
+    def run(self):
         try:
-            print("Launching editor in Safari...")
-            subprocess.run(["open", "-a", "Safari", file_url])
-            return True
+            self.progress.emit("Starting extraction...")
+            
+            # Preprocess PDF if needed
+            temp_pdf = None
+            original_path = self.pdf_path
+            
+            # Check if PDF needs cleaning
+            if self.needs_preprocessing(self.pdf_path):
+                self.progress.emit("Preprocessing PDF...")
+                temp_pdf = tempfile.NamedTemporaryFile(suffix='.pdf', delete=False)
+                temp_pdf.close()
+                
+                if PDFPreprocessor.clean_pdf(self.pdf_path, temp_pdf.name):
+                    self.pdf_path = temp_pdf.name
+                else:
+                    self.progress.emit("Preprocessing failed, using original...")
+            
+            # Extract content using Docling
+            self.progress.emit("Extracting content...")
+            converter = DocumentConverter()
+            result = converter.convert(self.pdf_path)
+            
+            # Process extraction results
+            content = {
+                'html': result.document.export_to_html(),
+                'markdown': result.document.export_to_markdown(),
+                'chunks': [],
+                'tables': []
+            }
+            
+            # Extract structured chunks with positioning
+            chunk_index = 0
+            for item, level in result.document.iterate_items():
+                item_type = type(item).__name__
+                
+                chunk = {
+                    'index': chunk_index,
+                    'type': item_type.lower().replace('item', ''),
+                    'content': getattr(item, 'text', str(item)),
+                    'level': level,
+                    'page': getattr(item, 'prov', [{}])[0].get('page_no', 0) if hasattr(item, 'prov') else 0,
+                    'bbox': getattr(item, 'prov', [{}])[0].get('bbox', {}) if hasattr(item, 'prov') else {}
+                }
+                content['chunks'].append(chunk)
+                chunk_index += 1
+                
+                # Extract tables separately
+                if item_type == 'TableItem' and hasattr(item, 'export_to_dataframe'):
+                    try:
+                        df = item.export_to_dataframe()
+                        table_data = {
+                            'index': len(content['tables']),
+                            'data': df.values.tolist(),
+                            'headers': df.columns.tolist(),
+                            'page': chunk['page'],
+                            'bbox': chunk['bbox']
+                        }
+                        content['tables'].append(table_data)
+                    except:
+                        pass
+            
+            # Cleanup
+            if temp_pdf:
+                os.unlink(temp_pdf.name)
+            
+            self.finished.emit(content)
+            
+        except Exception as e:
+            if temp_pdf:
+                os.unlink(temp_pdf.name)
+            self.error.emit(str(e))
+    
+    def needs_preprocessing(self, pdf_path: str) -> bool:
+        """Check if PDF needs preprocessing."""
+        try:
+            doc = fitz.open(pdf_path)
+            needs_clean = False
+            
+            # Check first few pages for quality issues
+            for page_num in range(min(3, doc.page_count)):
+                page = doc[page_num]
+                text = page.get_text()
+                
+                # Heuristics for determining if preprocessing is needed
+                if len(text.strip()) < 50:  # Very little text
+                    needs_clean = True
+                if page.first_annot:  # Has annotations
+                    needs_clean = True
+                    
+            doc.close()
+            return needs_clean
+            
         except:
-            pass
-    
-    # Fallback to default browser
-    print("Opening editor in default browser...")
-    if system == "Darwin":
-        subprocess.run(["open", file_url])
-    elif system == "Linux":
-        subprocess.run(["xdg-open", file_url])
-    elif system == "Windows":
-        subprocess.run(["start", file_url], shell=True)
-    
-    return True
+            return False
 
 
-def process_pdf_document(pdf_file: str) -> str:
-    """Process PDF document using Docling and generate WYSIWYG editor."""
+class ChonkerMainWindow(QMainWindow):
+    """Main application window with PDF viewer and content editor."""
     
-    if not os.path.exists(pdf_file):
-        print(f"Error: File '{pdf_file}' not found")
-        return None
+    def __init__(self):
+        super().__init__()
+        self.db = DatabaseManager()
+        self.current_document_id = None
+        self.extracted_content = None
+        self.bidirectional_selector = None
+        self.init_ui()
     
-    print(f"Processing {pdf_file}...")
+    def init_ui(self):
+        self.setWindowTitle("🐹 CHONKER - PDF Document Extraction & QC")
+        self.setGeometry(100, 100, 1600, 1000)
+        
+        # Central widget
+        central_widget = QWidget()
+        self.setCentralWidget(central_widget)
+        layout = QVBoxLayout(central_widget)
+        
+        # Top toolbar
+        toolbar_layout = QHBoxLayout()
+        
+        self.open_btn = QPushButton("📂 Open PDF")
+        self.open_btn.clicked.connect(self.open_pdf)
+        toolbar_layout.addWidget(self.open_btn)
+        
+        self.extract_btn = QPushButton("🔍 Extract Content")
+        self.extract_btn.clicked.connect(self.extract_content)
+        self.extract_btn.setEnabled(False)
+        toolbar_layout.addWidget(self.extract_btn)
+        
+        self.save_db_btn = QPushButton("💾 Save to Database")
+        self.save_db_btn.clicked.connect(self.save_to_database)
+        self.save_db_btn.setEnabled(False)
+        toolbar_layout.addWidget(self.save_db_btn)
+        
+        self.recent_btn = QPushButton("📋 Recent Documents")
+        self.recent_btn.clicked.connect(self.show_recent_documents)
+        toolbar_layout.addWidget(self.recent_btn)
+        
+        toolbar_layout.addStretch()
+        
+        # Quality indicator
+        self.quality_label = QLabel("Quality: Not assessed")
+        toolbar_layout.addWidget(self.quality_label)
+        
+        layout.addLayout(toolbar_layout)
+        
+        # Progress bar
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setVisible(False)
+        layout.addWidget(self.progress_bar)
+        
+        # Main splitter
+        self.splitter = QSplitter(Qt.Orientation.Horizontal)
+        layout.addWidget(self.splitter)
+        
+        # Left side - PDF viewer
+        self.setup_pdf_viewer()
+        
+        # Right side - Extracted content tabs
+        self.setup_content_viewer()
+        
+        # Status bar
+        self.status_bar = QStatusBar()
+        self.setStatusBar(self.status_bar)
+        self.status_bar.showMessage("Ready - Open a PDF to begin")
     
-    try:
-        # Import Docling
-        from docling.document_converter import DocumentConverter
-    except ImportError:
-        print("Error: Docling not installed. Please install with: pip install docling")
-        return None
+    def setup_pdf_viewer(self):
+        """Set up the PDF viewer pane."""
+        pdf_widget = QWidget()
+        pdf_layout = QVBoxLayout(pdf_widget)
+        
+        # PDF controls
+        controls_layout = QHBoxLayout()
+        self.prev_page_btn = QPushButton("← Previous")
+        self.prev_page_btn.clicked.connect(self.prev_page)
+        self.next_page_btn = QPushButton("Next →")
+        self.next_page_btn.clicked.connect(self.next_page)
+        self.page_label = QLabel("Page 1 of 1")
+        
+        controls_layout.addWidget(self.prev_page_btn)
+        controls_layout.addWidget(self.page_label)
+        controls_layout.addWidget(self.next_page_btn)
+        controls_layout.addStretch()
+        
+        pdf_layout.addLayout(controls_layout)
+        
+        # PDF viewer
+        self.pdf_view = QPdfView(pdf_widget)
+        self.pdf_document = QPdfDocument(self)
+        self.pdf_view.setDocument(self.pdf_document)
+        pdf_layout.addWidget(self.pdf_view)
+        
+        self.splitter.addWidget(pdf_widget)
     
-    # Convert PDF using Docling
-    converter = DocumentConverter()
-    result = converter.convert(pdf_file)
+    def setup_content_viewer(self):
+        """Set up the extracted content viewer with tabs."""
+        self.content_tabs = QTabWidget()
+        
+        # HTML content tab
+        self.html_viewer = QTextEdit()
+        self.html_viewer.setReadOnly(True)
+        self.content_tabs.addTab(self.html_viewer, "Extracted HTML")
+        
+        # Markdown content tab
+        self.markdown_viewer = QTextEdit()
+        self.markdown_viewer.setReadOnly(True)
+        self.content_tabs.addTab(self.markdown_viewer, "Markdown")
+        
+        # Chunks tab for detailed view
+        self.chunks_table = QTableWidget()
+        self.chunks_table.setColumnCount(5)
+        self.chunks_table.setHorizontalHeaderLabels(["Type", "Content", "Page", "Level", "Confidence"])
+        self.content_tabs.addTab(self.chunks_table, "Content Chunks")
+        
+        # Tables tab
+        self.tables_widget = QWidget()
+        self.content_tabs.addTab(self.tables_widget, "Extracted Tables")
+        
+        self.splitter.addWidget(self.content_tabs)
+        self.splitter.setSizes([800, 800])
+        
+        # Initialize bidirectional selector after UI is created
+        self.bidirectional_selector = BidirectionalSelector(
+            self.pdf_view, self.content_tabs, self.chunks_table
+        )
     
-    # Extract content with enhanced options to capture all elements
-    document_text = result.document.export_to_markdown()
-    native_html = result.document.export_to_html()
+    def open_pdf(self):
+        """Open a PDF file."""
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, "Open PDF", "", "PDF Files (*.pdf)"
+        )
+        
+        if file_path:
+            self.current_pdf_path = file_path
+            self.pdf_document.load(file_path)
+            self.extract_btn.setEnabled(True)
+            self.update_page_label()
+            self.status_bar.showMessage(f"Loaded: {os.path.basename(file_path)}")
+            
+            # Check if already in database
+            file_hash = self.calculate_file_hash(file_path)
+            existing_doc = self.db.get_document_by_hash(file_hash)
+            if existing_doc:
+                self.status_bar.showMessage(f"Document already in database (ID: {existing_doc['id']})")
     
-    # Extract tables (if any)
-    tables = []
-    for table in result.document.tables:
-        tables.append({
-            'data': table.export_to_dataframe().to_dict('records') if hasattr(table, 'export_to_dataframe') else [],
-            'caption': getattr(table, 'caption', '')
-        })
+    def extract_content(self):
+        """Extract content from the loaded PDF."""
+        if not hasattr(self, 'current_pdf_path'):
+            return
+        
+        self.progress_bar.setVisible(True)
+        self.progress_bar.setRange(0, 0)  # Indeterminate
+        self.extract_btn.setEnabled(False)
+        
+        # Start extraction in background
+        self.extraction_worker = ExtractionWorker(self.current_pdf_path)
+        self.extraction_worker.finished.connect(self.on_extraction_finished)
+        self.extraction_worker.progress.connect(self.status_bar.showMessage)
+        self.extraction_worker.error.connect(self.on_extraction_error)
+        self.extraction_worker.start()
     
-    print(f"Extracted {len(tables)} tables from document")
-    print(f"Document has {len(document_text)} characters of content")
+    def on_extraction_finished(self, content: dict):
+        """Handle completed extraction."""
+        self.extracted_content = content
+        self.progress_bar.setVisible(False)
+        self.extract_btn.setEnabled(True)
+        self.save_db_btn.setEnabled(True)
+        
+        # Populate content viewers
+        self.html_viewer.setHtml(content['html'])
+        self.markdown_viewer.setPlainText(content['markdown'])
+        
+        # Populate chunks table
+        self.populate_chunks_table(content['chunks'])
+        
+        # Update bidirectional selector with chunk data
+        if self.bidirectional_selector:
+            self.bidirectional_selector.set_chunks(content['chunks'])
+        
+        self.status_bar.showMessage("Extraction completed - Review content for quality")
     
-    # Extract metadata
-    metadata = {
-        'title': getattr(result.document, 'title', os.path.basename(pdf_file)),
-        'source': pdf_file
-    }
+    def on_extraction_error(self, error: str):
+        """Handle extraction errors."""
+        self.progress_bar.setVisible(False)
+        self.extract_btn.setEnabled(True)
+        QMessageBox.critical(self, "Extraction Error", f"Failed to extract content:\n{error}")
+        self.status_bar.showMessage("Extraction failed")
     
-    # Generate the WYSIWYG editor
-    output_path = "chonker_editor.html"
-    result_path = generate_wysiwyg_editor(
-        document_text=document_text,
-        tables=tables,
-        metadata=metadata,
-        output_path=output_path,
-        native_html=native_html,
-        pdf_file=os.path.abspath(pdf_file)
-    )
+    def populate_chunks_table(self, chunks: List[Dict]):
+        """Populate the chunks table with extracted content."""
+        self.chunks_table.setRowCount(len(chunks))
+        
+        for i, chunk in enumerate(chunks):
+            self.chunks_table.setItem(i, 0, QTableWidgetItem(chunk['type']))
+            content_preview = chunk['content'][:100] + "..." if len(chunk['content']) > 100 else chunk['content']
+            self.chunks_table.setItem(i, 1, QTableWidgetItem(content_preview))
+            self.chunks_table.setItem(i, 2, QTableWidgetItem(str(chunk['page'])))
+            self.chunks_table.setItem(i, 3, QTableWidgetItem(str(chunk['level'])))
+            self.chunks_table.setItem(i, 4, QTableWidgetItem("N/A"))  # Confidence placeholder
+        
+        self.chunks_table.resizeColumnsToContents()
     
-    print(f"WYSIWYG editor generated: {result_path}")
-    return result_path
+    def save_to_database(self):
+        """Save extracted content to database."""
+        if not self.extracted_content:
+            return
+        
+        try:
+            # Calculate file hash
+            file_hash = self.calculate_file_hash(self.current_pdf_path)
+            filename = os.path.basename(self.current_pdf_path)
+            
+            # Check if already exists
+            existing_doc = self.db.get_document_by_hash(file_hash)
+            if existing_doc:
+                reply = QMessageBox.question(
+                    self, "Document Exists", 
+                    "This document is already in the database. Update it?",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+                )
+                if reply == QMessageBox.StandardButton.No:
+                    return
+                document_id = existing_doc['id']
+            else:
+                # Add new document
+                document_id = self.db.add_document(filename, self.current_pdf_path, file_hash)
+            
+            # Save extracted content
+            self.db.save_extracted_content(document_id, 'html', self.extracted_content['html'])
+            self.db.save_extracted_content(document_id, 'markdown', self.extracted_content['markdown'])
+            
+            self.current_document_id = document_id
+            self.status_bar.showMessage(f"Saved to database (ID: {document_id})")
+            QMessageBox.information(self, "Success", f"Document saved to database with ID: {document_id}")
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Database Error", f"Failed to save to database:\n{str(e)}")
+    
+    def show_recent_documents(self):
+        """Show recently processed documents."""
+        recent_docs = self.db.get_recent_documents()
+        
+        # Simple dialog showing recent documents
+        msg = "Recent Documents:\n\n"
+        for doc in recent_docs[:10]:
+            msg += f"ID {doc['id']}: {doc['filename']} ({doc['processed_date']})\n"
+        
+        QMessageBox.information(self, "Recent Documents", msg)
+    
+    def calculate_file_hash(self, file_path: str) -> str:
+        """Calculate SHA-256 hash of file."""
+        hasher = hashlib.sha256()
+        with open(file_path, 'rb') as f:
+            for chunk in iter(lambda: f.read(4096), b""):
+                hasher.update(chunk)
+        return hasher.hexdigest()
+    
+    def prev_page(self):
+        """Navigate to previous page."""
+        nav = self.pdf_view.pageNavigator()
+        if nav and nav.currentPage() > 0:
+            nav.jump(nav.currentPage() - 1, QPointF())
+            self.update_page_label()
+    
+    def next_page(self):
+        """Navigate to next page."""
+        nav = self.pdf_view.pageNavigator()
+        if nav and nav.currentPage() < self.pdf_document.pageCount() - 1:
+            nav.jump(nav.currentPage() + 1, QPointF())
+            self.update_page_label()
+    
+    def update_page_label(self):
+        """Update page navigation label."""
+        if self.pdf_document.pageCount() > 0:
+            nav = self.pdf_view.pageNavigator()
+            current = nav.currentPage() + 1 if nav else 1
+            total = self.pdf_document.pageCount()
+            self.page_label.setText(f"Page {current} of {total}")
 
 
 def main():
-    """Main function to process PDF and launch WYSIWYG editor."""
+    if not DEPENDENCIES_AVAILABLE:
+        print("🐹 Error: CHONKER needs dependencies! Please install:")
+        print("  pip install docling PyMuPDF")
+        sys.exit(1)
     
-    pdf_file = None
+    app = QApplication(sys.argv)
+    app.setApplicationName("CHONKER")
     
-    # Check if a file was provided via command line
-    if len(sys.argv) == 2:
-        pdf_file = sys.argv[1]
-        print(f"Processing file from command line: {pdf_file}")
-    else:
-        # Show native file picker directly
-        print("Opening native file picker...")
-        pdf_file = create_native_file_picker()
-        
-        if not pdf_file:
-            print("No file selected. Exiting.")
-            sys.exit(0)
-        
-        print(f"Selected file: {pdf_file}")
+    window = ChonkerMainWindow()
+    window.show()
     
-    # Process the PDF document
-    html_file = process_pdf_document(pdf_file)
-    
-    if html_file:
-        # Launch the browser
-        print("Launching 🐹 CHONKER editor...")
-        success = launch_browser(html_file)
-        
-        if success:
-            print("\n🐹 CHONKER editor launched successfully!")
-            print("\nFeatures:")
-            print("- PDF viewer in left iframe - scrolls independently!")
-            print("- CKEditor in right iframe - scrolls independently!")
-            print("- Use navigation buttons to control PDF")
-            print("- Full table editing support in CKEditor")
-            print("- Save button exports edited content")
-            print("\nNote: Keep this terminal open while using the editor.")
-        else:
-            print("Failed to launch browser")
-    else:
-        print("Failed to process PDF document")
+    sys.exit(app.exec())
 
 
 if __name__ == "__main__":

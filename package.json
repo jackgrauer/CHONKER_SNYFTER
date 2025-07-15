@@ -1,37 +1,18 @@
 {
   "name": "chonker-snyfter",
   "version": "1.0.0",
-  "description": "🐹 CHONKER SNYFTER - Document Processing Pipeline",
+  "description": "🐹 CHONKER & 🐁 SNYFTER - Character-driven PDF processing",
   "private": true,
   "scripts": {
-    "build": "turbo run build",
     "dev": "turbo run dev",
-    "lint": "turbo run lint",
+    "build": "turbo run build",
     "test": "turbo run test",
-    "clean": "turbo run clean",
-    "chonker": "just chonker",
-    "service": "just service",
-    "status": "just status"
+    "lint": "turbo run lint",
+    "chonker": "turbo run chonker:extract",
+    "snyfter": "turbo run snyfter:catalog"
   },
-  "keywords": [
-    "document-processing",
-    "docling",
-    "python",
-    "fastapi",
-    "html-editor",
-    "turborepo"
-  ],
-  "author": "Jack",
-  "license": "MIT",
   "devDependencies": {
-    "turbo": "^2.5.4"
+    "turbo": "latest"
   },
-  "workspaces": [
-    "apps/*",
-    "packages/*"
-  ],
-  "engines": {
-    "node": ">=18.0.0"
-  },
-  "packageManager": "npm@10.0.0"
+  "packageManager": "npm@9.0.0"
 }
