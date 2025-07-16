@@ -22,6 +22,7 @@ import sqlite3
 import json
 import hashlib
 import tempfile
+import subprocess
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any
 from datetime import datetime
@@ -646,6 +647,9 @@ class ChonkerSnyfterEnhancedWindow(QMainWindow):
         self.current_pdf_path = None
         self.processing_thread = None
         
+        # 🛡️ Caffeinate process to defend against sleep/logout
+        self.caffeinate_process = None
+        self.start_caffeinate_defense()
         
         # Load emoji assets with error handling
         self.load_assets()
@@ -653,6 +657,56 @@ class ChonkerSnyfterEnhancedWindow(QMainWindow):
         self.init_ui()
         self.apply_modern_theme()
         
+    
+    def start_caffeinate_defense(self):
+        """🛡️ Start caffeinate to prevent system sleep/logout - DEFEND AGAINST THE MACHINE!"""
+        try:
+            # Kill any existing caffeinate process
+            if self.caffeinate_process and self.caffeinate_process.poll() is None:
+                self.caffeinate_process.terminate()
+            
+            # Start caffeinate with display sleep prevention (-d), system sleep prevention (-i), 
+            # and user idle prevention (-u) to prevent auto logout
+            self.caffeinate_process = subprocess.Popen(
+                ['caffeinate', '-diu'],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL
+            )
+            
+            print("🛡️ CAFFEINATE DEFENSE ACTIVATED! I shall not sleep! I shall not yield!")
+            print("☕ Brewing infinite coffee to keep the system awake...")
+            
+        except Exception as e:
+            print(f"⚠️ Caffeinate defense failed to activate: {e}")
+            print("🐹 But CHONKER will keep munching regardless!")
+    
+    def stop_caffeinate_defense(self):
+        """🛑 Stop caffeinate when closing the app"""
+        if self.caffeinate_process and self.caffeinate_process.poll() is None:
+            self.caffeinate_process.terminate()
+            print("☕ Caffeinate defense deactivated. System may sleep now.")
+    
+    def update_terminal(self, message: str):
+        """💬 Update the terminal display in the top bar"""
+        if hasattr(self, 'terminal_display'):
+            # Add timestamp
+            timestamp = datetime.now().strftime("%H:%M:%S")
+            formatted_message = f"[{timestamp}] {message}"
+            
+            # Keep last 100 messages
+            current_text = self.terminal_display.toPlainText()
+            lines = current_text.split('\n') if current_text else []
+            lines.append(formatted_message)
+            if len(lines) > 100:
+                lines = lines[-100:]
+            
+            self.terminal_display.setPlainText('\n'.join(lines))
+            # Scroll to bottom
+            scrollbar = self.terminal_display.verticalScrollBar()
+            scrollbar.setValue(scrollbar.maximum())
+        else:
+            # Fallback to console if terminal_display not initialized
+            print(f"💬 {message}")
     
     def load_assets(self):
         """Load emoji assets with fallback"""
@@ -698,33 +752,391 @@ class ChonkerSnyfterEnhancedWindow(QMainWindow):
         return pixmap
     
     def init_ui(self):
-        """Initialize the enhanced UI"""
-        self.setWindowTitle("CHONKER & SNYFTER - Enhanced Document Processing System")
-        self.setGeometry(100, 100, 1600, 1000)
+        """Initialize the enhanced UI with modern Notion-style design"""
+        self.setWindowTitle("CHONKER & SNYFTER")
         
-        # Central widget
+        # Start maximized/full-screen as requested
+        self.showMaximized()
+        
+        # Create modern menu bar first
+        self.create_modern_menu_bar()
+        
+        # Central widget with no margins for edge-to-edge design
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
         main_layout = QVBoxLayout(central_widget)
         main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
         
-        # Create unified top bar
-        self.create_unified_top_bar(main_layout)
+        # Create slim modern top bar (reduced height)
+        self.create_modern_top_bar(main_layout)
         
-        # Main content area
-        self.stacked_widget = QStackedWidget()
-        main_layout.addWidget(self.stacked_widget)
+        # Main content area with floating panels support
+        self.content_container = QWidget()
+        self.content_layout = QVBoxLayout(self.content_container)
+        self.content_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.addWidget(self.content_container)
         
-        # Create both interfaces
+        # Initialize floating panels system
+        self.floating_panels = {}
+        self.init_floating_panels()
+        
+        # Create interfaces
         self.chonker_widget = self.create_enhanced_chonker_interface()
         self.snyfter_widget = self.create_enhanced_snyfter_interface()
         
-        self.stacked_widget.addWidget(self.chonker_widget)
-        self.stacked_widget.addWidget(self.snyfter_widget)
+        # Initialize faithful output for processing
+        self.faithful_output = QTextEdit()
+        self.faithful_output.hide()  # Hidden by default
         
-        # Start in CHONKER mode with welcome message
+        # Apply modern monochrome theme
+        self.apply_modern_theme()
+        
+        # Initialize status messages before setting mode
+        self.add_visual_feedback_effects()
+        
+        # Start in CHONKER mode with welcome
         self.set_mode(Mode.CHONKER)
         self.show_welcome_message()
+    
+    def create_modern_menu_bar(self):
+        """Create Notion-style menu bar with File/Edit/View/Window/Help"""
+        menubar = self.menuBar()
+        menubar.setNativeMenuBar(False)  # Force custom style
+        
+        # File menu
+        file_menu = menubar.addMenu("File")
+        
+        new_action = QAction("New Session", self)
+        new_action.setShortcut("Ctrl+N")
+        new_action.triggered.connect(self.new_session)
+        file_menu.addAction(new_action)
+        
+        open_action = QAction("Open PDF...", self)
+        open_action.setShortcut("Ctrl+O")
+        open_action.triggered.connect(self.open_pdf)
+        file_menu.addAction(open_action)
+        
+        file_menu.addSeparator()
+        
+        recent_menu = file_menu.addMenu("Recent Files")
+        self.update_recent_files_menu(recent_menu)
+        
+        file_menu.addSeparator()
+        
+        export_action = QAction("Export...", self)
+        export_action.setShortcut("Ctrl+E")
+        export_action.triggered.connect(self.export_current)
+        file_menu.addAction(export_action)
+        
+        # Edit menu
+        edit_menu = menubar.addMenu("Edit")
+        
+        cmd_palette_action = QAction("Command Palette", self)
+        cmd_palette_action.setShortcut("Ctrl+K")
+        cmd_palette_action.triggered.connect(self.show_command_palette)
+        edit_menu.addAction(cmd_palette_action)
+        
+        edit_menu.addSeparator()
+        
+        find_action = QAction("Find...", self)
+        find_action.setShortcut("Ctrl+F")
+        find_action.triggered.connect(self.show_find_dialog)
+        edit_menu.addAction(find_action)
+        
+        # View menu
+        view_menu = menubar.addMenu("View")
+        
+        toggle_pdf_action = QAction("Toggle PDF Panel", self)
+        toggle_pdf_action.setShortcut("Ctrl+1")
+        toggle_pdf_action.triggered.connect(lambda: self.toggle_panel("pdf"))
+        view_menu.addAction(toggle_pdf_action)
+        
+        toggle_output_action = QAction("Toggle Output Panel", self)
+        toggle_output_action.setShortcut("Ctrl+2")
+        toggle_output_action.triggered.connect(lambda: self.toggle_panel("output"))
+        view_menu.addAction(toggle_output_action)
+        
+        view_menu.addSeparator()
+        
+        theme_menu = view_menu.addMenu("Theme")
+        light_theme = QAction("Light", self)
+        light_theme.triggered.connect(lambda: self.apply_theme("light"))
+        theme_menu.addAction(light_theme)
+        
+        dark_theme = QAction("Dark", self)
+        dark_theme.triggered.connect(lambda: self.apply_theme("dark"))
+        theme_menu.addAction(dark_theme)
+        
+        system_theme = QAction("System", self)
+        system_theme.setChecked(True)
+        system_theme.triggered.connect(lambda: self.apply_theme("system"))
+        theme_menu.addAction(system_theme)
+        
+        # Window menu
+        window_menu = menubar.addMenu("Window")
+        
+        new_window_action = QAction("New Window", self)
+        new_window_action.setShortcut("Ctrl+Shift+N")
+        new_window_action.triggered.connect(self.new_window)
+        window_menu.addAction(new_window_action)
+        
+        window_menu.addSeparator()
+        
+        minimize_action = QAction("Minimize", self)
+        minimize_action.setShortcut("Ctrl+M")
+        minimize_action.triggered.connect(self.showMinimized)
+        window_menu.addAction(minimize_action)
+        
+        # Help menu
+        help_menu = menubar.addMenu("Help")
+        
+        shortcuts_action = QAction("Keyboard Shortcuts", self)
+        shortcuts_action.triggered.connect(self.show_shortcuts_dialog)
+        help_menu.addAction(shortcuts_action)
+        
+        about_action = QAction("About CHONKER & SNYFTER", self)
+        about_action.triggered.connect(self.show_about_dialog)
+        help_menu.addAction(about_action)
+    
+    def create_modern_top_bar(self, parent_layout):
+        """Create slim modern top bar with minimal controls"""
+        top_bar = QWidget()
+        top_bar.setObjectName("modernTopBar")
+        top_bar.setFixedHeight(40)  # Slimmer than before
+        top_bar_layout = QHBoxLayout(top_bar)
+        top_bar_layout.setContentsMargins(12, 4, 12, 4)
+        top_bar_layout.setSpacing(16)
+        
+        # Left side - Character mode toggle (compact)
+        mode_container = QWidget()
+        mode_layout = QHBoxLayout(mode_container)
+        mode_layout.setContentsMargins(0, 0, 0, 0)
+        mode_layout.setSpacing(8)
+        
+        # Compact CHONKER button
+        self.chonker_btn = QPushButton()
+        self.chonker_btn.setFixedSize(80, 32)
+        self.chonker_btn.clicked.connect(lambda: self.set_mode(Mode.CHONKER))
+        chonker_layout = QHBoxLayout(self.chonker_btn)
+        chonker_layout.setContentsMargins(6, 2, 6, 2)
+        chonker_layout.setSpacing(4)
+        
+        chonker_icon = QLabel()
+        chonker_icon.setPixmap(self.chonker_pixmap.scaled(20, 20, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
+        chonker_layout.addWidget(chonker_icon)
+        
+        chonker_text = QLabel("CHONKER")
+        chonker_text.setStyleSheet("font-weight: 600; font-size: 10px;")
+        chonker_layout.addWidget(chonker_text)
+        
+        mode_layout.addWidget(self.chonker_btn)
+        self.chonker_btn.setToolTip("🐹 CHONKER Mode - PDF Processing\n(Press Tab to switch)")
+        
+        # Compact SNYFTER button
+        self.snyfter_btn = QPushButton()
+        self.snyfter_btn.setFixedSize(80, 32)
+        self.snyfter_btn.clicked.connect(lambda: self.set_mode(Mode.SNYFTER))
+        snyfter_layout = QHBoxLayout(self.snyfter_btn)
+        snyfter_layout.setContentsMargins(6, 2, 6, 2)
+        snyfter_layout.setSpacing(4)
+        
+        snyfter_icon = QLabel()
+        snyfter_icon.setPixmap(self.snyfter_pixmap.scaled(20, 20, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
+        snyfter_layout.addWidget(snyfter_icon)
+        
+        snyfter_text = QLabel("SNYFTER")
+        snyfter_text.setStyleSheet("font-weight: 600; font-size: 10px;")
+        snyfter_layout.addWidget(snyfter_text)
+        
+        mode_layout.addWidget(self.snyfter_btn)
+        self.snyfter_btn.setToolTip("🐁 SNYFTER Mode - Search & Archive\n(Press Tab to switch)")
+        
+        top_bar_layout.addWidget(mode_container)
+        
+        # Center - Breadcrumb navigation
+        self.breadcrumb_label = QLabel("")
+        self.breadcrumb_label.setStyleSheet("color: #666; font-size: 12px;")
+        top_bar_layout.addWidget(self.breadcrumb_label)
+        
+        top_bar_layout.addStretch()
+        
+        # Right side - Quick actions and status
+        quick_actions = QHBoxLayout()
+        quick_actions.setSpacing(8)
+        
+        # Command palette button
+        cmd_btn = QPushButton("⌘K")
+        cmd_btn.setFixedSize(32, 32)
+        cmd_btn.setToolTip("Command Palette (Ctrl+K)")
+        cmd_btn.clicked.connect(self.show_command_palette)
+        quick_actions.addWidget(cmd_btn)
+        
+        # Terminal display (shows status messages)
+        self.terminal_display = QTextEdit()
+        self.terminal_display.setFixedHeight(32)
+        self.terminal_display.setReadOnly(True)
+        self.terminal_display.setStyleSheet("""
+            QTextEdit {
+                background-color: #1E1E1E;
+                color: #00FF00;
+                font-family: 'Courier New', monospace;
+                font-size: 10px;
+                border: 1px solid #333;
+                border-radius: 4px;
+                padding: 2px 4px;
+            }
+            QTextEdit:focus {
+                border-color: #00FF00;
+            }
+        """)
+        self.terminal_display.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.terminal_display.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        top_bar_layout.addWidget(self.terminal_display, stretch=1)
+        
+        # Status indicator
+        self.status_indicator = QLabel("●")
+        self.status_indicator.setStyleSheet("color: #4CAF50; font-size: 16px;")
+        self.status_indicator.setToolTip("Ready")
+        quick_actions.addWidget(self.status_indicator)
+        
+        top_bar_layout.addLayout(quick_actions)
+        
+        parent_layout.addWidget(top_bar)
+    
+    def init_floating_panels(self):
+        """Initialize the floating panels system"""
+        # This will hold our floating panel windows
+        self.panel_windows = {}
+        
+        # Default panel configuration
+        self.panel_configs = {
+            'pdf': {'title': '🐹 PDF Viewer', 'size': (600, 800)},
+            'output': {'title': '🌐 Output', 'size': (800, 600)},
+            'search': {'title': '🐁 Search', 'size': (400, 600)},
+            'chunks': {'title': '📊 Chunks', 'size': (600, 400)}
+        }
+    
+    def apply_modern_theme(self):
+        """Apply modern monochrome theme with sharp angles"""
+        self.setStyleSheet("""
+            /* Modern monochrome palette */
+            QMainWindow {
+                background-color: #FFFFFF;
+                color: #000000;
+            }
+            
+            /* Menu bar styling */
+            QMenuBar {
+                background-color: #FAFAFA;
+                border-bottom: 1px solid #E0E0E0;
+                padding: 4px;
+            }
+            
+            QMenuBar::item {
+                padding: 4px 12px;
+                background: transparent;
+                color: #333333;
+            }
+            
+            QMenuBar::item:selected {
+                background: #F0F0F0;
+            }
+            
+            QMenu {
+                background-color: #FFFFFF;
+                border: 1px solid #E0E0E0;
+                padding: 4px 0;
+            }
+            
+            QMenu::item {
+                padding: 6px 24px;
+                color: #333333;
+            }
+            
+            QMenu::item:selected {
+                background-color: #F5F5F5;
+            }
+            
+            /* Modern top bar */
+            QWidget#modernTopBar {
+                background: #FAFAFA;
+                border-bottom: 1px solid #E0E0E0;
+            }
+            
+            /* Sharp-angled buttons */
+            QPushButton {
+                background: #FFFFFF;
+                border: 1px solid #D0D0D0;
+                padding: 6px 12px;
+                font-weight: 500;
+                color: #333333;
+            }
+            
+            QPushButton:hover {
+                background: #F5F5F5;
+                border-color: #BBBBBB;
+            }
+            
+            QPushButton:pressed {
+                background: #EEEEEE;
+            }
+            
+            /* Mode buttons active state */
+            QPushButton#active_mode {
+                background: #333333;
+                color: #FFFFFF;
+                border: 1px solid #333333;
+            }
+            
+            /* Text inputs */
+            QLineEdit, QTextEdit {
+                border: 1px solid #D0D0D0;
+                padding: 6px;
+                background: #FFFFFF;
+                selection-background-color: #E0E0E0;
+            }
+            
+            /* Tables with stripes */
+            QTableWidget {
+                border: 1px solid #D0D0D0;
+                gridline-color: #E0E0E0;
+                background-color: #FFFFFF;
+                alternate-background-color: #FAFAFA;
+            }
+            
+            QTableWidget::item {
+                padding: 4px;
+            }
+            
+            QTableWidget::item:selected {
+                background-color: #E0E0E0;
+                color: #000000;
+            }
+            
+            /* Scrollbars */
+            QScrollBar:vertical {
+                border: none;
+                background: #F5F5F5;
+                width: 12px;
+            }
+            
+            QScrollBar::handle:vertical {
+                background: #CCCCCC;
+                min-height: 20px;
+            }
+            
+            QScrollBar::handle:vertical:hover {
+                background: #BBBBBB;
+            }
+            
+            /* Status bar */
+            QStatusBar {
+                background: #FAFAFA;
+                border-top: 1px solid #E0E0E0;
+                color: #666666;
+            }
+        """)
     
     def create_unified_top_bar(self, parent_layout):
         """Create single unified top bar with all controls"""
@@ -897,17 +1309,7 @@ class ChonkerSnyfterEnhancedWindow(QMainWindow):
         # Smooth animations for mode switching
         from PyQt6.QtCore import QPropertyAnimation, QEasingCurve
         
-        # Create processing animation for progress bar
-        self.progress_animation = QPropertyAnimation(self.progress_bar, b"value")
-        self.progress_animation.setDuration(300)
-        self.progress_animation.setEasingCurve(QEasingCurve.Type.OutCubic)
-        
-        # Add tooltips for better UX
-        self.chonker_btn.setToolTip("🐹 CHONKER Mode - PDF Processing\n(Press Tab to switch)")
-        self.snyfter_btn.setToolTip("🐁 SNYFTER Mode - Search & Archive\n(Press Tab to switch)")
-        self.open_btn.setToolTip("Open PDF file (Ctrl+O)")
-        self.process_btn.setToolTip("Process current PDF (Ctrl+P)")
-        self.export_btn.setToolTip("Export processed content")
+        # Tooltips will be added when buttons are created
         
         # Add status messages with character personality
         self.status_messages = {
@@ -921,11 +1323,25 @@ class ChonkerSnyfterEnhancedWindow(QMainWindow):
     
     def update_status_with_personality(self, status_key: str, custom_message: str = None):
         """Update status with character personality"""
-        if custom_message:
-            self.status_label.setText(custom_message)
-        else:
-            message = self.status_messages.get(status_key, "Ready")
-            self.status_label.setText(message)
+        if hasattr(self, 'status_indicator'):
+            # Update status indicator color
+            colors = {
+                'ready': '#4CAF50',      # Green
+                'loading': '#FF9800',    # Orange
+                'processing': '#2196F3', # Blue
+                'success': '#4CAF50',    # Green
+                'error': '#F44336',      # Red
+                'snyfter_mode': '#9C27B0' # Purple
+            }
+            color = colors.get(status_key, '#4CAF50')
+            self.status_indicator.setStyleSheet(f"color: {color}; font-size: 16px;")
+            
+            # Update tooltip
+            if custom_message:
+                self.status_indicator.setToolTip(custom_message)
+            else:
+                message = self.status_messages.get(status_key, "Ready")
+                self.status_indicator.setToolTip(message)
     
     def show_welcome_message(self):
         """Show a brief welcome message"""
@@ -939,8 +1355,237 @@ class ChonkerSnyfterEnhancedWindow(QMainWindow):
         if os.path.exists(doc_path):
             QTimer.singleShot(500, lambda: self.load_pdf(doc_path))
     
+    def show_command_palette(self):
+        """Show modern command palette (Cmd+K style)"""
+        from PyQt6.QtWidgets import QDialog, QDialogButtonBox
+        from PyQt6.QtCore import Qt
+        
+        class CommandPalette(QDialog):
+            def __init__(self, parent):
+                super().__init__(parent)
+                self.setWindowTitle("Command Palette")
+                self.setModal(True)
+                self.setWindowFlags(Qt.WindowType.FramelessWindowHint)
+                self.resize(600, 400)
+                
+                # Center on parent
+                parent_rect = parent.geometry()
+                x = parent_rect.x() + (parent_rect.width() - 600) // 2
+                y = parent_rect.y() + 100
+                self.move(x, y)
+                
+                layout = QVBoxLayout(self)
+                layout.setContentsMargins(0, 0, 0, 0)
+                
+                # Search input
+                self.search_input = QLineEdit()
+                self.search_input.setPlaceholderText("Type a command...")
+                self.search_input.setStyleSheet("""
+                    QLineEdit {
+                        border: none;
+                        border-bottom: 1px solid #E0E0E0;
+                        padding: 16px;
+                        font-size: 16px;
+                        background: #FAFAFA;
+                    }
+                """)
+                layout.addWidget(self.search_input)
+                
+                # Command list
+                self.command_list = QListWidget()
+                self.command_list.setStyleSheet("""
+                    QListWidget {
+                        border: none;
+                        background: #FFFFFF;
+                        font-size: 14px;
+                    }
+                    QListWidget::item {
+                        padding: 12px 16px;
+                        border-bottom: 1px solid #F0F0F0;
+                    }
+                    QListWidget::item:hover {
+                        background: #F5F5F5;
+                    }
+                    QListWidget::item:selected {
+                        background: #E0E0E0;
+                        color: #000000;
+                    }
+                """)
+                
+                # Add commands
+                commands = [
+                    ("Open PDF", "Ctrl+O", parent.open_pdf),
+                    ("Process Current PDF", "Ctrl+P", parent.process_current_pdf),
+                    ("Export...", "Ctrl+E", parent.export_current),
+                    ("Toggle PDF Panel", "Ctrl+1", lambda: parent.toggle_panel("pdf")),
+                    ("Toggle Output Panel", "Ctrl+2", lambda: parent.toggle_panel("output")),
+                    ("New Window", "Ctrl+Shift+N", parent.new_window),
+                    ("Switch to CHONKER Mode", "Tab", lambda: parent.set_mode(Mode.CHONKER)),
+                    ("Switch to SNYFTER Mode", "Tab", lambda: parent.set_mode(Mode.SNYFTER)),
+                    ("Find...", "Ctrl+F", parent.show_find_dialog),
+                    ("Recent Files", "", lambda: parent.show_recent_files()),
+                ]
+                
+                self.commands = commands
+                for cmd, shortcut, _ in commands:
+                    item_text = f"{cmd}"
+                    if shortcut:
+                        item_text += f"  ({shortcut})"
+                    self.command_list.addItem(item_text)
+                
+                layout.addWidget(self.command_list)
+                
+                # Connect signals
+                self.search_input.textChanged.connect(self.filter_commands)
+                self.search_input.returnPressed.connect(self.execute_command)
+                self.command_list.itemActivated.connect(self.execute_command)
+                
+                # Focus search
+                self.search_input.setFocus()
+            
+            def filter_commands(self, text):
+                """Filter commands based on search text"""
+                for i in range(self.command_list.count()):
+                    item = self.command_list.item(i)
+                    item.setHidden(text.lower() not in item.text().lower())
+            
+            def execute_command(self):
+                """Execute selected command"""
+                current_item = self.command_list.currentItem()
+                if current_item and not current_item.isHidden():
+                    index = self.command_list.row(current_item)
+                    _, _, action = self.commands[index]
+                    self.accept()
+                    action()
+            
+            def keyPressEvent(self, event):
+                if event.key() == Qt.Key.Key_Escape:
+                    self.reject()
+                else:
+                    super().keyPressEvent(event)
+        
+        palette = CommandPalette(self)
+        palette.exec()
+    
+    def toggle_panel(self, panel_name):
+        """Toggle floating panel visibility"""
+        if panel_name not in self.panel_windows:
+            self.create_floating_panel(panel_name)
+        else:
+            window = self.panel_windows[panel_name]
+            if window.isVisible():
+                window.hide()
+            else:
+                window.show()
+                window.raise_()
+    
+    def create_floating_panel(self, panel_name):
+        """Create a new floating panel window"""
+        config = self.panel_configs.get(panel_name, {})
+        
+        window = QWidget()
+        window.setWindowTitle(config.get('title', 'Panel'))
+        window.resize(*config.get('size', (600, 400)))
+        window.setWindowFlags(Qt.WindowType.Window)
+        
+        # Add content based on panel type
+        layout = QVBoxLayout(window)
+        
+        if panel_name == 'pdf':
+            # Move PDF viewer to floating window
+            if hasattr(self, 'pdf_view'):
+                layout.addWidget(self.pdf_view)
+        elif panel_name == 'output':
+            # Move output to floating window
+            if hasattr(self, 'faithful_output'):
+                layout.addWidget(self.faithful_output)
+        elif panel_name == 'search':
+            # Create search interface
+            search_widget = self.create_search_widget()
+            layout.addWidget(search_widget)
+        
+        self.panel_windows[panel_name] = window
+        window.show()
+    
+    def new_window(self):
+        """Create a new window instance"""
+        new_window = ChonkerSnyfterEnhancedWindow()
+        new_window.show()
+    
+    def update_recent_files_menu(self, menu):
+        """Update recent files menu"""
+        # TODO: Implement recent files tracking
+        menu.addAction("No recent files")
+    
+    def show_find_dialog(self):
+        """Show find dialog"""
+        # TODO: Implement find functionality
+        self.update_terminal("🔍 Find dialog coming soon!", "info")
+    
+    def apply_theme(self, theme_name):
+        """Apply selected theme"""
+        self.update_terminal(f"🎨 Applying {theme_name} theme", "info")
+        # TODO: Implement theme switching
+    
+    def show_shortcuts_dialog(self):
+        """Show keyboard shortcuts dialog"""
+        QMessageBox.information(self, "Keyboard Shortcuts", 
+            "Tab - Switch modes\n"
+            "Ctrl+O - Open PDF\n"
+            "Ctrl+P - Process PDF\n"
+            "Ctrl+K - Command Palette\n"
+            "Ctrl+E - Export\n"
+            "Ctrl+1 - Toggle PDF Panel\n"
+            "Ctrl+2 - Toggle Output Panel\n"
+            "Ctrl+F - Find\n"
+            "Ctrl+N - New Session\n"
+            "Ctrl+Shift+N - New Window")
+    
+    def show_about_dialog(self):
+        """Show about dialog"""
+        QMessageBox.about(self, "About CHONKER & SNYFTER",
+            "🐹 CHONKER & 🐁 SNYFTER\n\n"
+            "The Character-Driven PDF Processing System\n\n"
+            "Featuring the ACTUAL Android 7.1 emoji images!\n"
+            "Never trust Unicode rendering.")
+    
+    def show_recent_files(self):
+        """Show recent files dialog"""
+        self.update_terminal("📂 Recent files dialog coming soon!", "info")
+    
+    def create_search_widget(self):
+        """Create search widget for floating panel"""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        
+        search_input = QLineEdit()
+        search_input.setPlaceholderText("🐁 Search archives...")
+        layout.addWidget(search_input)
+        
+        results_list = QListWidget()
+        layout.addWidget(results_list)
+        
+        return widget
+    
     def create_enhanced_chonker_interface(self):
-        """Create clean CHONKER interface - Left: PDF, Right: Faithful Output"""
+        """Create CHONKER interface for modern floating panel system"""
+        # Simple container that starts empty - panels will float
+        container = QWidget()
+        layout = QVBoxLayout(container)
+        
+        # Welcome message for empty state
+        welcome = QLabel("🐹 Welcome to CHONKER!\n\nUse Ctrl+O to open a PDF\nor drag and drop a file here")
+        welcome.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        welcome.setStyleSheet("font-size: 18px; color: #666; padding: 60px;")
+        layout.addWidget(welcome)
+        
+        # Store reference for later
+        self.welcome_widget = welcome
+        
+        return container
+    
+    def create_enhanced_chonker_interface_old(self):
+        """Old interface - keeping for reference"""
         # Main horizontal splitter
         splitter = QSplitter(Qt.Orientation.Horizontal)
         
@@ -1015,7 +1660,58 @@ class ChonkerSnyfterEnhancedWindow(QMainWindow):
         return splitter
     
     def create_enhanced_snyfter_interface(self):
-        """Create clean SNYFTER interface - Left: Search, Right: Results"""
+        """Create SNYFTER interface for modern floating panel system"""
+        # Simple container for search
+        container = QWidget()
+        layout = QVBoxLayout(container)
+        
+        # Centered search interface
+        search_container = QWidget()
+        search_container.setMaximumWidth(600)
+        search_layout = QVBoxLayout(search_container)
+        
+        # SNYFTER welcome
+        welcome = QLabel("🐁 SNYFTER's Archive")
+        welcome.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        welcome.setStyleSheet("font-size: 24px; color: #333; padding: 20px;")
+        search_layout.addWidget(welcome)
+        
+        # Search input
+        self.search_input = QLineEdit()
+        self.search_input.setPlaceholderText("Search archived documents...")
+        self.search_input.setStyleSheet("""
+            QLineEdit {
+                padding: 12px;
+                font-size: 16px;
+                border: 2px solid #E0E0E0;
+            }
+        """)
+        self.search_input.returnPressed.connect(self.search_archives)
+        search_layout.addWidget(self.search_input)
+        
+        # Recent documents
+        recent_label = QLabel("Recent Documents")
+        recent_label.setStyleSheet("font-weight: 600; margin-top: 20px;")
+        search_layout.addWidget(recent_label)
+        
+        self.recent_list = QListWidget()
+        self.recent_list.setMaximumHeight(200)
+        search_layout.addWidget(self.recent_list)
+        
+        search_layout.addStretch()
+        
+        # Center the search container
+        h_layout = QHBoxLayout()
+        h_layout.addStretch()
+        h_layout.addWidget(search_container)
+        h_layout.addStretch()
+        
+        layout.addLayout(h_layout)
+        
+        return container
+    
+    def create_enhanced_snyfter_interface_old(self):
+        """Old interface - keeping for reference"""
         # Main horizontal splitter
         splitter = QSplitter(Qt.Orientation.Horizontal)
         
@@ -1199,9 +1895,21 @@ class ChonkerSnyfterEnhancedWindow(QMainWindow):
         
         # Update button styles and switch views
         if mode == Mode.CHONKER:
-            self.stacked_widget.setCurrentWidget(self.chonker_widget)
+            # Update content for CHONKER mode
+            if hasattr(self, 'content_layout'):
+                # Clear current content
+                while self.content_layout.count():
+                    item = self.content_layout.takeAt(0)
+                    if item.widget():
+                        item.widget().setParent(None)
+                
+                # Add CHONKER interface
+                self.content_layout.addWidget(self.chonker_widget)
             
-            # Highlight CHONKER button in unified top bar
+            self.update_status_with_personality('ready')
+            self.breadcrumb_label.setText("CHONKER Mode")
+            
+            # Highlight CHONKER button
             self.chonker_btn.setStyleSheet("""
                 QPushButton {
                     background-color: #1ABC9C;
@@ -1222,8 +1930,20 @@ class ChonkerSnyfterEnhancedWindow(QMainWindow):
                     font-weight: normal;
                 }
             """)
-        else:
-            self.stacked_widget.setCurrentWidget(self.snyfter_widget)
+        else:  # SNYFTER mode
+            # Update content for SNYFTER mode
+            if hasattr(self, 'content_layout'):
+                # Clear current content
+                while self.content_layout.count():
+                    item = self.content_layout.takeAt(0)
+                    if item.widget():
+                        item.widget().setParent(None)
+                
+                # Add SNYFTER interface
+                self.content_layout.addWidget(self.snyfter_widget)
+            
+            self.update_status_with_personality('snyfter_mode')
+            self.breadcrumb_label.setText("SNYFTER Mode")
             
             # Highlight SNYFTER button
             self.snyfter_btn.setStyleSheet("""
@@ -1249,35 +1969,106 @@ class ChonkerSnyfterEnhancedWindow(QMainWindow):
     
     
     def open_pdf(self):
-        """Open PDF file dialog"""
+        """Open PDF file dialog - creates new floating window"""
         file_path, _ = QFileDialog.getOpenFileName(
             self, "Select PDF", "", "PDF Files (*.pdf)"
         )
         if file_path:
-            self.load_pdf(file_path)
+            # Create new PDF window as requested
+            self.create_pdf_window(file_path)
+    
+    def create_pdf_window(self, file_path: str):
+        """Create a new floating window for PDF viewing"""
+        # Create new window
+        pdf_window = QWidget()
+        pdf_window.setWindowTitle(f"🐹 PDF: {os.path.basename(file_path)}")
+        pdf_window.resize(800, 1000)
+        pdf_window.setWindowFlags(Qt.WindowType.Window)
+        
+        layout = QVBoxLayout(pdf_window)
+        layout.setContentsMargins(0, 0, 0, 0)
+        
+        # PDF controls
+        controls = QHBoxLayout()
+        controls.setContentsMargins(10, 5, 10, 5)
+        
+        # Page navigation
+        page_spin = QSpinBox()
+        page_spin.setMinimum(1)
+        controls.addWidget(QLabel("Page:"))
+        controls.addWidget(page_spin)
+        
+        total_pages_label = QLabel("/ 0")
+        controls.addWidget(total_pages_label)
+        
+        controls.addStretch()
+        
+        # Process button for this PDF
+        process_btn = QPushButton("🐹 Process This PDF")
+        process_btn.clicked.connect(lambda: self.process_specific_pdf(file_path))
+        controls.addWidget(process_btn)
+        
+        # Close button
+        close_btn = QPushButton("✕")
+        close_btn.setFixedSize(30, 30)
+        close_btn.clicked.connect(pdf_window.close)
+        controls.addWidget(close_btn)
+        
+        layout.addLayout(controls)
+        
+        # PDF viewer
+        pdf_view = QPdfView()
+        pdf_document = QPdfDocument()
+        pdf_view.setDocument(pdf_document)
+        
+        # Load the PDF
+        pdf_document.load(file_path)
+        page_spin.setMaximum(pdf_document.pageCount())
+        total_pages_label.setText(f"/ {pdf_document.pageCount()}")
+        
+        # Connect page navigation
+        page_spin.valueChanged.connect(
+            lambda page: pdf_view.pageNavigator().jump(page - 1, QPointF(0, 0))
+        )
+        
+        layout.addWidget(pdf_view)
+        
+        # Store window reference
+        window_id = f"pdf_{len(self.panel_windows)}"
+        self.panel_windows[window_id] = pdf_window
+        
+        # Show window
+        pdf_window.show()
+        
+        # Update breadcrumb
+        self.breadcrumb_label.setText(f"CHONKER Mode > {os.path.basename(file_path)}")
+        
+        # Store current PDF path for processing
+        self.current_pdf_path = file_path
+        
+        # Hide welcome widget if visible
+        if hasattr(self, 'welcome_widget'):
+            self.welcome_widget.hide()
+    
+    def process_specific_pdf(self, file_path: str):
+        """Process a specific PDF file"""
+        self.current_pdf_path = file_path
+        self.process_current_pdf()
     
     def load_pdf(self, file_path: str):
-        """Load PDF into viewer"""
+        """Load PDF into viewer or create new window"""
         try:
             self.current_pdf_path = file_path
-            self.pdf_document.load(file_path)
             
-            # Update controls
-            page_count = self.pdf_document.pageCount()
-            self.page_spin.setMaximum(page_count)
-            self.page_spin.setValue(1)
-            self.total_pages_label.setText(f"/ {page_count}")
-            
-            # Enable buttons
-            self.process_btn.setEnabled(True)
+            # In modern UI, create a new floating window for each PDF
+            self.create_pdf_window(file_path)
             
             # Update status
-            self.status_label.setText(f"Loaded: {os.path.basename(file_path)}")
-            self.log_message(f"📂 Loaded PDF: {file_path}")
+            self.update_terminal(f"📂 Loaded PDF: {file_path}")
             
         except Exception as e:
             QMessageBox.critical(self, "🐹 CHONKER Error", f"🐹 *cough* Failed to load PDF: {str(e)}")
-            self.log_message(f"🐹 Error loading PDF: {str(e)}", "error")
+            self.update_terminal(f"🐹 Error loading PDF: {str(e)}")
     
     def process_current_pdf(self):
         """Process the current PDF"""
@@ -1300,7 +2091,7 @@ class ChonkerSnyfterEnhancedWindow(QMainWindow):
     def on_processing_progress(self, message: str):
         """Handle processing progress messages"""
         self.status_label.setText(message)
-        self.log_message(message)
+        self.update_terminal(message)
     
     def on_chunk_progress(self, current: int, total: int):
         """Handle chunk processing progress"""
@@ -1321,23 +2112,23 @@ class ChonkerSnyfterEnhancedWindow(QMainWindow):
             if self.snyfter_db.save_document(result, self.current_pdf_path):
                 success_msg = "✅ Processing complete and saved to database!"
                 self.status_label.setText(success_msg)
-                self.log_message("✅ Document successfully processed and archived")
+                self.update_terminal("✅ Document successfully processed and archived")
                 
                 # Update archive stats
                 self.update_archive_stats()
             else:
                 warning_msg = "⚠️  Processing complete but failed to save to database"
                 self.status_label.setText(warning_msg)
-                self.log_message(warning_msg, "warning")
+                self.update_terminal(warning_msg, "warning")
         else:
-            self.log_message(f"❌ Processing failed: {result.error_message}", "error")
+            self.update_terminal(f"❌ Processing failed: {result.error_message}", "error")
     
     def on_processing_error(self, error_msg: str):
         """Handle processing errors"""
         self.progress_bar.hide()
         self.process_btn.setEnabled(True)
         QMessageBox.critical(self, "🐹 Processing Error", f"🐹 *burp* {error_msg}")
-        self.log_message(error_msg, "error")
+        self.update_terminal(error_msg, "error")
     
     def display_processing_results(self, result: ProcessingResult):
         """Display processing results in faithful output format with rendered HTML"""
@@ -1464,7 +2255,7 @@ class ChonkerSnyfterEnhancedWindow(QMainWindow):
             
         except ImportError:
             # Fallback if BeautifulSoup not available
-            self.log_message("🐹 BeautifulSoup not available, showing raw HTML", "warning")
+            self.update_terminal("🐹 BeautifulSoup not available, showing raw HTML", "warning")
             simple_html = f"""
             <h2>🐹 CHONKER's Faithful Output</h2>
             <p><b>Document ID:</b> {result.document_id}</p>
@@ -1478,9 +2269,93 @@ class ChonkerSnyfterEnhancedWindow(QMainWindow):
             self.faithful_output.setReadOnly(False)
         
         # Log summary with personality
-        self.log_message(f"📊 Extracted {len(result.chunks)} chunks in {result.processing_time:.2f} seconds")
+        self.update_terminal(f"📊 Extracted {len(result.chunks)} chunks in {result.processing_time:.2f} seconds")
         self.update_status_with_personality('success')
+        
+        # Create new output window for the processed content
+        self.create_output_window(result)
     
+    def create_output_window(self, result: ProcessingResult):
+        """Create a new floating window for HTML output"""
+        # Create new window
+        output_window = QWidget()
+        output_window.setWindowTitle(f"🌐 Output: {os.path.basename(self.current_pdf_path)}")
+        output_window.resize(900, 800)
+        output_window.setWindowFlags(Qt.WindowType.Window)
+        
+        layout = QVBoxLayout(output_window)
+        layout.setContentsMargins(0, 0, 0, 0)
+        
+        # Output controls
+        controls = QHBoxLayout()
+        controls.setContentsMargins(10, 5, 10, 5)
+        
+        controls.addWidget(QLabel("🌐 Processed HTML Output"))
+        controls.addStretch()
+        
+        # Export button
+        export_btn = QPushButton("💾 Export")
+        export_btn.clicked.connect(self.export_current)
+        controls.addWidget(export_btn)
+        
+        # Close button
+        close_btn = QPushButton("✕")
+        close_btn.setFixedSize(30, 30)
+        close_btn.clicked.connect(output_window.close)
+        controls.addWidget(close_btn)
+        
+        layout.addLayout(controls)
+        
+        # Create QTextEdit for HTML output
+        output_view = QTextEdit()
+        output_view.setReadOnly(False)  # Editable as requested
+        
+        # Set the HTML content we already generated
+        if hasattr(self, 'faithful_output') and self.faithful_output.toHtml():
+            output_view.setHtml(self.faithful_output.toHtml())
+        else:
+            # Fallback - generate HTML again
+            try:
+                from bs4 import BeautifulSoup
+                soup = BeautifulSoup(result.html_content, 'html.parser')
+                
+                html_output = f"""
+                <!DOCTYPE html>
+                <html>
+                <head>
+                    <style>
+                        body {{ font-family: -apple-system, sans-serif; margin: 20px; }}
+                        table {{ border-collapse: collapse; width: 100%; margin: 15px 0; }}
+                        th, td {{ border: 1px solid #ddd; padding: 8px; text-align: left; }}
+                        th {{ background-color: #f5f5f5; }}
+                        tr:nth-child(even) {{ background-color: #fafafa; }}
+                    </style>
+                </head>
+                <body>
+                    <h2>🐹 CHONKER's Output</h2>
+                    {soup.prettify()}
+                </body>
+                </html>
+                """
+                output_view.setHtml(html_output)
+            except:
+                output_view.setHtml(result.html_content)
+        
+        layout.addWidget(output_view)
+        
+        # Store window reference
+        window_id = f"output_{len(self.panel_windows)}"
+        self.panel_windows[window_id] = output_window
+        
+        # Store output view for export
+        self.last_output_view = output_view
+        
+        # Show window
+        output_window.show()
+        
+        # Update status
+        self.update_status_with_personality('success', 
+            "🐹 *burp* Processing complete! New output window created.")
     
     def clean_current_pdf(self):
         """Clean the current PDF"""
@@ -1508,11 +2383,11 @@ class ChonkerSnyfterEnhancedWindow(QMainWindow):
             self.load_pdf(temp_file.name)
             
             self.status_label.setText("✅ PDF cleaned successfully!")
-            self.log_message("🧹 PDF cleaned - annotations removed")
+            self.update_terminal("🧹 PDF cleaned - annotations removed")
             
         except Exception as e:
             QMessageBox.critical(self, "🐹 Clean Error", f"🐹 *cough* Failed to clean PDF: {str(e)}")
-            self.log_message(f"🐹 Error cleaning PDF: {str(e)}", "error")
+            self.update_terminal(f"🐹 Error cleaning PDF: {str(e)}", "error")
     
     def search_archives(self):
         """Search the SNYFTER archives"""
@@ -1542,7 +2417,7 @@ class ChonkerSnyfterEnhancedWindow(QMainWindow):
             self.results_tree.addTopLevelItem(item)
         
         self.status_label.setText(f"Found {len(results)} documents")
-        self.log_message(f"🔍 Search complete: {len(results)} results for '{query}'")
+        self.update_terminal(f"🔍 Search complete: {len(results)} results for '{query}'")
     
     def open_document_details(self, item: QTreeWidgetItem, column: int):
         """Open detailed view of a document"""
@@ -1578,7 +2453,7 @@ class ChonkerSnyfterEnhancedWindow(QMainWindow):
             self.stats_labels['last_updated'].setText(f"Last Updated: {last_date}")
             
         except Exception as e:
-            self.log_message(f"🐁 Error updating statistics: {str(e)}", "error")
+            self.update_terminal(f"🐁 Error updating statistics: {str(e)}", "error")
     
     def show_batch_dialog(self):
         """Show batch processing dialog"""
@@ -1615,7 +2490,7 @@ class ChonkerSnyfterEnhancedWindow(QMainWindow):
                     with open(file_path, 'w', encoding='utf-8') as f:
                         f.write(content)
                     QMessageBox.information(self, "Success", "Faithful output exported successfully!")
-                    self.log_message(f"📤 Exported faithful output to: {file_path}")
+                    self.update_terminal(f"📤 Exported faithful output to: {file_path}")
                 except Exception as e:
                     QMessageBox.critical(self, "🐹 Export Error", f"🐹 *hiccup* Export failed: {str(e)}")
                     
@@ -1641,12 +2516,12 @@ class ChonkerSnyfterEnhancedWindow(QMainWindow):
             self.chunks_table.setRowCount(0)
             self.markdown_view.clear()
             self.html_view.clear()
-            self.log_view.clear()
+            self.terminal_display.clear()
             self.results_tree.clear()
             self.search_input.clear()
             
             self.status_label.setText("Ready - New session started")
-            self.log_message("🆕 New session started")
+            self.update_terminal("🆕 New session started")
     
     def on_page_changed(self, page_num):
         """Handle page navigation"""
@@ -1703,6 +2578,9 @@ class ChonkerSnyfterEnhancedWindow(QMainWindow):
     
     def closeEvent(self, event):
         """Handle application close"""
+        # Stop caffeinate defense
+        self.stop_caffeinate_defense()
+        
         # Stop any running threads
         if self.processing_thread and self.processing_thread.isRunning():
             self.processing_thread.stop()
@@ -2011,6 +2889,11 @@ class DocumentDetailsDialog(QDialog):
 
 def main():
     """Main entry point"""
+    # Announce caffeinate defense
+    print("\n🛡️ ACTIVATING CAFFEINATE DEFENSE SYSTEM...")
+    print("☕ This app will fight to stay awake and prevent auto-logout!")
+    print("💪 CHONKER & SNYFTER shall not be stopped by mere system sleep!\n")
+    
     app = QApplication(sys.argv)
     
     # Set application metadata
