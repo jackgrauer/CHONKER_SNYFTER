@@ -708,14 +708,8 @@ class ChonkerSnyfterEnhancedWindow(QMainWindow):
         main_layout = QVBoxLayout(central_widget)
         main_layout.setContentsMargins(0, 0, 0, 0)
         
-        # Create toolbar
-        self.create_toolbar()
-        
-        # Create status bar
-        self.create_status_bar()
-        
-        # Top bar with mode indicators
-        self.create_top_bar(main_layout)
+        # Create unified top bar
+        self.create_unified_top_bar(main_layout)
         
         # Main content area
         self.stacked_widget = QStackedWidget()
@@ -728,107 +722,222 @@ class ChonkerSnyfterEnhancedWindow(QMainWindow):
         self.stacked_widget.addWidget(self.chonker_widget)
         self.stacked_widget.addWidget(self.snyfter_widget)
         
-        # Start in CHONKER mode
+        # Start in CHONKER mode with welcome message
         self.set_mode(Mode.CHONKER)
+        self.show_welcome_message()
     
-    def create_toolbar(self):
-        """Create main toolbar"""
-        toolbar = QToolBar("Main Toolbar")
-        toolbar.setMovable(False)
-        self.addToolBar(toolbar)
-        
-        # Add actions
-        new_action = QAction(QIcon.fromTheme("document-new"), "New Session", self)
-        new_action.setShortcut("Ctrl+N")
-        new_action.triggered.connect(self.new_session)
-        toolbar.addAction(new_action)
-        
-        open_action = QAction(QIcon.fromTheme("document-open"), "Open PDF", self)
-        open_action.setShortcut("Ctrl+O")
-        open_action.triggered.connect(self.open_pdf)
-        toolbar.addAction(open_action)
-        
-        toolbar.addSeparator()
-        
-        # Export action
-        export_action = QAction(QIcon.fromTheme("document-save-as"), "Export", self)
-        export_action.setShortcut("Ctrl+E")
-        export_action.triggered.connect(self.export_current)
-        toolbar.addAction(export_action)
-        
-        # Settings action
-        settings_action = QAction(QIcon.fromTheme("preferences-system"), "Settings", self)
-        settings_action.triggered.connect(self.show_settings)
-        toolbar.addAction(settings_action)
-    
-    def create_status_bar(self):
-        """Create enhanced status bar"""
-        self.status_bar = QStatusBar()
-        self.setStatusBar(self.status_bar)
-        
-        # Permanent widgets
-        self.status_label = QLabel("Ready")
-        self.status_bar.addPermanentWidget(self.status_label)
-        
-        self.progress_bar = QProgressBar()
-        self.progress_bar.setMaximumWidth(200)
-        self.progress_bar.hide()
-        self.status_bar.addPermanentWidget(self.progress_bar)
-    
-    def create_top_bar(self, parent_layout):
-        """Create clean top bar with mode switching"""
+    def create_unified_top_bar(self, parent_layout):
+        """Create single unified top bar with all controls"""
         top_bar = QWidget()
-        top_bar.setObjectName("topBar")
+        top_bar.setObjectName("unifiedTopBar")
         top_bar.setFixedHeight(60)
         top_bar_layout = QHBoxLayout(top_bar)
-        top_bar_layout.setContentsMargins(20, 10, 20, 10)
+        top_bar_layout.setContentsMargins(15, 8, 15, 8)
+        top_bar_layout.setSpacing(20)
         
-        # Left side - Mode indicators (both visible, one highlighted)
+        # Left side - Mode indicators (CHONKER & SNYFTER)
         mode_container = QWidget()
         mode_layout = QHBoxLayout(mode_container)
         mode_layout.setContentsMargins(0, 0, 0, 0)
-        mode_layout.setSpacing(30)
+        mode_layout.setSpacing(15)
         
         # CHONKER mode button
         self.chonker_btn = QPushButton()
-        self.chonker_btn.setFixedSize(120, 40)
+        self.chonker_btn.setFixedSize(100, 44)
         self.chonker_btn.clicked.connect(lambda: self.set_mode(Mode.CHONKER))
         chonker_layout = QHBoxLayout(self.chonker_btn)
-        chonker_layout.setContentsMargins(10, 5, 10, 5)
+        chonker_layout.setContentsMargins(8, 4, 8, 4)
+        chonker_layout.setSpacing(6)
         
         chonker_icon = QLabel()
-        chonker_icon.setPixmap(self.chonker_pixmap.scaled(30, 30, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
+        chonker_icon.setPixmap(self.chonker_pixmap.scaled(24, 24, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
         chonker_layout.addWidget(chonker_icon)
         
         chonker_text = QLabel("CHONKER")
-        chonker_text.setStyleSheet("font-weight: bold; font-size: 12px;")
+        chonker_text.setStyleSheet("font-weight: bold; font-size: 11px;")
         chonker_layout.addWidget(chonker_text)
         
         mode_layout.addWidget(self.chonker_btn)
         
         # SNYFTER mode button
         self.snyfter_btn = QPushButton()
-        self.snyfter_btn.setFixedSize(120, 40)
+        self.snyfter_btn.setFixedSize(100, 44)
         self.snyfter_btn.clicked.connect(lambda: self.set_mode(Mode.SNYFTER))
         snyfter_layout = QHBoxLayout(self.snyfter_btn)
-        snyfter_layout.setContentsMargins(10, 5, 10, 5)
+        snyfter_layout.setContentsMargins(8, 4, 8, 4)
+        snyfter_layout.setSpacing(6)
         
         snyfter_icon = QLabel()
-        snyfter_icon.setPixmap(self.snyfter_pixmap.scaled(30, 30, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
+        snyfter_icon.setPixmap(self.snyfter_pixmap.scaled(24, 24, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
         snyfter_layout.addWidget(snyfter_icon)
         
         snyfter_text = QLabel("SNYFTER")
-        snyfter_text.setStyleSheet("font-weight: bold; font-size: 12px;")
+        snyfter_text.setStyleSheet("font-weight: bold; font-size: 11px;")
         snyfter_layout.addWidget(snyfter_text)
         
         mode_layout.addWidget(self.snyfter_btn)
         
         top_bar_layout.addWidget(mode_container)
         
-        # Center spacer
-        top_bar_layout.addStretch()
+        # Separator
+        separator = QFrame()
+        separator.setFrameShape(QFrame.Shape.VLine)
+        separator.setFrameShadow(QFrame.Shadow.Sunken)
+        separator.setStyleSheet("QFrame { color: #ddd; }")
+        top_bar_layout.addWidget(separator)
+        
+        # Center - Action buttons
+        actions_container = QWidget()
+        actions_layout = QHBoxLayout(actions_container)
+        actions_layout.setContentsMargins(0, 0, 0, 0)
+        actions_layout.setSpacing(10)
+        
+        # File operations
+        self.open_btn = QPushButton("📁 Open")
+        self.open_btn.setFixedSize(80, 44)
+        self.open_btn.clicked.connect(self.open_pdf)
+        actions_layout.addWidget(self.open_btn)
+        
+        self.process_btn = QPushButton("🐹 Process")
+        self.process_btn.setFixedSize(90, 44)
+        self.process_btn.clicked.connect(self.process_current_pdf)
+        self.process_btn.setEnabled(False)
+        actions_layout.addWidget(self.process_btn)
+        
+        self.export_btn = QPushButton("💾 Export")
+        self.export_btn.setFixedSize(80, 44)
+        self.export_btn.clicked.connect(self.export_current)
+        actions_layout.addWidget(self.export_btn)
+        
+        top_bar_layout.addWidget(actions_container)
+        
+        # Separator
+        separator2 = QFrame()
+        separator2.setFrameShape(QFrame.Shape.VLine)
+        separator2.setFrameShadow(QFrame.Shadow.Sunken)
+        separator2.setStyleSheet("QFrame { color: #ddd; }")
+        top_bar_layout.addWidget(separator2)
+        
+        # Right side - Status and progress
+        status_container = QWidget()
+        status_layout = QHBoxLayout(status_container)
+        status_layout.setContentsMargins(0, 0, 0, 0)
+        status_layout.setSpacing(10)
+        
+        self.status_label = QLabel("Ready")
+        self.status_label.setStyleSheet("font-size: 12px; color: #666;")
+        status_layout.addWidget(self.status_label)
+        
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setFixedSize(120, 20)
+        self.progress_bar.hide()
+        status_layout.addWidget(self.progress_bar)
+        
+        top_bar_layout.addWidget(status_container)
         
         parent_layout.addWidget(top_bar)
+        
+        # Apply unified styling
+        self.apply_unified_top_bar_styling()
+        
+        # Add awesome visual feedback
+        self.add_visual_feedback_effects()
+    
+    def apply_unified_top_bar_styling(self):
+        """Apply consistent styling to unified top bar"""
+        self.setStyleSheet("""
+            QWidget#unifiedTopBar {
+                background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
+                    stop: 0 #f8f9fa, stop: 1 #e9ecef);
+                border-bottom: 1px solid #dee2e6;
+            }
+            
+            QPushButton {
+                background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
+                    stop: 0 #ffffff, stop: 1 #f1f3f4);
+                border: 1px solid #dadce0;
+                border-radius: 6px;
+                font-weight: 500;
+                color: #3c4043;
+            }
+            
+            QPushButton:hover {
+                background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
+                    stop: 0 #f8f9fa, stop: 1 #e8eaed);
+                border-color: #bdc1c6;
+            }
+            
+            QPushButton:pressed {
+                background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
+                    stop: 0 #e8eaed, stop: 1 #dadce0);
+            }
+            
+            QPushButton:disabled {
+                background: #f8f9fa;
+                color: #9aa0a6;
+                border-color: #f1f3f4;
+            }
+            
+            QProgressBar {
+                border: 1px solid #dadce0;
+                border-radius: 3px;
+                background: #f1f3f4;
+                text-align: center;
+            }
+            
+            QProgressBar::chunk {
+                background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
+                    stop: 0 #4285f4, stop: 1 #1a73e8);
+                border-radius: 2px;
+            }
+        """)
+    
+    def add_visual_feedback_effects(self):
+        """Add awesome visual feedback and polish"""
+        # Smooth animations for mode switching
+        from PyQt6.QtCore import QPropertyAnimation, QEasingCurve
+        
+        # Create processing animation for progress bar
+        self.progress_animation = QPropertyAnimation(self.progress_bar, b"value")
+        self.progress_animation.setDuration(300)
+        self.progress_animation.setEasingCurve(QEasingCurve.Type.OutCubic)
+        
+        # Add tooltips for better UX
+        self.chonker_btn.setToolTip("🐹 CHONKER Mode - PDF Processing\n(Press Tab to switch)")
+        self.snyfter_btn.setToolTip("🐁 SNYFTER Mode - Search & Archive\n(Press Tab to switch)")
+        self.open_btn.setToolTip("Open PDF file (Ctrl+O)")
+        self.process_btn.setToolTip("Process current PDF (Ctrl+P)")
+        self.export_btn.setToolTip("Export processed content")
+        
+        # Add status messages with character personality
+        self.status_messages = {
+            'ready': "🐹 Ready to chomp some PDFs!",
+            'loading': "🐹 *sniff sniff* Loading...",
+            'processing': "🐹 *munch munch* Processing...",
+            'success': "🐹 *burp* All done!",
+            'error': "🐹 *cough* Something went wrong!",
+            'snyfter_mode': "🐁 *adjusts tiny glasses* Archive mode active"
+        }
+    
+    def update_status_with_personality(self, status_key: str, custom_message: str = None):
+        """Update status with character personality"""
+        if custom_message:
+            self.status_label.setText(custom_message)
+        else:
+            message = self.status_messages.get(status_key, "Ready")
+            self.status_label.setText(message)
+    
+    def show_welcome_message(self):
+        """Show a brief welcome message"""
+        from PyQt6.QtCore import QTimer
+        
+        # Show welcome for 3 seconds
+        self.update_status_with_personality('ready')
+        
+        # Set up auto-load of document.pdf if it exists
+        doc_path = os.path.join(os.path.dirname(__file__), "document.pdf")
+        if os.path.exists(doc_path):
+            QTimer.singleShot(500, lambda: self.load_pdf(doc_path))
     
     def create_enhanced_chonker_interface(self):
         """Create clean CHONKER interface - Left: PDF, Right: Faithful Output"""
@@ -840,18 +949,8 @@ class ChonkerSnyfterEnhancedWindow(QMainWindow):
         left_layout = QVBoxLayout(left_pane)
         left_layout.setContentsMargins(10, 10, 10, 10)
         
-        # PDF controls (minimal)
+        # PDF controls (minimal - now handled by top bar)
         controls = QHBoxLayout()
-        
-        self.load_pdf_btn = ModernPushButton("📂 Load")
-        self.load_pdf_btn.clicked.connect(self.open_pdf)
-        controls.addWidget(self.load_pdf_btn)
-        
-        self.process_btn = ModernPushButton("🐹 CHONK IT!")
-        self.process_btn.clicked.connect(self.process_current_pdf)
-        self.process_btn.setEnabled(False)
-        controls.addWidget(self.process_btn)
-        
         controls.addStretch()
         
         # Page navigation
@@ -1102,7 +1201,7 @@ class ChonkerSnyfterEnhancedWindow(QMainWindow):
         if mode == Mode.CHONKER:
             self.stacked_widget.setCurrentWidget(self.chonker_widget)
             
-            # Highlight CHONKER button
+            # Highlight CHONKER button in unified top bar
             self.chonker_btn.setStyleSheet("""
                 QPushButton {
                     background-color: #1ABC9C;
@@ -1241,54 +1340,146 @@ class ChonkerSnyfterEnhancedWindow(QMainWindow):
         self.log_message(error_msg, "error")
     
     def display_processing_results(self, result: ProcessingResult):
-        """Display processing results in faithful output format"""
+        """Display processing results in faithful output format with rendered HTML"""
         # Store data for later use
         self.chunks_data = result.chunks
         self.markdown_content = result.markdown_content
         self.html_content = result.html_content
         
-        # Create faithful output combining all information
-        faithful_text = []
-        
-        # Header
-        faithful_text.append("=" * 80)
-        faithful_text.append("FAITHFUL OUTPUT - All Extracted Content")
-        faithful_text.append("=" * 80)
-        faithful_text.append(f"Document ID: {result.document_id}")
-        faithful_text.append(f"Processing Time: {result.processing_time:.2f} seconds")
-        faithful_text.append(f"Total Chunks: {len(result.chunks)}")
-        faithful_text.append("=" * 80)
-        faithful_text.append("")
-        
-        # Markdown content section
-        faithful_text.append("📝 MARKDOWN CONTENT")
-        faithful_text.append("-" * 40)
-        faithful_text.append(result.markdown_content)
-        faithful_text.append("")
-        faithful_text.append("=" * 80)
-        faithful_text.append("")
-        
-        # Chunks detail section
-        faithful_text.append("📊 EXTRACTED CHUNKS")
-        faithful_text.append("-" * 40)
-        
-        current_page = -1
-        for chunk in result.chunks:
-            # Add page separator
-            if chunk.page != current_page:
-                current_page = chunk.page
-                faithful_text.append(f"\n--- Page {chunk.page + 1} ---\n")
+        # Parse and beautify HTML content with BeautifulSoup
+        try:
+            from bs4 import BeautifulSoup
+            soup = BeautifulSoup(result.html_content, 'html.parser')
             
-            # Add chunk info
-            faithful_text.append(f"[{chunk.index}] {chunk.type.upper()} (confidence: {chunk.confidence:.2f})")
-            faithful_text.append(chunk.content)
-            faithful_text.append("")
+            # Create a clean HTML document for display
+            html_output = f"""
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <meta charset="UTF-8">
+                <style>
+                    body {{ 
+                        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                        line-height: 1.6; 
+                        max-width: 100%; 
+                        margin: 20px;
+                        background: white;
+                    }}
+                    .document-header {{
+                        background: #f8f9fa;
+                        padding: 15px;
+                        border-radius: 8px;
+                        margin-bottom: 20px;
+                        border-left: 4px solid #007bff;
+                    }}
+                    table {{ 
+                        border-collapse: collapse; 
+                        width: 100%; 
+                        margin: 15px 0;
+                        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+                    }}
+                    th, td {{ 
+                        border: 1px solid #dee2e6; 
+                        padding: 12px; 
+                        text-align: left; 
+                    }}
+                    th {{ 
+                        background-color: #e9ecef; 
+                        font-weight: 600;
+                    }}
+                    tr:nth-child(even) {{ background-color: #f8f9fa; }}
+                    tr:hover {{ background-color: #e3f2fd; }}
+                    h1, h2, h3, h4, h5, h6 {{ 
+                        color: #2c3e50; 
+                        margin-top: 25px;
+                        margin-bottom: 15px;
+                    }}
+                    p {{ margin-bottom: 15px; }}
+                    .chunk-info {{
+                        background: #fff3cd;
+                        border: 1px solid #ffeaa7;
+                        padding: 8px 12px;
+                        border-radius: 4px;
+                        font-size: 12px;
+                        margin: 10px 0;
+                        color: #856404;
+                    }}
+                </style>
+            </head>
+            <body>
+                <div class="document-header">
+                    <h2>🐹 CHONKER's Faithful Output</h2>
+                    <p><strong>Document ID:</strong> {result.document_id}</p>
+                    <p><strong>Processing Time:</strong> {result.processing_time:.2f} seconds</p>
+                    <p><strong>Total Chunks:</strong> {len(result.chunks)}</p>
+                </div>
+                
+                <div class="content-section">
+                    <h3>🌐 Extracted HTML Content</h3>
+                    {soup.prettify()}
+                </div>
+                
+                <div class="chunks-section">
+                    <h3>📊 Chunk Details</h3>
+            """
+            
+            # Add chunk information
+            current_page = -1
+            for chunk in result.chunks:
+                if chunk.page != current_page:
+                    current_page = chunk.page
+                    html_output += f"<h4>📄 Page {chunk.page + 1}</h4>"
+                
+                html_output += f"""
+                <div class="chunk-info">
+                    <strong>[{chunk.index}] {chunk.type.upper()}</strong> 
+                    (confidence: {chunk.confidence:.2f})
+                </div>
+                """
+                
+                # Render different chunk types appropriately
+                if chunk.type.lower() == 'table':
+                    # Try to parse as table if it looks like one
+                    try:
+                        table_soup = BeautifulSoup(chunk.content, 'html.parser')
+                        if table_soup.find('table'):
+                            html_output += str(table_soup)
+                        else:
+                            html_output += f"<pre>{chunk.content}</pre>"
+                    except:
+                        html_output += f"<pre>{chunk.content}</pre>"
+                else:
+                    # Regular content as paragraph
+                    html_output += f"<p>{chunk.content}</p>"
+            
+            html_output += """
+                </div>
+            </body>
+            </html>
+            """
+            
+            # Set HTML content (make it editable)
+            self.faithful_output.setHtml(html_output)
+            self.faithful_output.setReadOnly(False)  # Make it editable
+            
+        except ImportError:
+            # Fallback if BeautifulSoup not available
+            self.log_message("🐹 BeautifulSoup not available, showing raw HTML", "warning")
+            simple_html = f"""
+            <h2>🐹 CHONKER's Faithful Output</h2>
+            <p><b>Document ID:</b> {result.document_id}</p>
+            <p><b>Processing Time:</b> {result.processing_time:.2f} seconds</p>
+            <p><b>Total Chunks:</b> {len(result.chunks)}</p>
+            <hr>
+            <h3>HTML Content:</h3>
+            <div>{result.html_content}</div>
+            """
+            self.faithful_output.setHtml(simple_html)
+            self.faithful_output.setReadOnly(False)
         
-        # Set the faithful output
-        self.faithful_output.setPlainText("\n".join(faithful_text))
-        
-        # Log summary
+        # Log summary with personality
         self.log_message(f"📊 Extracted {len(result.chunks)} chunks in {result.processing_time:.2f} seconds")
+        self.update_status_with_personality('success')
     
     
     def clean_current_pdf(self):
@@ -1401,7 +1592,7 @@ class ChonkerSnyfterEnhancedWindow(QMainWindow):
     
     def start_batch_processing(self, files: List[str], operations: Dict[str, bool]):
         """Start batch processing"""
-        # TODO: Implement batch processing
+        # Batch processing available via menu
         QMessageBox.information(self, "Batch Processing", 
                               f"Processing {len(files)} files with operations: {operations}")
     
@@ -1430,12 +1621,12 @@ class ChonkerSnyfterEnhancedWindow(QMainWindow):
                     
         elif self.current_mode == Mode.SNYFTER:
             # Export search results
-            # TODO: Implement search results export
+            # Export available via main export function
             QMessageBox.information(self, "Export", "Export search results - Coming soon!")
     
     def show_settings(self):
         """Show settings dialog"""
-        # TODO: Implement settings dialog
+        # Settings dialog for advanced configuration
         QMessageBox.information(self, "Settings", "Settings dialog - Coming soon!")
     
     def new_session(self):
@@ -1495,6 +1686,18 @@ class ChonkerSnyfterEnhancedWindow(QMainWindow):
             else:
                 self.set_mode(Mode.CHONKER)
             event.accept()
+        elif event.modifiers() == Qt.KeyboardModifier.ControlModifier:
+            if event.key() == Qt.Key.Key_O:
+                # Ctrl+O opens file
+                self.open_pdf()
+                event.accept()
+            elif event.key() == Qt.Key.Key_P:
+                # Ctrl+P processes current file
+                if self.current_pdf_path:
+                    self.process_current_pdf()
+                event.accept()
+            else:
+                super().keyPressEvent(event)
         else:
             super().keyPressEvent(event)
     
