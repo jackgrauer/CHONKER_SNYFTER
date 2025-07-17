@@ -81,3 +81,20 @@ check-features:
     @echo "❌ HTML zoom: NOT WORKING"
     @echo "❓ VLM fallback: UNCLEAR"
     @echo "✅ Core processing: WORKING"
+
+# Launch autonomous SNYFTER development
+develop-snyfter:
+    ./launch_snyfter_development.sh
+
+# Monitor SNYFTER development progress
+monitor-snyfter:
+    @echo "Monitoring latest SNYFTER development log..."
+    @tail -f logs/snyfter_dev_*.log | tail -f -n +1
+
+# Check SNYFTER development status
+snyfter-status:
+    @if [ -f snyfter_development_summary.md ]; then \
+        cat snyfter_development_summary.md; \
+    else \
+        echo "No SNYFTER development summary found yet"; \
+    fi
