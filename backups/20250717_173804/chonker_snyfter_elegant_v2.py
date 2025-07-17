@@ -34,8 +34,7 @@ warnings.filterwarnings("ignore", message=".*pin_memory.*MPS.*")
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QFileDialog, QMessageBox, QTextEdit, QLabel, 
-    QSplitter, QDialog, QMenuBar, QMenu, QToolBar, QStatusBar,
-    QGroupBox, QTreeWidget, QTreeWidgetItem
+    QSplitter, QDialog, QMenuBar, QMenu, QToolBar, QStatusBar
 )
 from PyQt6.QtCore import (
     Qt, QThread, pyqtSignal, QTimer, QPointF, QObject, QEvent,
@@ -1843,82 +1842,14 @@ class ChonkerSnyfterApp(QMainWindow):
                     self._apply_pdf_zoom()
     
     def _apply_text_zoom(self) -> None:
-        """Apply current text zoom by re-rendering the HTML content"""
-        if not self.faithful_output:
-            return
-            
-        # Store the current content
-        current_html = self.faithful_output.toHtml()
+        """Apply current text zoom to the text output widget.
         
-        # Check if we have the processing result to re-render properly
-        if hasattr(self, '_last_processing_result'):
-            # Re-display with new zoom level
-            self._display_in_faithful_output(self._last_processing_result)
-            self.log(f"Re-rendered HTML with zoom: {self.text_zoom}px")
-        else:
-            # Simple approach: just log that we need content first
-            self.log(f"Zoom set to {self.text_zoom}px - will apply when content is loaded")
-                
-    def _apply_css_injection_zoom(self) -> None:
-        """Alternative CSS injection approach"""
-        scale_factor = self.text_zoom / 12.0
-        
-        # Get current HTML
-        current_html = self.faithful_output.toHtml()
-        
-        # Generate zoom CSS with more aggressive overrides
-        zoom_css = f"""<style>
-        * {{ font-size: {self.text_zoom}px !important; }}
-        body, p, div, span {{ font-size: {self.text_zoom}px !important; }}
-        h1 {{ font-size: {int(self.text_zoom * 1.5)}px !important; }}
-        h2 {{ font-size: {int(self.text_zoom * 1.2)}px !important; }}
-        h3 {{ font-size: {int(self.text_zoom * 1.1)}px !important; }}
-        table, td, th {{ font-size: {self.text_zoom}px !important; }}
-        </style>"""
-        
-        # Remove any existing injected styles
-        import re
-        current_html = re.sub(r'<style>.*?</style>', '', current_html, flags=re.DOTALL)
-        
-        # Find the best place to inject
-        if '</head>' in current_html:
-            current_html = current_html.replace('</head>', f'{zoom_css}</head>')
-        elif '<body>' in current_html:
-            current_html = current_html.replace('<body>', f'{zoom_css}<body>')
-        else:
-            # Prepend if no suitable location
-            current_html = zoom_css + current_html
-            
-        # Apply the modified HTML
-        self.faithful_output.setHtml(current_html)
-        self.log(f"Applied CSS injection zoom: {self.text_zoom}px")
-    
-    def _apply_widget_transform_zoom(self) -> None:
-        """Fallback zoom using widget transform"""
-        try:
-            # For QTextEdit, we can't use setTransform directly
-            # Instead, we'll try to scale the viewport
-            scale_factor = self.text_zoom / 12.0
-            
-            # Set a scaled font as fallback
+        Sets the font size of the faithful_output widget to the current text_zoom value.
+        """
+        if self.faithful_output:
             font = self.faithful_output.font()
-            font.setPointSize(int(12 * scale_factor))
+            font.setPointSize(self.text_zoom)
             self.faithful_output.setFont(font)
-            
-            # Also try to scale any existing content using zoom methods
-            if scale_factor > 1.0:
-                zoom_steps = int((scale_factor - 1.0) * 10)
-                for _ in range(zoom_steps):
-                    self.faithful_output.zoomIn()
-            elif scale_factor < 1.0:
-                zoom_steps = int((1.0 - scale_factor) * 10)
-                for _ in range(zoom_steps):
-                    self.faithful_output.zoomOut()
-                    
-            self.log(f"Applied fallback zoom: {self.text_zoom}pt")
-            
-        except Exception as e:
-            self.log(f"Zoom fallback also failed: {e}")
     
     def _apply_pdf_zoom(self) -> None:
         """Apply current PDF zoom to the PDF view widget.
@@ -1937,114 +1868,11 @@ class ChonkerSnyfterApp(QMainWindow):
         self.chonker_btn.setChecked(mode == Mode.CHONKER)
         self.snyfter_btn.setChecked(mode == Mode.SNYFTER)
         
-        # Update UI based on mode
+        # Update terminal
         if mode == Mode.CHONKER:
-            # Show CHONKER UI (splitter with PDF and text views)
-            if hasattr(self, 'splitter'):
-                self.splitter.setVisible(True)
-            if hasattr(self, 'snyfter_layout'):
-                self.snyfter_layout.setVisible(False)
             self.log("CHONKER mode activated - Ready to process PDFs!")
         else:
-            # Show SNYFTER UI
-            if not hasattr(self, 'snyfter_layout'):
-                self._create_snyfter_ui()
-            if hasattr(self, 'splitter'):
-                self.splitter.setVisible(False)
-            self.snyfter_layout.setVisible(True)
-            self.log("SNYFTER mode activated - Ready for qualitative analysis!")
-    
-    def _create_snyfter_ui(self):
-        """Create SNYFTER mode UI layout"""
-        # Create SNYFTER-specific layout
-        self.snyfter_layout = QWidget()
-        snyfter_main_layout = QVBoxLayout(self.snyfter_layout)
-        
-        # Create a label to show SNYFTER mode is active
-        snyfter_label = QLabel("🕵️ SNYFTER Mode - Qualitative Analysis")
-        snyfter_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        snyfter_label.setStyleSheet("""
-            QLabel {
-                font-size: 24px;
-                font-weight: bold;
-                color: #D3D3D3;
-                padding: 20px;
-                background-color: #525659;
-                border-radius: 10px;
-                margin: 10px;
-            }
-        """)
-        snyfter_main_layout.addWidget(snyfter_label)
-        
-        # Create horizontal layout for code tree and document view
-        h_layout = QHBoxLayout()
-        
-        # Left side - Code tree
-        code_tree_container = QGroupBox("Codes")
-        code_tree_container.setStyleSheet("""
-            QGroupBox {
-                font-weight: bold;
-                border: 2px solid #3A3C3E;
-                border-radius: 5px;
-                margin-top: 10px;
-                padding-top: 10px;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                left: 10px;
-                padding: 0 5px 0 5px;
-            }
-        """)
-        tree_layout = QVBoxLayout(code_tree_container)
-        
-        # Placeholder for code tree
-        self.code_tree = QTreeWidget()
-        self.code_tree.setHeaderLabel("Qualitative Codes")
-        self.code_tree.setStyleSheet("""
-            QTreeWidget {
-                background-color: #2D2E30;
-                color: #E0E0E0;
-                border: none;
-            }
-        """)
-        tree_layout.addWidget(self.code_tree)
-        
-        # Right side - Document viewer with annotation capabilities
-        doc_container = QGroupBox("Document")
-        doc_container.setStyleSheet("""
-            QGroupBox {
-                font-weight: bold;
-                border: 2px solid #3A3C3E;
-                border-radius: 5px;
-                margin-top: 10px;
-                padding-top: 10px;
-            }
-        """)
-        doc_layout = QVBoxLayout(doc_container)
-        
-        # Placeholder for annotatable text viewer
-        self.annotation_viewer = QTextEdit()
-        self.annotation_viewer.setPlaceholderText("Load a document to begin qualitative analysis...")
-        self.annotation_viewer.setStyleSheet("""
-            QTextEdit {
-                background-color: #2D2E30;
-                color: #E0E0E0;
-                border: none;
-                font-size: 14px;
-            }
-        """)
-        doc_layout.addWidget(self.annotation_viewer)
-        
-        # Add to horizontal layout
-        h_layout.addWidget(code_tree_container, 1)
-        h_layout.addWidget(doc_container, 3)
-        
-        snyfter_main_layout.addLayout(h_layout)
-        
-        # Add to the central widget's layout
-        central_layout = self.centralWidget().layout()
-        central_layout.addWidget(self.snyfter_layout)
-        self.snyfter_layout.setVisible(False)
+            self.log("SNYFTER mode activated - Ready to search archives!")
     
     def _on_ocr_needed(self, file_path: str):
         """Handle when OCR is needed for a scanned PDF"""
@@ -2402,9 +2230,6 @@ class ChonkerSnyfterApp(QMainWindow):
     
     def _display_in_faithful_output(self, result: ProcessingResult):
         """Display processed content in the right pane faithful output"""
-        # Apply zoom to the base HTML
-        zoom_size = self.text_zoom
-        
         html = f"""
         <!DOCTYPE html>
         <html>
@@ -2415,21 +2240,18 @@ class ChonkerSnyfterApp(QMainWindow):
                     margin: 20px; 
                     color: #FFFFFF;
                     background: #525659;
-                    font-size: {zoom_size}px !important;
                 }}
                 table {{ 
                     border-collapse: collapse; 
                     margin: 15px 0;
                     border: 1px solid #3A3C3E;
                     background-color: #3A3C3E;
-                    font-size: {zoom_size}px !important;
                 }}
                 th, td {{ 
                     border: 1px solid #525659; 
                     padding: 8px;
                     color: #FFFFFF;
                     background-color: #424548;
-                    font-size: {zoom_size}px !important;
                 }}
                 th {{
                     background-color: #3A3C3E;
@@ -2451,13 +2273,9 @@ class ChonkerSnyfterApp(QMainWindow):
                 button:hover {{
                     background: #16A085;
                 }}
-                h1 {{ color: #1ABC9C; font-size: {int(zoom_size * 1.5)}px !important; }}
-                h2 {{ color: #1ABC9C; font-size: {int(zoom_size * 1.3)}px !important; }}
-                h3 {{ color: #1ABC9C; font-size: {int(zoom_size * 1.2)}px !important; }}
-                p {{ color: #FFFFFF; font-size: {zoom_size}px !important; }}
-                li {{ color: #FFFFFF; font-size: {zoom_size}px !important; }}
-                div {{ font-size: {zoom_size}px !important; }}
-                span {{ font-size: {zoom_size}px !important; }}
+                h1, h2, h3 {{ color: #1ABC9C; }}
+                p {{ color: #FFFFFF; }}
+                li {{ color: #FFFFFF; }}
             </style>
         </head>
         <body>
@@ -2470,8 +2288,6 @@ class ChonkerSnyfterApp(QMainWindow):
         </html>
         """
         self.faithful_output.setHtml(html)
-        # Store the result for re-rendering on zoom changes
-        self._last_processing_result = result
     
     def create_output_window(self, result: ProcessingResult):
         """Create window for processed output"""
@@ -2647,39 +2463,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
-class Implementtexthighlightingandannotationsystem(QWidget):
-    """Generated Implementtexthighlightingandannotationsystem for SNYFTER mode"""
-    
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setup_ui()
-        self.setup_style()
-        self.setup_event_handlers()
-    
-    def setup_ui(self):
-        """Initialize UI components"""
-        # Generated UI setup
-        pass
-    
-    def setup_style(self):
-        """Apply SNYFTER theme styling"""
-        style = f"""
-        Implementtexthighlightingandannotationsystem {
-            background-color: #525659;
-            color: #FFFFFF;
-            border: 1px solid #3A3C3E;
-        }
-        """
-        self.setStyleSheet(style)
-    
-    def setup_event_handlers(self):
-        """Connect event handlers"""
-        # Generated event handler connections
-        pass
-    
-    # Additional methods would be generated here based on component type
-    def refresh(self):
-        """Refresh component state"""
-        pass

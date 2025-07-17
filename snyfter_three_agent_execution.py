@@ -270,11 +270,15 @@ def extend_database_for_snyfter(self):
         conn.commit()
 '''
     
-    def _ui_component_template(self, task: UIComponentTask) -> str:
+    def _ui_component_template(self, task: DevelopmentTask) -> str:
         """Generate UI component code"""
+        # For UI component tasks, extract component details from task name/description
+        component_name = task.name.replace("Create ", "").replace(" component", "").replace(" ", "")
+        parent_class = "QWidget"  # Default parent class
+        
         return f'''
-class {task.component_name}({task.parent_class}):
-    """Generated {task.component_name} for SNYFTER mode"""
+class {component_name}({parent_class}):
+    """Generated {component_name} for SNYFTER mode"""
     
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -289,11 +293,11 @@ class {task.component_name}({task.parent_class}):
     
     def setup_style(self):
         """Apply SNYFTER theme styling"""
-        style = """
-        {task.component_name} {{
-            background-color: {task.style_requirements.get('background', '#525659')};
-            color: {task.style_requirements.get('color', '#FFFFFF')};
-            border: {task.style_requirements.get('border', '1px solid #3A3C3E')};
+        style = f"""
+        {component_name} {{
+            background-color: #525659;
+            color: #FFFFFF;
+            border: 1px solid #3A3C3E;
         }}
         """
         self.setStyleSheet(style)
@@ -303,8 +307,10 @@ class {task.component_name}({task.parent_class}):
         # Generated event handler connections
         pass
     
-    # Required methods
-    {self._generate_methods(task.required_methods)}
+    # Additional methods would be generated here based on component type
+    def refresh(self):
+        """Refresh component state"""
+        pass
 '''
     
     def _integration_template(self, task: DevelopmentTask) -> str:
