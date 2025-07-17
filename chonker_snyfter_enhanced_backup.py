@@ -24,39 +24,49 @@ import hashlib
 import tempfile
 import subprocess
 from pathlib import Path
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Tuple, Any
 from datetime import datetime
 from enum import Enum
+import traceback
+import csv
 
 from PyQt6.QtWidgets import (
-    QApplication, QMainWindow, QVBoxLayout, QHBoxLayout, QWidget,
-    QPushButton, QFileDialog, QMessageBox, QTextEdit, QLabel,
-    QComboBox, QFrame, QProgressBar, QTableWidget, QTableWidgetItem,
-    QTabWidget, QLineEdit, QListWidget, QSplitter,
-    QSpinBox, QDialog, QDialogButtonBox, QCheckBox, QFormLayout,
-    QGroupBox, QGraphicsOpacityEffect, QTreeWidget, QTreeWidgetItem
+    QApplication, QMainWindow, QStackedWidget, QVBoxLayout, QHBoxLayout,
+    QWidget, QPushButton, QFileDialog, QMessageBox, QTextEdit,
+    QLabel, QComboBox, QScrollArea, QFrame, QProgressBar,
+    QTableWidget, QTableWidgetItem, QTabWidget, QStatusBar,
+    QLineEdit, QListWidget, QSplitter, QPlainTextEdit, QMenu,
+    QSpinBox, QInputDialog, QListWidgetItem, QDialog, QDialogButtonBox,
+    QCheckBox, QFormLayout, QGroupBox, QRadioButton, QButtonGroup,
+    QGraphicsOpacityEffect, QToolBar, QDockWidget, QTreeWidget, QTreeWidgetItem
 )
 from PyQt6.QtCore import (
-    Qt, QThread, pyqtSignal, QPointF, QPropertyAnimation, QEasingCurve
+    Qt, QThread, pyqtSignal, QTimer, QPointF, QObject, QEvent, 
+    QSize, QRectF, QPropertyAnimation, QParallelAnimationGroup,
+    QSequentialAnimationGroup, QEasingCurve, pyqtProperty, QUrl
 )
 from PyQt6.QtGui import (
-    QFont, QColor, QPixmap, QAction, QPainter, 
-    QBrush
+    QFont, QPalette, QColor, QTextCharFormat, QTextCursor, 
+    QKeyEvent, QPixmap, QIcon, QAction, QPainter, QPen, QBrush,
+    QLinearGradient, QRadialGradient, QFontDatabase, QMovie
 )
-from PyQt6.QtPdf import QPdfDocument
+from PyQt6.QtPdf import QPdfDocument, QPdfSelection
 from PyQt6.QtPdfWidgets import QPdfView
 
 # Enhanced imports
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, validator
 from typing import List, Optional, Dict, Any
 from enum import Enum
 from rich.console import Console
+from rich.progress import Progress, SpinnerColumn, BarColumn, TextColumn
+from rich.table import Table
 from rich.panel import Panel
 from rich import box
 
 console = Console()
 
 try:
+    from docling.document_converter import DocumentConverter
     import fitz  # PyMuPDF
     DEPENDENCIES_AVAILABLE = True
 except ImportError:
@@ -1458,6 +1468,7 @@ class ChonkerSnyfterEnhancedWindow(QMainWindow):
     def add_visual_feedback_effects(self):
         """Add awesome visual feedback and polish"""
         # Smooth animations for mode switching
+        from PyQt6.QtCore import QPropertyAnimation, QEasingCurve
         
         # Tooltips will be added when buttons are created
         
@@ -1507,7 +1518,7 @@ class ChonkerSnyfterEnhancedWindow(QMainWindow):
     
     def show_command_palette(self):
         """Show modern command palette (Cmd+K style)"""
-        from PyQt6.QtWidgets import QDialog
+        from PyQt6.QtWidgets import QDialog, QDialogButtonBox
         from PyQt6.QtCore import Qt
         
         class CommandPalette(QDialog):
@@ -1734,7 +1745,8 @@ class ChonkerSnyfterEnhancedWindow(QMainWindow):
         
         return container
     
-    # Removed old interface methods for cleaner code
+    def create_enhanced_chonker_interface_old(self):
+        """Old interface - keeping for reference"""
         # Main horizontal splitter
         splitter = QSplitter(Qt.Orientation.Horizontal)
         
@@ -2837,6 +2849,7 @@ class ChonkerSnyfterEnhancedWindow(QMainWindow):
     def on_page_changed(self, page_num):
         """Handle page navigation"""
         # Page navigation is now handled in individual PDF windows
+        pass
     
     def log_message(self, message: str, level: str = "info"):
         """Add message to log view with timestamp"""

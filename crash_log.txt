@@ -1,0 +1,16 @@
+
+🛡️ ACTIVATING CAFFEINATE DEFENSE SYSTEM...
+☕ This app will fight to stay awake and prevent auto-logout!
+💪 CHONKER & SNYFTER shall not be stopped by mere system sleep!
+
+🛡️ CAFFEINATE DEFENSE ACTIVATED! I shall not sleep! I shall not yield!
+☕ Brewing infinite coffee to keep the system awake...
+╭────────────── Welcome ──────────────╮
+│ 🐹 CHONKER & 🐁 SNYFTER             │
+│ Enhanced Document Processing System │
+│                                     │
+│ Ready to process your documents!    │
+╰─────────────────────────────────────╯
+qt.qpa.fonts: Populating font family aliases took 122 ms. Replace uses of missing font family "-apple-system" with one that exists to avoid this cost. 
+2025-07-16 15:46:18.036 Python[61970:8053081] TSMSendMessageToUIServer: CFMessagePortSendRequest FAILED(-1) to send to port com.apple.tsm.uiserver
+2025-07-16 15:46:18.036 Python[61970:8053081] TSMSendMessageToUIServer: CFMessagePortSendRequest FAILED(-1) to send to port com.apple.tsm.uiserver

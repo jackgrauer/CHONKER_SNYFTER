@@ -63,7 +63,6 @@ except ImportError:
     DEPENDENCIES_AVAILABLE = False
     console.print("[red]⚠️  Missing dependencies! Please install docling and PyMuPDF[/red]")
 
-
 # Structured data models using Instructor
 class DocumentChunk(BaseModel):
     """Structured representation of a document chunk"""
@@ -74,7 +73,6 @@ class DocumentChunk(BaseModel):
     page: int
     confidence: float = Field(default=1.0, ge=0.0, le=1.0)
     metadata: Dict[str, Any] = Field(default_factory=dict)
-
 
 class ProcessingResult(BaseModel):
     """Structured result from document processing"""
@@ -87,7 +85,6 @@ class ProcessingResult(BaseModel):
     error_message: Optional[str] = None
     warnings: List[str] = Field(default_factory=list)
 
-
 class ExportOptions(BaseModel):
     """Export configuration"""
     format: str = Field(description="Export format: json, csv, markdown, html")
@@ -97,11 +94,9 @@ class ExportOptions(BaseModel):
     include_markdown: bool = True
     chunk_types: List[str] = Field(default_factory=lambda: ["all"])
 
-
 class Mode(Enum):
     CHONKER = "chonker"  # PDF processing mode
     SNYFTER = "snyfter"  # Database/research mode
-
 
 class ChonkerPersonality:
     """🐹 CHONKER - The enthusiastic PDF muncher"""
@@ -134,7 +129,6 @@ class ChonkerPersonality:
         "🐹 This PDF needs some de-scuzzifying!"
     ]
 
-
 class SnyfterPersonality:
     """🐁 SNYFTER - The meticulous librarian mouse"""
     
@@ -166,7 +160,6 @@ class SnyfterPersonality:
         "🐁 Document preserved for posterity."
     ]
 
-
 class AnimatedLabel(QLabel):
     """Label with fade-in/fade-out animation support"""
     
@@ -175,24 +168,7 @@ class AnimatedLabel(QLabel):
         self.opacity_effect = QGraphicsOpacityEffect()
         self.setGraphicsEffect(self.opacity_effect)
         
-    def fade_in(self, duration=500):
-        self.animation = QPropertyAnimation(self.opacity_effect, b"opacity")
-        self.animation.setDuration(duration)
-        self.animation.setStartValue(0)
-        self.animation.setEndValue(1)
-        self.animation.setEasingCurve(QEasingCurve.Type.InOutQuad)
-        self.animation.start()
-        
-    def fade_out(self, duration=500):
-        self.animation = QPropertyAnimation(self.opacity_effect, b"opacity")
-        self.animation.setDuration(duration)
-        self.animation.setStartValue(1)
-        self.animation.setEndValue(0)
-        self.animation.setEasingCurve(QEasingCurve.Type.InOutQuad)
-        self.animation.start()
-
-
-class EnhancedChonkerWorker(QThread):
+    class EnhancedChonkerWorker(QThread):
     """Enhanced CHONKER's PDF processing worker thread with better error handling"""
     
     finished = pyqtSignal(ProcessingResult)
@@ -520,7 +496,6 @@ class EnhancedChonkerWorker(QThread):
         """Stop processing"""
         self.should_stop = True
 
-
 class SnyfterDatabase:
     """Enhanced SNYFTER's meticulous database management"""
     
@@ -759,7 +734,6 @@ class SnyfterDatabase:
         
         return None
 
-
 class ModernPushButton(QPushButton):
     """Modern styled push button with hover effects"""
     
@@ -786,7 +760,6 @@ class ModernPushButton(QPushButton):
             }
         """)
 
-
 class ChonkerSnyfterEnhancedWindow(QMainWindow):
     """Enhanced main window with improved features"""
     
@@ -807,8 +780,7 @@ class ChonkerSnyfterEnhancedWindow(QMainWindow):
         
         self.init_ui()
         self.apply_modern_theme()
-        
-    
+
     def start_caffeinate_defense(self):
         """🛡️ Start caffeinate to prevent system sleep/logout - DEFEND AGAINST THE MACHINE!"""
         try:
@@ -1664,19 +1636,18 @@ class ChonkerSnyfterEnhancedWindow(QMainWindow):
     
     def update_recent_files_menu(self, menu):
         """Update recent files menu"""
-        # TODO: Implement recent files tracking
+
         menu.addAction("No recent files")
     
     def show_find_dialog(self):
         """Show find dialog"""
-        # TODO: Implement find functionality
+
         self.update_terminal("🔍 Find dialog coming soon!", "info")
     
     def apply_theme(self, theme_name):
         """Apply selected theme"""
         self.update_terminal(f"🎨 Applying {theme_name} theme", "info")
-        # TODO: Implement theme switching
-    
+
     def show_shortcuts_dialog(self):
         """Show keyboard shortcuts dialog"""
         QMessageBox.information(self, "Keyboard Shortcuts", 
@@ -1859,80 +1830,7 @@ class ChonkerSnyfterEnhancedWindow(QMainWindow):
         layout.addLayout(h_layout)
         
         return container
-    
-    def create_enhanced_snyfter_interface_old(self):
-        """Old interface - keeping for reference"""
-        # Main horizontal splitter
-        splitter = QSplitter(Qt.Orientation.Horizontal)
-        
-        # LEFT PANE - Search Controls
-        left_pane = QWidget()
-        left_layout = QVBoxLayout(left_pane)
-        left_layout.setContentsMargins(10, 10, 10, 10)
-        
-        # Search header
-        search_header = QLabel("🔍 Archive Search")
-        search_header.setStyleSheet("font-weight: bold; font-size: 14px; color: #1ABC9C;")
-        left_layout.addWidget(search_header)
-        
-        # Search input
-        self.search_input = QLineEdit()
-        self.search_input.setPlaceholderText("Search documents...")
-        self.search_input.returnPressed.connect(self.search_archives)
-        left_layout.addWidget(self.search_input)
-        
-        # Search type filter
-        self.search_type_combo = QComboBox()
-        self.search_type_combo.addItems(["All Types", "text", "heading", "list", "table"])
-        left_layout.addWidget(self.search_type_combo)
-        
-        # Search button
-        self.search_btn = ModernPushButton("🔍 Search")
-        self.search_btn.clicked.connect(self.search_archives)
-        left_layout.addWidget(self.search_btn)
-        
-        # Statistics
-        left_layout.addWidget(QLabel("\n📊 Statistics:"))
-        self.stats_labels = {
-            'total_docs': QLabel("Documents: 0"),
-            'total_chunks': QLabel("Chunks: 0"),
-            'last_updated': QLabel("Updated: Never")
-        }
-        
-        for label in self.stats_labels.values():
-            label.setStyleSheet("color: #7F8C8D; font-size: 12px;")
-            left_layout.addWidget(label)
-        
-        left_layout.addStretch()
-        
-        splitter.addWidget(left_pane)
-        
-        # RIGHT PANE - Results
-        right_pane = QWidget()
-        right_layout = QVBoxLayout(right_pane)
-        right_layout.setContentsMargins(10, 10, 10, 10)
-        
-        # Results header
-        results_header = QLabel("📄 Search Results")
-        results_header.setStyleSheet("font-weight: bold; font-size: 14px; color: #1ABC9C;")
-        right_layout.addWidget(results_header)
-        
-        # Results tree
-        self.results_tree = QTreeWidget()
-        self.results_tree.setHeaderLabels(["Document", "Date", "Chunks", "Snippet"])
-        self.results_tree.itemDoubleClicked.connect(self.open_document_details)
-        right_layout.addWidget(self.results_tree)
-        
-        splitter.addWidget(right_pane)
-        
-        # Set splitter sizes (30/70)
-        splitter.setSizes([300, 900])
-        
-        # Update statistics
-        self.update_archive_stats()
-        
-        return splitter
-    
+
     def apply_modern_theme(self):
         """Apply modern dark theme"""
         self.setStyleSheet("""
@@ -1951,8 +1849,7 @@ class ChonkerSnyfterEnhancedWindow(QMainWindow):
                 font-weight: bold;
                 font-size: 12px;
             }
-            
-            
+
             QTabWidget::pane {
                 border: 1px solid #3C3C3C;
                 background: #2D2D30;
@@ -2116,8 +2013,7 @@ class ChonkerSnyfterEnhancedWindow(QMainWindow):
                     font-weight: normal;
                 }
             """)
-    
-    
+
     def open_pdf(self):
         """Open PDF file dialog - creates new floating window"""
         file_path, _ = QFileDialog.getOpenFileName(
@@ -2897,7 +2793,6 @@ class ChonkerSnyfterEnhancedWindow(QMainWindow):
         
         event.accept()
 
-
 class BatchProcessDialog(QDialog):
     """Enhanced batch processing dialog"""
     
@@ -3050,7 +2945,6 @@ class BatchProcessDialog(QDialog):
         
         self.accept()
 
-
 class DocumentDetailsDialog(QDialog):
     """Dialog for viewing document details"""
     
@@ -3195,7 +3089,6 @@ class DocumentDetailsDialog(QDialog):
                 except Exception as e:
                     QMessageBox.critical(self, "🐹 Export Error", f"🐹 *hiccup* Export failed: {str(e)}")
 
-
 def handle_exception(exc_type, exc_value, exc_traceback):
     """Global exception handler to prevent silent crashes"""
     if issubclass(exc_type, KeyboardInterrupt):
@@ -3245,7 +3138,6 @@ def main():
     ))
     
     sys.exit(app.exec())
-
 
 if __name__ == "__main__":
     main()
