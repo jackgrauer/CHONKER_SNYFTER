@@ -1624,7 +1624,7 @@ class ChonkerSnyfterApp(QMainWindow):
             gesture_type = gesture_event.gestureType()
             
             # Debug: log all gesture events
-            self.log(f"Gesture on {obj.__class__.__name__}: {gesture_type}")
+            # Gesture detected
             
             if 'ZoomNativeGesture' in str(gesture_type):
                 # Only handle the event once per gesture
@@ -1854,71 +1854,10 @@ class ChonkerSnyfterApp(QMainWindow):
         if hasattr(self, '_last_processing_result'):
             # Re-display with new zoom level
             self._display_in_faithful_output(self._last_processing_result)
-            self.log(f"Re-rendered HTML with zoom: {self.text_zoom}px")
+            # Zoom applied via re-render
         else:
             # Simple approach: just log that we need content first
-            self.log(f"Zoom set to {self.text_zoom}px - will apply when content is loaded")
-                
-    def _apply_css_injection_zoom(self) -> None:
-        """Alternative CSS injection approach"""
-        scale_factor = self.text_zoom / 12.0
-        
-        # Get current HTML
-        current_html = self.faithful_output.toHtml()
-        
-        # Generate zoom CSS with more aggressive overrides
-        zoom_css = f"""<style>
-        * {{ font-size: {self.text_zoom}px !important; }}
-        body, p, div, span {{ font-size: {self.text_zoom}px !important; }}
-        h1 {{ font-size: {int(self.text_zoom * 1.5)}px !important; }}
-        h2 {{ font-size: {int(self.text_zoom * 1.2)}px !important; }}
-        h3 {{ font-size: {int(self.text_zoom * 1.1)}px !important; }}
-        table, td, th {{ font-size: {self.text_zoom}px !important; }}
-        </style>"""
-        
-        # Remove any existing injected styles
-        import re
-        current_html = re.sub(r'<style>.*?</style>', '', current_html, flags=re.DOTALL)
-        
-        # Find the best place to inject
-        if '</head>' in current_html:
-            current_html = current_html.replace('</head>', f'{zoom_css}</head>')
-        elif '<body>' in current_html:
-            current_html = current_html.replace('<body>', f'{zoom_css}<body>')
-        else:
-            # Prepend if no suitable location
-            current_html = zoom_css + current_html
-            
-        # Apply the modified HTML
-        self.faithful_output.setHtml(current_html)
-        self.log(f"Applied CSS injection zoom: {self.text_zoom}px")
-    
-    def _apply_widget_transform_zoom(self) -> None:
-        """Fallback zoom using widget transform"""
-        try:
-            # For QTextEdit, we can't use setTransform directly
-            # Instead, we'll try to scale the viewport
-            scale_factor = self.text_zoom / 12.0
-            
-            # Set a scaled font as fallback
-            font = self.faithful_output.font()
-            font.setPointSize(int(12 * scale_factor))
-            self.faithful_output.setFont(font)
-            
-            # Also try to scale any existing content using zoom methods
-            if scale_factor > 1.0:
-                zoom_steps = int((scale_factor - 1.0) * 10)
-                for _ in range(zoom_steps):
-                    self.faithful_output.zoomIn()
-            elif scale_factor < 1.0:
-                zoom_steps = int((1.0 - scale_factor) * 10)
-                for _ in range(zoom_steps):
-                    self.faithful_output.zoomOut()
-                    
-            self.log(f"Applied fallback zoom: {self.text_zoom}pt")
-            
-        except Exception as e:
-            self.log(f"Zoom fallback also failed: {e}")
+            pass  # Zoom will apply when content loads
     
     def _apply_pdf_zoom(self) -> None:
         """Apply current PDF zoom to the PDF view widget.
@@ -2648,38 +2587,3 @@ def main():
 if __name__ == "__main__":
     main()
 
-
-class Implementtexthighlightingandannotationsystem(QWidget):
-    """Generated Implementtexthighlightingandannotationsystem for SNYFTER mode"""
-    
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setup_ui()
-        self.setup_style()
-        self.setup_event_handlers()
-    
-    def setup_ui(self):
-        """Initialize UI components"""
-        # Generated UI setup
-        pass
-    
-    def setup_style(self):
-        """Apply SNYFTER theme styling"""
-        style = f"""
-        Implementtexthighlightingandannotationsystem {
-            background-color: #525659;
-            color: #FFFFFF;
-            border: 1px solid #3A3C3E;
-        }
-        """
-        self.setStyleSheet(style)
-    
-    def setup_event_handlers(self):
-        """Connect event handlers"""
-        # Generated event handler connections
-        pass
-    
-    # Additional methods would be generated here based on component type
-    def refresh(self):
-        """Refresh component state"""
-        pass
