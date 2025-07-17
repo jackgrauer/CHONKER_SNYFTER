@@ -22,6 +22,7 @@ from typing import Dict, List, Optional, Tuple, Any
 from datetime import datetime
 from enum import Enum
 import traceback
+from html import escape
 
 # Qt imports
 from PyQt6.QtWidgets import (
@@ -107,6 +108,14 @@ class DocumentProcessor(QThread):
         super().__init__()
         self.pdf_path = pdf_path
         self.should_stop = False
+    
+    def stop(self):
+        """Stop processing thread safely"""
+        self.should_stop = True
+        if self.isRunning():
+            if not self.wait(5000):  # Wait up to 5 seconds
+                self.terminate()  # Force terminate if needed
+                self.wait()  # Wait for termination
     
     def run(self):
         """Process document with comprehensive error handling"""
@@ -195,21 +204,24 @@ class DocumentProcessor(QThread):
         )
     
     def _item_to_html(self, item, level: int) -> str:
-        """Convert document item to HTML"""
+        """Convert document item to HTML with XSS protection"""
         item_type = type(item).__name__
         
         if item_type == 'SectionHeaderItem' and hasattr(item, 'text'):
             heading_level = min(level + 1, 3)
-            return f'<h{heading_level}>{item.text}</h{heading_level}>'
+            safe_text = escape(str(item.text))
+            return f'<h{heading_level}>{safe_text}</h{heading_level}>'
         
         elif item_type == 'TableItem':
             return self._table_to_html(item)
         
         elif item_type == 'TextItem' and hasattr(item, 'text'):
-            return f'<p>{item.text}</p>'
+            safe_text = escape(str(item.text))
+            return f'<p>{safe_text}</p>'
         
         elif item_type == 'ListItem' and hasattr(item, 'text'):
-            return f'<li>{item.text}</li>'
+            safe_text = escape(str(item.text))
+            return f'<li>{safe_text}</li>'
         
         return ''
     
@@ -225,14 +237,16 @@ class DocumentProcessor(QThread):
                 # Headers
                 html.append('<tr>')
                 for col in df.columns:
-                    html.append(f'<th>{col}</th>')
+                    safe_col = escape(str(col))
+                    html.append(f'<th>{safe_col}</th>')
                 html.append('</tr>')
                 
                 # Data rows
                 for _, row in df.iterrows():
                     html.append('<tr>')
                     for value in row:
-                        html.append(f'<td contenteditable="true">{value}</td>')
+                        safe_value = escape(str(value))
+                        html.append(f'<td contenteditable="true">{safe_value}</td>')
                     html.append('</tr>')
                     
             except:
@@ -414,22 +428,37 @@ class DocumentDatabase:
             return False
     
     def search(self, query: str) -> List[Dict]:
-        """Search documents using FTS"""
+        """Search documents using FTS with SQL injection protection"""
+        if not query or len(query) > 1000:
+            return []
+        
+        # Validate FTS5 query syntax - only allow safe characters
+        import re
+        if not re.match(r'^[a-zA-Z0-9\s\-_"\']+$', query):
+            print(f"🐁 Invalid search query: {query}")
+            return []
+        
         conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row  # Fix for dict conversion
         results = []
         
         try:
-            cursor = conn.execute('''
+            # Use proper parameterized query
+            cursor = conn.execute("""
                 SELECT DISTINCT d.* 
                 FROM chunks_fts f
                 JOIN documents d ON f.document_id = d.id
                 WHERE chunks_fts MATCH ?
                 ORDER BY rank
                 LIMIT 50
-            ''', (query,))
+            """, (query,))
             
             results = [dict(row) for row in cursor.fetchall()]
             
+        except sqlite3.OperationalError as e:
+            # FTS syntax error - return empty results
+            print(f"🐁 Search syntax error: {e}")
+            results = []
         except Exception as e:
             print(f"🐁 Search error: {e}")
         
@@ -485,26 +514,35 @@ class ChonkerSnyfterApp(QMainWindow):
             self.snyfter_pixmap = self._create_fallback_emoji("S", QColor("#D3D3D3"))
     
     def _create_fallback_emoji(self, emoji: str, bg_color: QColor) -> QPixmap:
-        """Create fallback emoji (but we should never need this!)"""
+        """Create fallback emoji with proper resource cleanup"""
         pixmap = QPixmap(64, 64)
         pixmap.fill(Qt.GlobalColor.transparent)
         
-        painter = QPainter(pixmap)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter = QPainter()
+        try:
+            if not painter.begin(pixmap):
+                return pixmap
+                
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+            
+            # Background circle
+            painter.setBrush(QBrush(bg_color))
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.drawEllipse(2, 2, 60, 60)
+            
+            # Emoji text
+            painter.setPen(QColor("black"))
+            font = QFont()
+            font.setPointSize(32)
+            painter.setFont(font)
+            painter.drawText(pixmap.rect(), Qt.AlignmentFlag.AlignCenter, emoji)
+            
+        except Exception as e:
+            print(f"Error creating fallback emoji: {e}")
+        finally:
+            if painter.isActive():
+                painter.end()
         
-        # Background circle
-        painter.setBrush(QBrush(bg_color))
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.drawEllipse(2, 2, 60, 60)
-        
-        # Emoji text
-        painter.setPen(QColor("black"))
-        font = QFont()
-        font.setPointSize(32)
-        painter.setFont(font)
-        painter.drawText(pixmap.rect(), Qt.AlignmentFlag.AlignCenter, emoji)
-        
-        painter.end()
         return pixmap
     
     def _init_caffeinate(self):
@@ -829,11 +867,19 @@ class ChonkerSnyfterApp(QMainWindow):
     
     def create_embedded_pdf_viewer(self, file_path: str):
         """Create embedded PDF viewer in left pane"""
-        # Clear left pane
+        # Clear left pane and remove old event filters
         for i in reversed(range(self.left_layout.count())): 
             widget = self.left_layout.itemAt(i).widget()
             if widget:
+                if hasattr(widget, 'removeEventFilter'):
+                    widget.removeEventFilter(self)
                 widget.setParent(None)
+                widget.deleteLater()
+        
+        # Clean up old PDF view if exists
+        if hasattr(self, 'embedded_pdf_view') and self.embedded_pdf_view:
+            self.embedded_pdf_view.removeEventFilter(self)
+            self.embedded_pdf_view = None
         
         # Create PDF viewer
         self.embedded_pdf_view = QPdfView(self.left_pane)
@@ -868,6 +914,11 @@ class ChonkerSnyfterApp(QMainWindow):
     
     def process_current(self):
         """Process current PDF"""
+        # Stop any existing processor
+        if hasattr(self, 'processor') and self.processor.isRunning():
+            self.log("Stopping previous processing...")
+            self.processor.stop()
+        
         # Check if we have a PDF loaded
         if not self.current_pdf_path:
             QMessageBox.warning(self, "No PDF", "Please open a PDF first")
@@ -1019,6 +1070,10 @@ class ChonkerSnyfterApp(QMainWindow):
     
     def closeEvent(self, event):
         """Clean up on close"""
+        # Stop any running processor
+        if hasattr(self, 'processor') and self.processor.isRunning():
+            self.processor.stop()
+        
         # Stop caffeinate
         if self.caffeinate_process:
             self.caffeinate_process.terminate()
