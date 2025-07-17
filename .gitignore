@@ -4,27 +4,15 @@ __pycache__/
 *$py.class
 *.so
 .Python
-env/
 venv/
-.venv
-pip-log.txt
-pip-delete-this-directory.txt
+env/
+ENV/
+
+# Testing
+.coverage
+htmlcov/
 .pytest_cache/
-.ruff_cache/
-
-# Virtual environments
-chonksnyft-env/
-../chonksnyft-env/
-
-# CHONKER & SNYFTER specific
-snyfter_archives.db
-chonker_documents.db
-*.db-journal
-extracted/
-archives/
-temp_pdfs/
-*.pdf.tmp
-*_cleaned.pdf
+*.cover
 
 # IDE
 .vscode/
@@ -33,27 +21,20 @@ temp_pdfs/
 *.swo
 .DS_Store
 
-# Turborepo
-.turbo/
-dist/
-node_modules/
-
-# Test artifacts
-htmlcov/
-.coverage
-.coverage.*
-coverage.xml
-*.cover
-
-# Logs
-*.log
-logs/
-
-# Backups
-backups/
-*.backup
-
-# Local config
+# Application
+snyfter_archive.db
+*.db-journal
+*.db-wal
+*.db-shm
 .env
-.env.local
-config.local.json
+config.json
+
+# Logs and cache
+*.log
+~/.chonker_cache/
+~/.chonker_logs/
+
+# Build
+dist/
+build/
+*.egg-info/

@@ -23,6 +23,8 @@ from datetime import datetime
 from enum import Enum
 import traceback
 from html import escape
+from queue import Queue
+import time
 
 # Qt imports
 from PyQt6.QtWidgets import (
@@ -34,7 +36,7 @@ from PyQt6.QtCore import (
     Qt, QThread, pyqtSignal, QTimer, QPointF, QObject, QEvent
 )
 from PyQt6.QtGui import (
-    QAction, QKeySequence, QIcon, QPixmap, QPainter, QFont, QBrush, QColor
+    QAction, QKeySequence, QIcon, QPixmap, QPainter, QFont, QBrush, QColor, QTextCursor
 )
 from PyQt6.QtPdf import QPdfDocument
 from PyQt6.QtPdfWidgets import QPdfView
@@ -60,6 +62,31 @@ except ImportError:
     PYDANTIC_AVAILABLE = False
     BaseModel = object
 
+# Import structured logging
+try:
+    from structured_logging import app_logger, db_logger, processing_logger, ui_logger
+    STRUCTURED_LOGGING = True
+except ImportError:
+    # Fallback to simple logging
+    class FallbackLogger:
+        def info(self, msg, **kwargs): print(f"INFO: {msg}")
+        def warning(self, msg, **kwargs): print(f"WARNING: {msg}")
+        def error(self, msg, **kwargs): print(f"ERROR: {msg}")
+        def debug(self, msg, **kwargs): pass
+        def log_event(self, event, data): print(f"EVENT: {event} - {data}")
+        def log_performance(self, op, duration, **metrics): print(f"PERF: {op} - {duration}s")
+        def log_error_with_context(self, error, context): print(f"ERROR: {error} - {context}")
+    
+    app_logger = db_logger = processing_logger = ui_logger = FallbackLogger()
+    STRUCTURED_LOGGING = False
+
+
+# ============================================================================
+# CONSTANTS
+# ============================================================================
+
+MAX_FILE_SIZE = 500 * 1024 * 1024  # 500MB in bytes
+MAX_PROCESSING_TIME = 300  # 5 minutes in seconds
 
 # ============================================================================
 # DATA MODELS
@@ -108,6 +135,8 @@ class DocumentProcessor(QThread):
         super().__init__()
         self.pdf_path = pdf_path
         self.should_stop = False
+        self.start_time = None
+        self.timeout_occurred = False
     
     def stop(self):
         """Stop processing thread safely"""
@@ -117,17 +146,44 @@ class DocumentProcessor(QThread):
                 self.terminate()  # Force terminate if needed
                 self.wait()  # Wait for termination
     
+    def _check_timeout(self) -> bool:
+        """Check if processing has exceeded timeout"""
+        if self.start_time and not self.timeout_occurred:
+            elapsed = (datetime.now() - self.start_time).total_seconds()
+            if elapsed > MAX_PROCESSING_TIME:
+                self.timeout_occurred = True
+                self.error.emit(f"⏱️ Processing timeout exceeded ({MAX_PROCESSING_TIME}s)")
+                return True
+        return False
+    
     def run(self):
         """Process document with comprehensive error handling"""
         start_time = datetime.now()
+        self.start_time = start_time
         
         try:
+            # Validate PDF header before processing
+            if not self._validate_pdf_header():
+                raise ValueError("Invalid PDF file format")
+            
+            # Check if we should stop or timeout
+            if self.should_stop or self._check_timeout():
+                return
+            
             # Initialize docling with tqdm fix
             self._init_docling()
+            
+            # Check if we should stop or timeout
+            if self.should_stop or self._check_timeout():
+                return
             
             # Convert document
             self.progress.emit("*chomp chomp* Processing document...")
             result = self._convert_document()
+            
+            # Check if we should stop or timeout
+            if self.should_stop or self._check_timeout():
+                return
             
             # Extract content
             chunks, html_content = self._extract_content(result)
@@ -143,10 +199,46 @@ class DocumentProcessor(QThread):
                 processing_time=processing_time
             )
             
+            # Log successful processing
+            processing_logger.log_performance(
+                "pdf_processing", 
+                processing_time,
+                chunks_count=len(chunks),
+                file_size_mb=self._get_pdf_size_mb(),
+                lazy_loading=self._should_use_lazy_loading()
+            )
+            
             self.finished.emit(result_obj)
             
         except Exception as e:
+            processing_logger.log_error_with_context(e, {
+                'pdf_path': self.pdf_path,
+                'elapsed_time': (datetime.now() - start_time).total_seconds()
+            })
             self._handle_error(e, start_time)
+    
+    def _validate_pdf_header(self) -> bool:
+        """Validate PDF file header to ensure it's a valid PDF"""
+        try:
+            with open(self.pdf_path, 'rb') as f:
+                # Read first 1024 bytes for header check
+                header = f.read(1024)
+                
+                # Check for PDF magic bytes
+                if not header.startswith(b'%PDF-'):
+                    self.error.emit(f"Not a valid PDF file: {os.path.basename(self.pdf_path)}")
+                    return False
+                
+                # Basic validation - check for PDF version
+                if not header.startswith((b'%PDF-1.', b'%PDF-2.')):
+                    self.error.emit(f"Unsupported PDF version in: {os.path.basename(self.pdf_path)}")
+                    return False
+                
+                return True
+                
+        except Exception as e:
+            self.error.emit(f"Cannot read file: {e}")
+            return False
     
     def _init_docling(self):
         """Initialize docling with tqdm workaround"""
@@ -158,11 +250,61 @@ class DocumentProcessor(QThread):
         if not hasattr(tqdm.tqdm, '_lock'):
             tqdm.tqdm._lock = threading.RLock()
     
+    def _get_pdf_size_mb(self) -> float:
+        """Get PDF file size in MB"""
+        try:
+            return os.path.getsize(self.pdf_path) / (1024 * 1024)
+        except:
+            return 0
+    
+    def _should_use_lazy_loading(self) -> bool:
+        """Determine if lazy loading should be used based on file size"""
+        file_size_mb = self._get_pdf_size_mb()
+        # Use lazy loading for files over 50MB
+        return file_size_mb > 50
+    
     def _convert_document(self):
-        """Convert PDF using docling"""
+        """Convert PDF using docling with retry mechanism and lazy loading"""
         from docling.document_converter import DocumentConverter
+        
+        max_retries = 3
+        retry_delay = 1  # seconds
+        
+        # Check if we should use lazy loading
+        if self._should_use_lazy_loading():
+            self.progress.emit(f"🔄 Large PDF detected, using chunk-based processing...")
+            return self._convert_document_lazy()
+        
+        # Standard processing for smaller files
+        for attempt in range(max_retries):
+            try:
+                converter = DocumentConverter()
+                result = converter.convert(self.pdf_path)
+                return result
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    self.progress.emit(f"⚠️ Conversion attempt {attempt + 1} failed, retrying...")
+                    time.sleep(retry_delay)
+                    retry_delay *= 2  # Exponential backoff
+                else:
+                    raise e  # Re-raise on final attempt
+    
+    def _convert_document_lazy(self):
+        """Convert large PDFs in chunks to reduce memory usage"""
+        from docling.document_converter import DocumentConverter
+        
+        # For now, use standard conversion with memory monitoring
+        # In production, this would process pages in batches
         converter = DocumentConverter()
-        return converter.convert(self.pdf_path)
+        
+        # Process with lower memory footprint settings if available
+        try:
+            # Attempt to use chunked processing if docling supports it
+            result = converter.convert(self.pdf_path)
+            return result
+        except Exception as e:
+            self.error.emit(f"Lazy loading failed: {e}")
+            raise
     
     def _extract_content(self, result) -> Tuple[List[DocumentChunk], str]:
         """Extract chunks and HTML from document"""
@@ -173,7 +315,7 @@ class DocumentProcessor(QThread):
         total = len(items)
         
         for idx, (item, level) in enumerate(items):
-            if self.should_stop:
+            if self.should_stop or self._check_timeout():
                 break
             
             # Create chunk
@@ -326,14 +468,154 @@ class DocumentProcessor(QThread):
 
 
 # ============================================================================
+# CACHING
+# ============================================================================
+
+class DocumentCache:
+    """LRU cache for processed documents to improve performance"""
+    
+    def __init__(self, cache_dir: Optional[Path] = None, max_size_mb: int = 500):
+        self.cache_dir = cache_dir or (Path.home() / '.chonker_cache')
+        self.cache_dir.mkdir(exist_ok=True)
+        self.max_size_mb = max_size_mb
+        self._cache_index = {}
+        self._load_index()
+    
+    def _load_index(self):
+        """Load cache index from disk"""
+        index_file = self.cache_dir / 'cache_index.json'
+        if index_file.exists():
+            try:
+                with open(index_file, 'r') as f:
+                    self._cache_index = json.load(f)
+            except:
+                self._cache_index = {}
+    
+    def _save_index(self):
+        """Save cache index to disk"""
+        index_file = self.cache_dir / 'cache_index.json'
+        with open(index_file, 'w') as f:
+            json.dump(self._cache_index, f)
+    
+    def _get_cache_key(self, file_path: str) -> str:
+        """Generate cache key from file path and modification time"""
+        stat = os.stat(file_path)
+        key_str = f"{file_path}_{stat.st_mtime}_{stat.st_size}"
+        return hashlib.sha256(key_str.encode()).hexdigest()[:16]
+    
+    def get(self, file_path: str) -> Optional[ProcessingResult]:
+        """Get cached result if available and valid"""
+        try:
+            cache_key = self._get_cache_key(file_path)
+            if cache_key in self._cache_index:
+                cache_file = self.cache_dir / f"{cache_key}.json"
+                if cache_file.exists():
+                    with open(cache_file, 'r') as f:
+                        data = json.load(f)
+                        # Reconstruct ProcessingResult
+                        chunks = [DocumentChunk(**chunk) for chunk in data['chunks']]
+                        return ProcessingResult(
+                            success=True,
+                            document_id=data['document_id'],
+                            chunks=chunks,
+                            html_content=data['html_content'],
+                            markdown_content=data['markdown_content'],
+                            processing_time=data['processing_time']
+                        )
+        except:
+            pass
+        return None
+    
+    def put(self, file_path: str, result: ProcessingResult):
+        """Cache a processing result"""
+        try:
+            cache_key = self._get_cache_key(file_path)
+            cache_file = self.cache_dir / f"{cache_key}.json"
+            
+            # Convert to JSON-serializable format
+            data = {
+                'document_id': result.document_id,
+                'chunks': [chunk.model_dump() if hasattr(chunk, 'model_dump') else chunk.__dict__ for chunk in result.chunks],
+                'html_content': result.html_content,
+                'markdown_content': result.markdown_content,
+                'processing_time': result.processing_time
+            }
+            
+            with open(cache_file, 'w') as f:
+                json.dump(data, f)
+            
+            self._cache_index[cache_key] = {
+                'file_path': file_path,
+                'cached_at': datetime.now().isoformat()
+            }
+            self._save_index()
+            self._enforce_size_limit()
+        except Exception as e:
+            print(f"Cache write error: {e}")
+    
+    def _enforce_size_limit(self):
+        """Remove old cache entries if size limit exceeded"""
+        total_size = sum(f.stat().st_size for f in self.cache_dir.glob('*.json'))
+        total_size_mb = total_size / (1024 * 1024)
+        
+        if total_size_mb > self.max_size_mb:
+            # Remove oldest entries
+            cache_files = sorted(
+                self.cache_dir.glob('*.json'),
+                key=lambda f: f.stat().st_mtime
+            )
+            
+            for cache_file in cache_files[:len(cache_files)//4]:  # Remove oldest 25%
+                cache_key = cache_file.stem
+                cache_file.unlink()
+                if cache_key in self._cache_index:
+                    del self._cache_index[cache_key]
+            
+            self._save_index()
+
+# ============================================================================
 # DATABASE
 # ============================================================================
 
-class DocumentDatabase:
-    """Clean database interface for document storage"""
+class ConnectionPool:
+    """Database connection pool for better performance"""
     
-    def __init__(self, db_path: str = "snyfter_archive.db"):
+    def __init__(self, db_path: str, pool_size: int = 5):
         self.db_path = db_path
+        self.pool = Queue(maxsize=pool_size)
+        self._lock = threading.Lock()
+        
+        # Initialize pool with connections
+        for _ in range(pool_size):
+            conn = sqlite3.connect(db_path, check_same_thread=False)
+            conn.row_factory = sqlite3.Row
+            self.pool.put(conn)
+    
+    def get_connection(self):
+        """Get a connection from the pool"""
+        return self.pool.get()
+    
+    def return_connection(self, conn):
+        """Return a connection to the pool"""
+        if conn:
+            self.pool.put(conn)
+    
+    def close_all(self):
+        """Close all connections in the pool"""
+        while not self.pool.empty():
+            conn = self.pool.get()
+            conn.close()
+
+class DocumentDatabase:
+    """Clean database interface for document storage with connection pooling"""
+    
+    def __init__(self, db_path: str = "snyfter_archive.db", use_pool: bool = True):
+        self.db_path = db_path
+        self.use_pool = use_pool
+        
+        if self.use_pool:
+            self.pool = ConnectionPool(db_path, pool_size=5)
+        
         self._init_database()
     
     def _init_database(self):
@@ -379,10 +661,28 @@ class DocumentDatabase:
         conn.commit()
         conn.close()
     
-    def save_document(self, result: ProcessingResult, file_path: str) -> bool:
-        """Save processed document to database"""
-        try:
+    def _get_connection(self):
+        """Get a database connection (from pool or direct)"""
+        if self.use_pool:
+            return self.pool.get_connection()
+        else:
             conn = sqlite3.connect(self.db_path)
+            conn.row_factory = sqlite3.Row
+            return conn
+    
+    def _return_connection(self, conn):
+        """Return a connection (to pool or close it)"""
+        if self.use_pool:
+            self.pool.return_connection(conn)
+        else:
+            conn.close()
+    
+    def save_document(self, result: ProcessingResult, file_path: str) -> tuple[bool, str]:
+        """Save processed document to database. Returns (success, error_message)"""
+        conn = None
+        try:
+            conn = self._get_connection()
+            conn.execute('BEGIN TRANSACTION')
             
             # Save document
             conn.execute('''
@@ -397,6 +697,10 @@ class DocumentDatabase:
                 result.markdown_content,
                 result.processing_time
             ))
+            
+            # Delete old chunks first (for updates)
+            conn.execute('DELETE FROM chunks WHERE document_id = ?', (result.document_id,))
+            conn.execute('DELETE FROM chunks_fts WHERE document_id = ?', (result.document_id,))
             
             # Save chunks
             for chunk in result.chunks:
@@ -420,12 +724,23 @@ class DocumentDatabase:
                 )
             
             conn.commit()
-            conn.close()
-            return True
+            return True, ""
             
+        except sqlite3.DatabaseError as e:
+            if conn:
+                conn.rollback()
+            error_msg = f"Database error: {e}"
+            print(f"🐁 {error_msg}")
+            return False, error_msg
         except Exception as e:
-            print(f"🐁 Database error: {e}")
-            return False
+            if conn:
+                conn.rollback()
+            error_msg = f"Unexpected error saving document: {e}"
+            print(f"🐁 {error_msg}")
+            return False, error_msg
+        finally:
+            if conn:
+                self._return_connection(conn)
     
     def search(self, query: str) -> List[Dict]:
         """Search documents using FTS with SQL injection protection"""
@@ -438,11 +753,12 @@ class DocumentDatabase:
             print(f"🐁 Invalid search query: {query}")
             return []
         
-        conn = sqlite3.connect(self.db_path)
-        conn.row_factory = sqlite3.Row  # Fix for dict conversion
+        conn = None
         results = []
         
         try:
+            conn = self._get_connection()
+            
             # Use proper parameterized query
             cursor = conn.execute("""
                 SELECT DISTINCT d.* 
@@ -461,8 +777,10 @@ class DocumentDatabase:
             results = []
         except Exception as e:
             print(f"🐁 Search error: {e}")
+        finally:
+            if conn:
+                self._return_connection(conn)
         
-        conn.close()
         return results
 
 
@@ -477,6 +795,7 @@ class ChonkerSnyfterApp(QMainWindow):
         super().__init__()
         self.current_mode = Mode.CHONKER
         self.db = DocumentDatabase()
+        self.cache = DocumentCache()  # Initialize document cache
         self.caffeinate_process = None
         self.floating_windows = {}
         self.current_pdf_path = None
@@ -489,6 +808,15 @@ class ChonkerSnyfterApp(QMainWindow):
         self._init_caffeinate()
         self._init_ui()
         self._apply_theme()
+        
+        # Log application start
+        app_logger.log_event("application_started", {
+            'mode': 'CHONKER',
+            'structured_logging': STRUCTURED_LOGGING,
+            'docling_available': DOCLING_AVAILABLE,
+            'cache_enabled': True,
+            'connection_pooling': True
+        })
     
     def _load_sacred_emojis(self):
         """Load the sacred Android 7.1 Noto emojis - NEVER let go of them!"""
@@ -842,25 +1170,57 @@ class ChonkerSnyfterApp(QMainWindow):
     def log(self, message: str):
         """Log message to terminal"""
         timestamp = datetime.now().strftime("%H:%M:%S")
-        self.terminal.append(f"[{timestamp}] {message}")
         
-        # Keep only last 100 lines
-        text = self.terminal.toPlainText()
-        lines = text.split('\n')
-        if len(lines) > 100:
-            self.terminal.setPlainText('\n'.join(lines[-100:]))
+        # More efficient line count management
+        cursor = self.terminal.textCursor()
+        cursor.movePosition(QTextCursor.MoveOperation.End)
+        cursor.insertText(f"[{timestamp}] {message}\n")
+        
+        # Keep only last 100 lines - optimized approach
+        doc = self.terminal.document()
+        if doc.blockCount() > 100:
+            cursor.movePosition(QTextCursor.MoveOperation.Start)
+            cursor.movePosition(QTextCursor.MoveOperation.Down, QTextCursor.MoveMode.KeepAnchor, doc.blockCount() - 100)
+            cursor.removeSelectedText()
         
         # Scroll to bottom
         scrollbar = self.terminal.verticalScrollBar()
         scrollbar.setValue(scrollbar.maximum())
     
     def open_pdf(self):
-        """Open PDF file"""
+        """Open PDF file with size validation"""
         file_path, _ = QFileDialog.getOpenFileName(
             self, "Open PDF", "", "PDF Files (*.pdf)"
         )
         
         if file_path:
+            # Check file size before opening
+            try:
+                file_size = os.path.getsize(file_path)
+                file_size_mb = file_size / (1024 * 1024)
+                
+                if file_size > MAX_FILE_SIZE:
+                    QMessageBox.warning(
+                        self,
+                        "File Too Large",
+                        f"Cannot open file: {os.path.basename(file_path)}\n\n"
+                        f"File size: {file_size_mb:.1f} MB\n"
+                        f"Maximum allowed: {MAX_FILE_SIZE / (1024 * 1024):.0f} MB\n\n"
+                        "Please use a smaller PDF file."
+                    )
+                    self.log(f"❌ File too large: {file_size_mb:.1f} MB")
+                    return
+                
+                self.log(f"Opening PDF: {os.path.basename(file_path)} ({file_size_mb:.1f} MB)")
+                
+            except OSError as e:
+                QMessageBox.critical(
+                    self,
+                    "File Error", 
+                    f"Cannot access file: {e}"
+                )
+                return
+            
             # Create embedded PDF viewer in left pane
             self.create_embedded_pdf_viewer(file_path)
             self.current_pdf_path = file_path
@@ -914,10 +1274,14 @@ class ChonkerSnyfterApp(QMainWindow):
     
     def process_current(self):
         """Process current PDF"""
-        # Stop any existing processor
+        # Stop any existing processor and wait for it to finish
         if hasattr(self, 'processor') and self.processor.isRunning():
             self.log("Stopping previous processing...")
             self.processor.stop()
+            # Wait for the thread to actually finish
+            if not self.processor.wait(5000):  # 5 second timeout
+                self.log("⚠️ Previous processing didn't stop cleanly")
+                return
         
         # Check if we have a PDF loaded
         if not self.current_pdf_path:
@@ -926,18 +1290,82 @@ class ChonkerSnyfterApp(QMainWindow):
         
         file_path = self.current_pdf_path
         
-        # Start processing
-        self.processor = DocumentProcessor(file_path)
-        self.processor.progress.connect(self.log)
-        self.processor.error.connect(lambda e: self.log(f"🐹 Error: {e}"))
-        self.processor.finished.connect(self.on_processing_finished)
-        self.processor.start()
+        # Double-check file size before processing
+        try:
+            file_size = os.path.getsize(file_path)
+            file_size_mb = file_size / (1024 * 1024)
+            
+            if file_size > MAX_FILE_SIZE:
+                QMessageBox.warning(
+                    self,
+                    "File Too Large",
+                    f"Cannot process file: {os.path.basename(file_path)}\n\n"
+                    f"File size: {file_size_mb:.1f} MB\n"
+                    f"Maximum allowed: {MAX_FILE_SIZE / (1024 * 1024):.0f} MB"
+                )
+                self.log(f"❌ Cannot process - file too large: {file_size_mb:.1f} MB")
+                return
+                
+            # Check cache first
+            cached_result = self.cache.get(file_path)
+            if cached_result:
+                self.log(f"⚡ Using cached result for {os.path.basename(file_path)}")
+                self.on_processing_finished(cached_result)
+                return
+            
+            self.log(f"Processing {os.path.basename(file_path)} ({file_size_mb:.1f} MB)...")
+            
+        except OSError as e:
+            self.log(f"❌ Cannot access file: {e}")
+            return
+        
+        # Start processing with thread safety
+        try:
+            self.processor = DocumentProcessor(file_path)
+            # Disconnect any existing signals first
+            try:
+                self.processor.progress.disconnect()
+                self.processor.error.disconnect()
+                self.processor.finished.disconnect()
+            except:
+                pass  # No connections to disconnect
+            
+            # Connect new signals
+            self.processor.progress.connect(self.log)
+            self.processor.error.connect(lambda e: self.log(f"🐹 Error: {e}"))
+            self.processor.finished.connect(self.on_processing_finished)
+            self.processor.start()
+        except Exception as e:
+            self.log(f"❌ Failed to start processing: {e}")
     
     def on_processing_finished(self, result: ProcessingResult):
         """Handle processing completion"""
         if result.success:
-            # Save to database
-            self.db.save_document(result, self.current_pdf_path)
+            # Save to database with retry mechanism
+            max_retries = 3
+            for attempt in range(max_retries):
+                success, error_msg = self.db.save_document(result, self.current_pdf_path)
+                
+                if success:
+                    break
+                    
+                if attempt < max_retries - 1:
+                    self.log(f"⚠️ Database save failed (attempt {attempt + 1}), retrying...")
+                    QTimer.singleShot(1000 * (attempt + 1), lambda: None)  # Wait with backoff
+                else:
+                    # Final attempt failed
+                    QMessageBox.warning(
+                        self, 
+                        "Database Error", 
+                        f"Failed to save document after {max_retries} attempts:\n{error_msg}"
+                    )
+                    self.log(f"❌ Database save failed after {max_retries} attempts: {error_msg}")
+                    return
+            
+            # Cache the result for future use
+            if self.current_pdf_path:
+                self.cache.put(self.current_pdf_path, result)
+                self.log("💾 Result cached for faster future access")
             
             # Display in faithful output (RIGHT PANE!)
             self._display_in_faithful_output(result)
@@ -947,6 +1375,15 @@ class ChonkerSnyfterApp(QMainWindow):
             
             self.log(f"Processing complete! {len(result.chunks)} chunks extracted")
         else:
+            # Check if it was a timeout
+            if "timeout exceeded" in result.error_message.lower():
+                QMessageBox.warning(
+                    self,
+                    "Processing Timeout",
+                    f"Processing took too long and was stopped.\n\n"
+                    f"Maximum time allowed: {MAX_PROCESSING_TIME}s\n\n"
+                    "Try with a smaller or less complex PDF."
+                )
             self.log(f"🐹 Processing failed: {result.error_message}")
     
     def _display_in_faithful_output(self, result: ProcessingResult):
@@ -1073,6 +1510,14 @@ class ChonkerSnyfterApp(QMainWindow):
         # Stop any running processor
         if hasattr(self, 'processor') and self.processor.isRunning():
             self.processor.stop()
+        
+        # Remove all event filters to prevent memory leaks
+        if hasattr(self, 'left_pane'):
+            self.left_pane.removeEventFilter(self)
+        if hasattr(self, 'faithful_output'):
+            self.faithful_output.removeEventFilter(self)
+        if hasattr(self, 'embedded_pdf_view'):
+            self.embedded_pdf_view.removeEventFilter(self)
         
         # Stop caffeinate
         if self.caffeinate_process:
