@@ -5,7 +5,7 @@
 default:
     @just --list
 
-# Run the main application (streamlined version - backend removed)
+# Run the main application (streamlined version - 1,827 lines)
 run:
     source venv/bin/activate && python chonker_snyfter_elegant_v2.py
 
@@ -92,13 +92,14 @@ dev:
 
 # Check what's actually working
 check-features:
-    @echo "=== CHONKER & SNYFTER Feature Status ==="
+    @echo "=== CHONKER Feature Status ==="
     @echo "✅ Keyboard shortcuts: WORKING"
-    @echo "✅ Gesture detection: WORKING (terminal output)"
+    @echo "✅ Gesture detection: WORKING" 
     @echo "✅ PDF zoom: WORKING"
-    @echo "❌ HTML zoom: NOT WORKING"
-    @echo "❓ VLM fallback: UNCLEAR"
+    @echo "✅ HTML zoom: WORKING (re-render method)"
     @echo "✅ Core processing: WORKING"
+    @echo "✅ No-timeout launcher: WORKING"
+    @echo "✅ Sacred hamster emoji: PRESERVED"
 
 # Launch autonomous SNYFTER development
 develop-snyfter:

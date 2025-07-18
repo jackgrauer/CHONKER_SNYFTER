@@ -18,6 +18,11 @@
       "cache": false,
       "persistent": true
     },
+    "launch": {
+      "cache": false,
+      "persistent": true,
+      "outputs": ["/tmp/chonker.log", "/tmp/chonker.pid"]
+    },
     "clean": {
       "cache": false
     },
