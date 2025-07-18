@@ -1,40 +1,44 @@
-# CHONKER & SNYFTER v2.0 🐹🐭
+# CHONKER & SNYFTER 🐹
 
-Production-ready document processing system with PDF extraction and search capabilities.
+Minimal PDF processing with SQL export for quality-controlled content.
 
 ## Features
 
-- **CHONKER Mode** 🐹: Process PDFs with advanced extraction
-- **SNYFTER Mode** 🐭: Search through processed documents
-- **Enterprise Features**: Configuration management, structured logging, caching
-- **Security**: SQL injection protection, XSS prevention, file validation
-- **Performance**: Lazy loading, connection pooling, document caching
+- **Extract**: Process PDFs with Docling ML extraction
+- **Edit**: Quality control extracted content  
+- **Export**: Save to DuckDB/Parquet/JSON for downstream apps
+- **Clean UI**: Large hamster, green accent, left-aligned controls
 
 ## Quick Start
 
-1. Install dependencies:
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-2. Run the application:
-   ```bash
-   python chonker_snyfter_elegant_v2.py
-   ```
-
-3. Configure (optional):
-   ```bash
-   cp .env.example .env
-   # Edit .env with your settings
-   ```
-
-## Testing
-
-Run the test suite:
 ```bash
-pytest tests/
+# Install
+pip install -r requirements.txt
+
+# Run
+python chonker_snyfter_elegant_v2.py
+
+# Or use launcher
+./launch_chonker.sh
 ```
 
-## Production Score: 9.5/10
+## Keyboard Shortcuts
 
-Ready for enterprise deployment!
+- **Cmd+O**: Open PDF
+- **Cmd+P**: Process
+- **Cmd+E**: Export to SQL
+
+## Export
+
+Exports quality-controlled HTML to:
+- DuckDB database for SQL queries
+- Parquet files for analytics
+- JSON for APIs
+
+## GUI 
+
+- Perfected minimal design
+- No window title
+- Terminal shows shortcuts
+- Everything left-aligned
+- Green (#1ABC9C) accent color
