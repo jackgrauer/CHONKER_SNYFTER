@@ -310,7 +310,7 @@ class DocumentProcessor(QThread):
             self.progress.emit("🔍 Processing with OCR enabled...")
             
             # Use lazy loading for large PDFs
-            if self.file_size_mb > 50:
+            if self._get_pdf_size_mb() > 50:
                 return self._convert_document_lazy(converter)
             
             # Standard conversion with OCR
@@ -649,6 +649,56 @@ class ChonkerSnyfterApp(QMainWindow):
             # Fallback but with warning
             print("WARNING: CHONKER emoji missing! Using fallback...")
             self.chonker_pixmap = self._create_fallback_emoji("C", QColor("#FFE4B5"))
+    
+    def _validate_file_size(self, file_path: str, action: str = "open") -> Optional[float]:
+        """Validate file size and show appropriate warnings.
+        
+        Args:
+            file_path: Path to the file to validate
+            action: Action being performed ("open" or "process")
+            
+        Returns:
+            File size in MB if valid, None if invalid or error occurred
+        """
+        try:
+            file_size = os.path.getsize(file_path)
+            file_size_mb = file_size / (1024 * 1024)
+            
+            if file_size > MAX_FILE_SIZE:
+                # Different messages for different actions
+                if action == "open":
+                    QMessageBox.warning(
+                        self,
+                        "File Too Large",
+                        f"Cannot open file: {os.path.basename(file_path)}\n\n"
+                        f"File size: {file_size_mb:.1f} MB\n"
+                        f"Maximum allowed: {MAX_FILE_SIZE / (1024 * 1024):.0f} MB\n\n"
+                        "Please use a smaller PDF file."
+                    )
+                    self.log(f"❌ File too large: {file_size_mb:.1f} MB")
+                else:  # process
+                    QMessageBox.warning(
+                        self,
+                        "File Too Large",
+                        f"Cannot process file: {os.path.basename(file_path)}\n\n"
+                        f"File size: {file_size_mb:.1f} MB\n"
+                        f"Maximum allowed: {MAX_FILE_SIZE / (1024 * 1024):.0f} MB"
+                    )
+                    self.log(f"❌ Cannot process - file too large: {file_size_mb:.1f} MB")
+                return None
+                
+            return file_size_mb
+            
+        except OSError as e:
+            if action == "open":
+                QMessageBox.critical(
+                    self,
+                    "File Error", 
+                    f"Cannot access file: {e}"
+                )
+            else:  # process
+                self.log(f"❌ Cannot access file: {e}")
+            return None
         
     
     def _create_fallback_emoji(self, emoji: str, bg_color: QColor) -> QPixmap:
@@ -1375,31 +1425,11 @@ class ChonkerSnyfterApp(QMainWindow):
         
         if file_path:
             # Check file size before opening
-            try:
-                file_size = os.path.getsize(file_path)
-                file_size_mb = file_size / (1024 * 1024)
-                
-                if file_size > MAX_FILE_SIZE:
-                    QMessageBox.warning(
-                        self,
-                        "File Too Large",
-                        f"Cannot open file: {os.path.basename(file_path)}\n\n"
-                        f"File size: {file_size_mb:.1f} MB\n"
-                        f"Maximum allowed: {MAX_FILE_SIZE / (1024 * 1024):.0f} MB\n\n"
-                        "Please use a smaller PDF file."
-                    )
-                    self.log(f"❌ File too large: {file_size_mb:.1f} MB")
-                    return
-                
-                self.log(f"Opening PDF: {os.path.basename(file_path)} ({file_size_mb:.1f} MB)")
-                
-            except OSError as e:
-                QMessageBox.critical(
-                    self,
-                    "File Error", 
-                    f"Cannot access file: {e}"
-                )
+            file_size_mb = self._validate_file_size(file_path, "open")
+            if file_size_mb is None:
                 return
+                
+            self.log(f"Opening PDF: {os.path.basename(file_path)} ({file_size_mb:.1f} MB)")
             
             # Show loading message
             self.log("Loading PDF...")
@@ -1525,27 +1555,11 @@ class ChonkerSnyfterApp(QMainWindow):
         file_path = self.current_pdf_path
         
         # Double-check file size before processing
-        try:
-            file_size = os.path.getsize(file_path)
-            file_size_mb = file_size / (1024 * 1024)
-            
-            if file_size > MAX_FILE_SIZE:
-                QMessageBox.warning(
-                    self,
-                    "File Too Large",
-                    f"Cannot process file: {os.path.basename(file_path)}\n\n"
-                    f"File size: {file_size_mb:.1f} MB\n"
-                    f"Maximum allowed: {MAX_FILE_SIZE / (1024 * 1024):.0f} MB"
-                )
-                self.log(f"❌ Cannot process - file too large: {file_size_mb:.1f} MB")
-                return
-                
-            
-            self.log(f"Processing {os.path.basename(file_path)} ({file_size_mb:.1f} MB)...")
-            
-        except OSError as e:
-            self.log(f"❌ Cannot access file: {e}")
+        file_size_mb = self._validate_file_size(file_path, "process")
+        if file_size_mb is None:
             return
+            
+        self.log(f"Processing {os.path.basename(file_path)} ({file_size_mb:.1f} MB)...")
         
         # Start processing with thread safety
         try:
