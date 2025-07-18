@@ -5,9 +5,27 @@
 default:
     @just --list
 
-# Run the main application
+# Run the main application (streamlined version - backend removed)
 run:
     source venv/bin/activate && python chonker_snyfter_elegant_v2.py
+
+# Launch CHONKER in background (no timeout issues!)
+launch:
+    ./launch_chonker.sh
+
+# Stop running CHONKER
+stop:
+    ./launch_chonker.sh stop
+
+# Check CHONKER status
+status:
+    ./launch_chonker.sh status
+
+# Phoenix was rejected - user said "go back to the old one"
+# phoenix:
+#     ./launch_chonker_phoenix.sh
+# phoenix-direct:
+#     source venv/bin/activate && python chonker_phoenix.py
 
 # Run tests
 test:
