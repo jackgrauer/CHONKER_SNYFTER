@@ -23,6 +23,11 @@ import traceback
 from html import escape
 import time
 import warnings
+import duckdb
+import pandas as pd
+import re
+import json
+import shutil
 
 # Suppress PyTorch pin_memory warnings on MPS
 warnings.filterwarnings("ignore", message=".*pin_memory.*MPS.*")
@@ -32,7 +37,7 @@ from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QFileDialog, QMessageBox, QTextEdit, QLabel, 
     QSplitter, QDialog, QMenuBar, QMenu, QToolBar, QStatusBar,
-    QGroupBox, QTreeWidget, QTreeWidgetItem
+    QGroupBox, QTreeWidget, QTreeWidgetItem, QProgressDialog, QSizePolicy
 )
 from PyQt6.QtCore import (
     Qt, QThread, pyqtSignal, QTimer, QPointF, QObject, QEvent,
@@ -538,6 +543,7 @@ class DocumentProcessor(QThread):
                 controls.innerHTML = `
                     <button onclick="addRow(this)">+ Add Row</button>
                     <button onclick="addColumn(this)">+ Add Column</button>
+                    <button onclick="exportTable(this)" style="background: #1ABC9C;">📤 Export to SQL</button>
                 `;
                 table.parentNode.insertBefore(controls, table.nextSibling);
                 
@@ -566,6 +572,21 @@ class DocumentProcessor(QThread):
                 cell.setAttribute('contenteditable', 'true');
                 cell.innerHTML = '&nbsp;';
             });
+        }
+        
+        function exportTable(btn) {
+            const table = btn.parentNode.nextSibling;
+            const tableHtml = table.outerHTML;
+            const pageNum = table.getAttribute('data-page') || '1';
+            
+            // Send to Python backend via Qt channel
+            if (window.qt && window.qt.webChannelTransport) {
+                new QWebChannel(qt.webChannelTransport, function(channel) {
+                    channel.objects.backend.exportTable(tableHtml, pageNum);
+                });
+            } else {
+                alert('Export feature requires Qt WebChannel');
+            }
         }
         </script>
         '''
@@ -748,7 +769,7 @@ class ChonkerSnyfterApp(QMainWindow):
     
     def _init_ui(self):
         """Initialize the user interface"""
-        self.setWindowTitle("CHONKER & SNYFTER")
+        self.setWindowTitle("")  # No title
         self.showMaximized()  # Start maximized
         
         # Set CHONKER icon as window icon
@@ -805,6 +826,13 @@ class ChonkerSnyfterApp(QMainWindow):
         self.faithful_output.setReadOnly(False)
         self._update_pane_styles()  # Apply initial active pane styling
         self.splitter.addWidget(self.faithful_output)
+        
+        # Add custom context menu for export
+        self.faithful_output.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.faithful_output.customContextMenuRequested.connect(self._show_export_menu)
+        
+        # Initialize SQL exporter
+        self.sql_exporter = ChonkerSQLExporter()
         self.splitter.setSizes([700, 700])
         
         # Set up focus tracking and mouse tracking
@@ -865,6 +893,171 @@ class ChonkerSnyfterApp(QMainWindow):
             self.recent_files.remove(file_path)
             self._update_recent_files_menu()
     
+    def _show_export_menu(self, pos):
+        """Show context menu for exporting tables"""
+        cursor = self.faithful_output.textCursor()
+        cursor.setPosition(self.faithful_output.cursorForPosition(pos).position())
+        
+        # Check if cursor is near a table
+        cursor.movePosition(cursor.MoveOperation.StartOfBlock)
+        cursor.movePosition(cursor.MoveOperation.EndOfBlock, cursor.MoveMode.KeepAnchor)
+        block_text = cursor.selectedText()
+        
+        if '<table' in block_text or cursor.charFormat().anchorHref():
+            menu = QMenu(self)
+            export_action = menu.addAction("Export Content to SQL")
+            export_action.triggered.connect(lambda: self._export_table_at_cursor(cursor))
+            menu.exec(self.faithful_output.mapToGlobal(pos))
+    
+    def _export_table_at_cursor(self, cursor):
+        """Export the table at the current cursor position"""
+        # Find the table HTML
+        doc = self.faithful_output.document()
+        html = doc.toHtml()
+        
+        # Extract table near cursor position
+        cursor_pos = cursor.position()
+        
+        # Simple table extraction - find nearest table tags
+        import re
+        tables = list(re.finditer(r'<table[^>]*>.*?</table>', html, re.DOTALL | re.IGNORECASE))
+        
+        if not tables:
+            QMessageBox.information(self, "No Table Found", "No table found at cursor position")
+            return
+        
+        # Find the table closest to cursor
+        # This is simplified - in production you'd want more robust table detection
+        table_html = tables[0].group(0) if tables else ""
+        
+        if table_html:
+            # Export using the SQL exporter
+            try:
+                source_pdf = self.current_pdf_path if hasattr(self, 'current_pdf_path') else "unknown.pdf"
+                export_path = self.sql_exporter.export_table(
+                    table_html, 
+                    source_pdf, 
+                    1,  # Page number - simplified
+                    qc_user=os.getenv('USER', 'user')
+                )
+                
+                QMessageBox.information(
+                    self, 
+                    "Export Successful", 
+                    f"Table exported to:\n{export_path}\n\nParquet file saved for efficient querying!"
+                )
+            except Exception as e:
+                QMessageBox.critical(self, "Export Failed", f"Failed to export table: {str(e)}")
+    
+    def export_to_sql(self):
+        """Export the quality-controlled content to SQL database"""
+        if not hasattr(self, '_last_processing_result') or not self._last_processing_result:
+            QMessageBox.warning(self, "No Document", "Please process a document first")
+            return
+        
+        # Get suggested filename from source PDF
+        source_pdf = self.current_pdf_path if hasattr(self, 'current_pdf_path') else "unknown.pdf"
+        suggested_name = os.path.basename(source_pdf).replace('.pdf', '_export.duckdb')
+        
+        # Show native file save dialog
+        file_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Export to DuckDB",
+            suggested_name,
+            "DuckDB Database (*.duckdb);;All Files (*)"
+        )
+        
+        if not file_path:
+            return  # User cancelled
+        
+        # Ensure .duckdb extension
+        if not file_path.endswith('.duckdb'):
+            file_path += '.duckdb'
+        
+        # Get the current content from the faithful output (which may have been edited)
+        current_html = self.faithful_output.toHtml()
+        
+        # Extract just the body content (remove Qt's HTML wrapper)
+        from bs4 import BeautifulSoup
+        soup = BeautifulSoup(current_html, 'html.parser')
+        body = soup.find('body')
+        if body:
+            # Get all content after the header info
+            hr = body.find('hr')
+            if hr:
+                content_html = ''.join(str(sibling) for sibling in hr.find_next_siblings())
+            else:
+                content_html = str(body)
+        else:
+            content_html = current_html
+        
+        # Show progress
+        progress = QProgressDialog("Exporting content to SQL...", None, 0, 100, self)
+        progress.setWindowModality(Qt.WindowModality.WindowModal)
+        progress.setMinimumDuration(0)
+        progress.setCancelButton(None)  # Can't cancel
+        progress.setValue(25)
+        
+        try:
+            # Create exporter with chosen file path
+            exporter = ChonkerSQLExporter(file_path)
+            
+            # Export the content
+            export_id = exporter.export_content(
+                content_html,
+                source_pdf,
+                qc_user=os.getenv('USER', 'user')
+            )
+            
+            progress.setValue(75)
+            
+            # Get export statistics
+            stats = exporter.conn.execute("""
+                SELECT 
+                    COUNT(*) as total_elements,
+                    COUNT(DISTINCT element_type) as unique_types
+                FROM chonker_content 
+                WHERE export_id = ?
+            """, [export_id]).fetchone()
+            
+            progress.setValue(100)
+            progress.close()
+            
+            # Create export directory next to the database file
+            export_dir = os.path.join(os.path.dirname(file_path), f"{export_id}_files")
+            os.makedirs(export_dir, exist_ok=True)
+            
+            # Move/copy exported files to the chosen location
+            if os.path.exists("exports"):
+                import shutil
+                for file in os.listdir("exports"):
+                    if file.startswith(export_id):
+                        shutil.move(
+                            os.path.join("exports", file),
+                            os.path.join(export_dir, file)
+                        )
+            
+            # Show success message
+            summary = f"Export Complete!\n\n"
+            summary += f"Export ID: {export_id}\n\n"
+            summary += f"✓ {stats[0]} content elements exported\n"
+            summary += f"✓ {stats[1]} different element types\n\n"
+            summary += f"Files created:\n"
+            summary += f"  • Database: {os.path.basename(file_path)}\n"
+            summary += f"  • Export files: {os.path.basename(export_dir)}/\n\n"
+            summary += "The content is now ready for downstream applications!"
+            
+            QMessageBox.information(self, "Export Successful", summary)
+            self.log(f"Exported to: {file_path}")
+            
+            # Close the exporter connection
+            exporter.conn.close()
+            
+        except Exception as e:
+            progress.close()
+            QMessageBox.critical(self, "Export Failed", f"Failed to export content:\n\n{str(e)}")
+            self.log(f"Export failed: {str(e)}")
+    
     def _create_menu_bar(self):
         """Create application menu bar"""
         menubar = self.menuBar()
@@ -917,9 +1110,16 @@ class ChonkerSnyfterApp(QMainWindow):
     def _create_top_bar(self, parent_layout):
         """Create resizable top bar with mode toggle"""
         self.top_bar = QWidget()  # Store as instance variable
-        self.top_bar.setMinimumHeight(50)
+        self.top_bar.setMinimumHeight(60)
         self.top_bar.setMaximumHeight(150)  # Allow vertical resizing
         self.top_bar.setObjectName("topBar")
+        self.top_bar.setStyleSheet("""
+            #topBar {
+                background-color: #1ABC9C;
+                border: 2px solid #3A3C3E;
+                border-radius: 2px;
+            }
+        """)
         
         # Make top bar focusable and install event filter for pane selection
         self.top_bar.setMouseTracking(True)
@@ -927,64 +1127,122 @@ class ChonkerSnyfterApp(QMainWindow):
         
         top_bar = self.top_bar  # Keep local reference for compatibility
         
+        # Main layout - everything directly in here for proper alignment
         layout = QHBoxLayout(top_bar)
-        layout.setContentsMargins(20, 0, 20, 0)
+        layout.setContentsMargins(5, 8, 5, 8)  # Consistent margin from border
+        layout.setSpacing(5)  # Small consistent spacing between ALL elements
+        layout.setAlignment(Qt.AlignmentFlag.AlignLeft)
         
-        # Mode toggle with sacred emojis
+        # Now add buttons to the container
+        # Mode toggle with sacred emojis - FULL HEIGHT PRIMARY VISUAL ELEMENT
         self.chonker_btn = QPushButton()
-        self.chonker_btn.setIcon(QIcon(self.chonker_pixmap))
+        # Scale hamster emoji larger
+        scaled_hamster = self.chonker_pixmap.scaled(48, 48, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+        self.chonker_btn.setIcon(QIcon(scaled_hamster))
+        self.chonker_btn.setIconSize(scaled_hamster.size())
         self.chonker_btn.setText(" CHONKER")
         self.chonker_btn.setCheckable(True)
         self.chonker_btn.setChecked(True)
-        self.chonker_btn.setMinimumWidth(130)  # Make button wider to fit text
+        self.chonker_btn.setMinimumWidth(180)  # Make button wider
+        self.chonker_btn.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
+        self.chonker_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #1ABC9C;
+                color: white;
+                font-size: 18px;
+                font-weight: bold;
+                border: none;
+                padding: 5px;
+            }
+            QPushButton:hover {
+                background-color: #16A085;
+            }
+        """)
         self.chonker_btn.clicked.connect(lambda: self.set_mode(Mode.CHONKER))
         
         layout.addWidget(self.chonker_btn)
         
-        # Spacer to push terminal to the right
-        layout.addStretch()
-        
-        # Terminal with expand button
-        terminal_container = QWidget()
-        terminal_layout = QHBoxLayout(terminal_container)
-        terminal_layout.setContentsMargins(0, 0, 0, 0)
-        terminal_layout.setSpacing(0)  # No gap between terminal and button
+        # Remove terminal container - add directly to main layout
         
         # Terminal display - smaller and on the right
         self.terminal = QTextEdit()
-        self.terminal.setFixedHeight(30)  # Shorter
-        self.terminal.setMaximumWidth(350)  # Narrower
-        self.terminal.setReadOnly(False)  # Enable copy/paste
+        self.terminal.setMinimumHeight(40)  # Match button heights
+        self.terminal.setMaximumHeight(50)  # Allow slight flexibility
+        self.terminal.setMaximumWidth(250)  # Even narrower for tighter layout
+        self.terminal.setReadOnly(True)  # READ-ONLY for display only
         self.terminal.setObjectName("terminal")
         self.terminal.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.terminal.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         # Ensure no extra space at bottom
-        self.terminal.setLineWrapMode(QTextEdit.LineWrapMode.WidgetWidth)
-        self.terminal.document().setDocumentMargin(0)
+        self.terminal.setLineWrapMode(QTextEdit.LineWrapMode.WidgetWidth)  # Wrap within widget
+        self.terminal.document().setDocumentMargin(2)  # Small margin
+        # Set font metrics to ensure full lines are visible
+        font = self.terminal.font()
+        font.setFamily('Courier New')
+        font.setPixelSize(11)
+        self.terminal.setFont(font)
+        self.terminal.setStyleSheet("""
+            QTextEdit {
+                background-color: #2D2F31;
+                color: #1ABC9C;
+                font-family: 'Courier New', monospace;
+                font-size: 11px;
+                line-height: 14px;
+                border: 1px solid #3A3C3E;
+                padding: 2px;
+            }
+        """)
         
-        # Expand/collapse button
-        self.terminal_expand_btn = QPushButton("▼")
-        self.terminal_expand_btn.setFixedSize(20, 20)
-        self.terminal_expand_btn.setObjectName("terminalExpandBtn")
-        self.terminal_expand_btn.clicked.connect(self._toggle_terminal_expansion)
-        self.terminal_expanded = False
+        # Add terminal directly to main layout (no expand button)
+        layout.addWidget(self.terminal)
         
-        terminal_layout.addWidget(self.terminal)
-        terminal_layout.addWidget(self.terminal_expand_btn)
-        layout.addWidget(terminal_container)
+        # Quick actions - subordinate visual style
+        action_button_style = """
+            QPushButton {
+                background-color: #3A3C3E;
+                color: #B0B0B0;
+                font-size: 12px;
+                border: 1px solid #525659;
+                padding: 6px 10px;
+                min-height: 30px;
+                max-height: 35px;
+            }
+            QPushButton:hover {
+                background-color: #525659;
+                color: #FFFFFF;
+            }
+            QPushButton:disabled {
+                background-color: #2D2F31;
+                color: #666666;
+            }
+        """
         
-        # Quick actions
         open_btn = QPushButton("Open")
         open_btn.setToolTip("Open PDF (Ctrl+O)")
         open_btn.clicked.connect(self.open_pdf)
         open_btn.setShortcut(QKeySequence.StandardKey.Open)
+        open_btn.setStyleSheet(action_button_style)
         
         process_btn = QPushButton("Process")
         process_btn.setToolTip("Process (Ctrl+P)")
         process_btn.clicked.connect(self.process_current)
+        process_btn.setStyleSheet(action_button_style)
         
+        export_btn = QPushButton("Export")
+        export_btn.setToolTip("Export quality-controlled content to SQL (Cmd+E)")
+        export_btn.clicked.connect(self.export_to_sql)
+        export_btn.setEnabled(False)  # Disabled until processing is done
+        export_btn.setShortcut(QKeySequence("Ctrl+E"))  # Ctrl+E maps to Cmd+E on Mac
+        export_btn.setStyleSheet(action_button_style)
+        self.export_btn = export_btn  # Store reference
+        
+        # Add action buttons directly to main layout
         layout.addWidget(open_btn)
         layout.addWidget(process_btn)
+        layout.addWidget(export_btn)
+        
+        # Add stretch to push everything left
+        layout.addStretch()
         
         # Add to splitter instead of layout
         if isinstance(parent_layout, QSplitter):
@@ -993,34 +1251,20 @@ class ChonkerSnyfterApp(QMainWindow):
             parent_layout.addWidget(top_bar)
     
     def _show_welcome(self):
-        """Show welcome screen"""
-        welcome = QLabel("""
-        <div style="text-align: center; padding: 50px;">
-            <h1 style="color: #FFFFFF;">CHONKER & SNYFTER</h1>
-            <p style="font-size: 18px; color: #B0B0B0;">
-                Enhanced Document Processing System
-            </p>
-            <p style="margin-top: 30px; color: #B0B0B0;">
-                Press <b>Ctrl+O</b> to open a PDF<br>
-                Press <b>Ctrl+P</b> to process document<br>
-                Click on a pane to make it active
-            </p>
-        </div>
-        """)
-        welcome.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        welcome.setStyleSheet("background-color: #525659;")
-        
+        """Clear the left pane and show shortcuts in terminal"""
         # Clear left pane
         for i in reversed(range(self.left_layout.count())): 
-            self.left_layout.itemAt(i).widget().setParent(None)
+            widget = self.left_layout.itemAt(i).widget()
+            if widget:
+                widget.setParent(None)
         
-        self.left_layout.addWidget(welcome)
+        # Show shortcuts in terminal
+        self.log("Cmd+O: Open PDF | Cmd+P: Process | Cmd+E: Export")
     
     def _update_pane_styles(self):
         """Update pane borders based on active state"""
-        left_border_width = "3" if self.active_pane == 'left' else "1"
-        right_border_width = "3" if self.active_pane == 'right' else "1"
-        top_border_width = "3" if self.active_pane == 'top' else "1"
+        # Keep border width fixed to prevent layout shifts
+        border_width = "2"
         
         left_border_color = "#1ABC9C" if self.active_pane == 'left' else "#3A3C3E"
         right_border_color = "#1ABC9C" if self.active_pane == 'right' else "#3A3C3E"
@@ -1030,7 +1274,7 @@ class ChonkerSnyfterApp(QMainWindow):
         
         self.left_pane.setStyleSheet(f"""
             QWidget {{
-                border: {left_border_width}px solid {left_border_color};
+                border: {border_width}px solid {left_border_color};
                 border-radius: 2px;
                 background-color: #525659;
             }}
@@ -1052,7 +1296,7 @@ class ChonkerSnyfterApp(QMainWindow):
                 font-size: 12px;
                 background-color: #525659;
                 color: #FFFFFF;
-                border: {right_border_width}px solid {right_border_color};
+                border: {border_width}px solid {right_border_color};
                 border-radius: 2px;
                 padding: 10px;
             }}
@@ -1062,8 +1306,9 @@ class ChonkerSnyfterApp(QMainWindow):
         if hasattr(self, 'top_bar'):
             self.top_bar.setStyleSheet(f"""
                 #topBar {{
-                    background-color: #2D2F31;
-                    border-bottom: {top_border_width}px solid {top_border_color};
+                    background-color: #1ABC9C;
+                    border: {border_width}px solid {top_border_color};
+                    border-radius: 2px;
                 }}
             """)
     
@@ -1371,19 +1616,6 @@ class ChonkerSnyfterApp(QMainWindow):
             # Restart animation
             self.processing_timer.start(500)
     
-    def _toggle_terminal_expansion(self):
-        """Toggle terminal between compact and expanded view"""
-        if self.terminal_expanded:
-            # Collapse
-            self.terminal.setFixedHeight(30)
-            self.terminal_expand_btn.setText("▼")
-            self.terminal_expanded = False
-        else:
-            # Expand
-            self.terminal.setFixedHeight(150)
-            self.terminal_expand_btn.setText("▲")
-            self.terminal_expanded = True
-    
     def log(self, message: str):
         """Log message to terminal"""
         timestamp = datetime.now().strftime("%H:%M:%S")
@@ -1400,10 +1632,16 @@ class ChonkerSnyfterApp(QMainWindow):
             cursor.movePosition(QTextCursor.MoveOperation.Down, QTextCursor.MoveMode.KeepAnchor, doc.blockCount() - 100)
             cursor.removeSelectedText()
         
-        # Move cursor to end and ensure visibility
+        # Move cursor to end
         cursor.movePosition(QTextCursor.MoveOperation.End)
         self.terminal.setTextCursor(cursor)
-        self.terminal.ensureCursorVisible()
+        
+        # Ensure we're showing complete lines - scroll to show the last complete line
+        scrollbar = self.terminal.verticalScrollBar()
+        if scrollbar:
+            # Scroll to bottom minus a small offset to ensure complete line visibility
+            max_value = scrollbar.maximum()
+            scrollbar.setValue(max_value)
     
     def open_pdf(self):
         """Open PDF file with size validation"""
@@ -1597,6 +1835,11 @@ class ChonkerSnyfterApp(QMainWindow):
             # Also create floating output window
             self.create_output_window(result)
             
+            # Enable export button and store result
+            if hasattr(self, 'export_btn'):
+                self.export_btn.setEnabled(True)
+            self._last_processing_result = result
+            
             # Log completion
             if hasattr(result, 'chunks'):
                 self.log(f"Processing complete! {len(result.chunks)} chunks extracted")
@@ -1779,6 +2022,285 @@ class ChonkerSnyfterApp(QMainWindow):
 
 
 # ============================================================================
+# SQL EXPORT - CUTTING EDGE DATABASE INTEGRATION 🚀
+# ============================================================================
+
+try:
+    import duckdb
+    import pandas as pd
+    DUCKDB_AVAILABLE = True
+except ImportError:
+    DUCKDB_AVAILABLE = False
+
+class ChonkerSQLExporter:
+    """Export quality-controlled HTML content to DuckDB for downstream apps"""
+    
+    def __init__(self, db_path: str = "chonker_output.duckdb"):
+        if not DUCKDB_AVAILABLE:
+            raise ImportError("🐹 *cough* DuckDB not installed! Run: pip install duckdb pandas")
+        
+        self.db_path = db_path
+        self.conn = duckdb.connect(db_path)
+        self._init_metadata_table()
+    
+    def _init_metadata_table(self):
+        """Initialize metadata tracking table"""
+        self.conn.execute("""
+            CREATE TABLE IF NOT EXISTS chonker_exports (
+                export_id TEXT PRIMARY KEY,
+                source_pdf TEXT,
+                export_name TEXT,
+                original_html TEXT,
+                edited_html TEXT,
+                content_type TEXT,  -- 'full_document', 'table', 'section', etc.
+                content_hash TEXT,
+                exported_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                qc_user TEXT,
+                edit_count INTEGER DEFAULT 0,
+                metadata JSON
+            )
+        """)
+        
+        # Create structured content table for parsed elements
+        self.conn.execute("""
+            CREATE TABLE IF NOT EXISTS chonker_content (
+                content_id TEXT PRIMARY KEY,
+                export_id TEXT,
+                element_type TEXT,  -- 'heading', 'paragraph', 'table', 'list', etc.
+                element_order INTEGER,
+                element_text TEXT,
+                element_html TEXT,
+                element_metadata JSON,
+                FOREIGN KEY (export_id) REFERENCES chonker_exports(export_id)
+            )
+        """)
+    
+    def _infer_schema(self, html_table: str) -> tuple[pd.DataFrame, dict]:
+        """Smart schema inference using pandas"""
+        # Parse HTML table
+        dfs = pd.read_html(html_table)
+        if not dfs:
+            raise ValueError("No tables found in HTML")
+        
+        df = dfs[0]
+        
+        # Infer types
+        schema = {}
+        for col in df.columns:
+            # Try numeric first
+            try:
+                df[col] = pd.to_numeric(df[col])
+                if df[col].dtype == 'int64':
+                    schema[col] = 'INTEGER'
+                else:
+                    schema[col] = 'DOUBLE'
+            except:
+                # Try datetime
+                try:
+                    df[col] = pd.to_datetime(df[col])
+                    schema[col] = 'TIMESTAMP'
+                except:
+                    # Default to text
+                    schema[col] = 'VARCHAR'
+        
+        return df, schema
+    
+    def export_content(self, html_content: str, source_pdf: str, 
+                      export_name: str = None, qc_user: str = "user", 
+                      content_type: str = "full_document") -> str:
+        """Export quality-controlled HTML content to DuckDB"""
+        try:
+            # Generate export ID
+            timestamp = datetime.now()
+            export_id = f"{os.path.basename(source_pdf).replace('.pdf', '')}_{timestamp.strftime('%Y%m%d_%H%M%S')}"
+            export_id = re.sub(r'[^a-zA-Z0-9_]', '_', export_id)
+            
+            # Generate export name if not provided
+            if not export_name:
+                export_name = f"export_{export_id}"
+            
+            # Parse HTML to extract structured content
+            from bs4 import BeautifulSoup
+            soup = BeautifulSoup(html_content, 'html.parser')
+            
+            # Calculate content hash for tracking edits
+            content_hash = hashlib.sha256(html_content.encode()).hexdigest()[:16]
+            
+            # Check if this exact content was already exported
+            existing = self.conn.execute(
+                "SELECT export_id FROM chonker_exports WHERE content_hash = ?",
+                [content_hash]
+            ).fetchone()
+            
+            if existing:
+                return existing[0]
+            
+            # Extract metadata
+            metadata = {
+                'source_pdf': source_pdf,
+                'export_time': timestamp.isoformat(),
+                'total_elements': 0,
+                'element_types': {}
+            }
+            
+            # Insert main export record
+            self.conn.execute("""
+                INSERT INTO chonker_exports 
+                (export_id, source_pdf, export_name, original_html, edited_html, 
+                 content_type, content_hash, qc_user, metadata)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, [
+                export_id,
+                source_pdf,
+                export_name,
+                html_content[:10000],  # Store first 10KB for reference
+                html_content[:10000],  # Edited version (same initially)
+                content_type,
+                content_hash,
+                qc_user,
+                json.dumps(metadata)
+            ])
+            
+            # Parse and store structured content
+            element_order = 0
+            
+            # Process all elements in order
+            for element in soup.find_all(['h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p', 'table', 'ul', 'ol', 'div']):
+                element_type = element.name
+                element_text = element.get_text(strip=True)
+                element_html = str(element)
+                
+                # Skip empty elements
+                if not element_text:
+                    continue
+                
+                # Track element types
+                metadata['element_types'][element_type] = metadata['element_types'].get(element_type, 0) + 1
+                metadata['total_elements'] += 1
+                
+                # Generate content ID
+                content_id = f"{export_id}_{element_order:04d}"
+                
+                # Store element metadata
+                element_meta = {
+                    'tag': element_type,
+                    'classes': element.get('class', []),
+                    'id': element.get('id'),
+                    'char_count': len(element_text)
+                }
+                
+                # Special handling for tables
+                if element_type == 'table':
+                    rows = element.find_all('tr')
+                    cols = len(rows[0].find_all(['td', 'th'])) if rows else 0
+                    element_meta['rows'] = len(rows)
+                    element_meta['cols'] = cols
+                
+                # Insert structured content
+                self.conn.execute("""
+                    INSERT INTO chonker_content
+                    (content_id, export_id, element_type, element_order, 
+                     element_text, element_html, element_metadata)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                """, [
+                    content_id,
+                    export_id,
+                    element_type,
+                    element_order,
+                    element_text[:5000],  # Limit text size
+                    element_html[:10000],  # Limit HTML size
+                    json.dumps(element_meta)
+                ])
+                
+                element_order += 1
+            
+            # Update metadata
+            self.conn.execute("""
+                UPDATE chonker_exports 
+                SET metadata = ? 
+                WHERE export_id = ?
+            """, [json.dumps(metadata), export_id])
+            
+            # Export to Parquet for portability (optional)
+            os.makedirs("exports", exist_ok=True)
+            
+            try:
+                # Export main record
+                export_df = self.conn.execute(
+                    "SELECT * FROM chonker_exports WHERE export_id = ?", 
+                    [export_id]
+                ).df()
+                export_df.to_parquet(os.path.join("exports", f"{export_id}_metadata.parquet"))
+                
+                # Export content
+                content_df = self.conn.execute(
+                    "SELECT * FROM chonker_content WHERE export_id = ? ORDER BY element_order", 
+                    [export_id]
+                ).df()
+                content_df.to_parquet(os.path.join("exports", f"{export_id}_content.parquet"))
+                parquet_exported = True
+            except Exception as parquet_error:
+                print(f"Warning: Could not export Parquet files: {parquet_error}")
+                content_df = self.conn.execute(
+                    "SELECT * FROM chonker_content WHERE export_id = ? ORDER BY element_order", 
+                    [export_id]
+                ).df()
+                parquet_exported = False
+            
+            # Also export as single JSON for easy consumption
+            export_json = {
+                'export_id': export_id,
+                'metadata': metadata,
+                'content': []
+            }
+            
+            for _, row in content_df.iterrows():
+                export_json['content'].append({
+                    'type': row['element_type'],
+                    'text': row['element_text'],
+                    'html': row['element_html'],
+                    'metadata': json.loads(row['element_metadata'])
+                })
+            
+            with open(os.path.join("exports", f"{export_id}.json"), 'w') as f:
+                json.dump(export_json, f, indent=2)
+            
+            # Return export ID and parquet status
+            self._parquet_exported = parquet_exported
+            return export_id
+            
+        except Exception as e:
+            print(f"Export error: {str(e)}")
+            raise
+    
+    def get_api_ready_json(self, table_name: str) -> str:
+        """Generate JSON export for REST APIs"""
+        result = self.conn.execute(f"SELECT * FROM {table_name}").fetchall()
+        columns = [desc[0] for desc in self.conn.description]
+        
+        data = []
+        for row in result:
+            data.append(dict(zip(columns, row)))
+        
+        return json.dumps(data, indent=2, default=str)
+    
+    def generate_crud_sql(self, table_name: str) -> dict:
+        """Generate CRUD SQL statements for other apps"""
+        schema = self.conn.execute(f"DESCRIBE {table_name}").fetchall()
+        
+        columns = [col[0] for col in schema]
+        placeholders = ['?' for _ in columns]
+        
+        return {
+            'create': f"INSERT INTO {table_name} ({', '.join(columns)}) VALUES ({', '.join(placeholders)})",
+            'read': f"SELECT * FROM {table_name} WHERE id = ?",
+            'update': f"UPDATE {table_name} SET {', '.join([f'{col} = ?' for col in columns])} WHERE id = ?",
+            'delete': f"DELETE FROM {table_name} WHERE id = ?",
+            'schema': schema
+        }
+
+
+# ============================================================================
 # MAIN ENTRY POINT
 # ============================================================================
 
@@ -1795,15 +2317,8 @@ def main():
     
     sys.excepthook = handle_exception
     
-    # Print startup message
-    print("""
-╭────────────── Welcome ──────────────╮
-│ CHONKER & SNYFTER                   │
-│ Elegant Document Processing System  │
-│                                     │
-│ Ready to process your documents!    │
-╰─────────────────────────────────────╯
-    """)
+    # Simple startup message
+    print("CHONKER ready.")
     
     # Create application
     app = QApplication(sys.argv)
