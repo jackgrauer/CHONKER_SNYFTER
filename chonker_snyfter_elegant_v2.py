@@ -451,26 +451,27 @@ class DocumentProcessor(QThread):
     def _enhance_text_formatting(self, text: str) -> str:
         """Enhance text with proper superscript/subscript formatting"""
         
-        # Unicode superscript mapping
-        superscript_map = {
-            '⁰': '<sup>0</sup>', '¹': '<sup>1</sup>', '²': '<sup>2</sup>', '³': '<sup>3</sup>',
-            '⁴': '<sup>4</sup>', '⁵': '<sup>5</sup>', '⁶': '<sup>6</sup>', '⁷': '<sup>7</sup>',
-            '⁸': '<sup>8</sup>', '⁹': '<sup>9</sup>', '⁺': '<sup>+</sup>', '⁻': '<sup>-</sup>',
-            'ⁿ': '<sup>n</sup>', 'ⁱ': '<sup>i</sup>', 'ʳ': '<sup>r</sup>', 'ˢ': '<sup>s</sup>',
-            'ᵗ': '<sup>t</sup>', 'ʰ': '<sup>h</sup>', 'ˣ': '<sup>x</sup>', 'ʸ': '<sup>y</sup>',
-            'ᶻ': '<sup>z</sup>', 'ᵃ': '<sup>a</sup>', 'ᵇ': '<sup>b</sup>', 'ᶜ': '<sup>c</sup>',
-            'ᵈ': '<sup>d</sup>', 'ᵉ': '<sup>e</sup>', 'ᶠ': '<sup>f</sup>', 'ᵍ': '<sup>g</sup>'
-        }
+        # Unicode superscript mapping using comprehensions
+        sup_digits = {chr(0x2070 + i): f'<sup>{i}</sup>' for i in range(10) if i != 1 and i != 2 and i != 3}
+        sup_digits.update({chr(0x00B9): '<sup>1</sup>', chr(0x00B2): '<sup>2</sup>', chr(0x00B3): '<sup>3</sup>'})
+        sup_chars = {chr(c): f'<sup>{ch}</sup>' for c, ch in [
+            (0x207A, '+'), (0x207B, '-'), (0x207F, 'n'), (0x2071, 'i'), 
+            (0x02B3, 'r'), (0x02E2, 's'), (0x1D57, 't'), (0x02B0, 'h'),
+            (0x02E3, 'x'), (0x02B8, 'y'), (0x1DBB, 'z'), (0x1D43, 'a'),
+            (0x1D47, 'b'), (0x1D9C, 'c'), (0x1D48, 'd'), (0x1D49, 'e'),
+            (0x1DA0, 'f'), (0x1D4D, 'g')
+        ]}
+        superscript_map = {**sup_digits, **sup_chars}
         
-        # Unicode subscript mapping
-        subscript_map = {
-            '₀': '<sub>0</sub>', '₁': '<sub>1</sub>', '₂': '<sub>2</sub>', '₃': '<sub>3</sub>',
-            '₄': '<sub>4</sub>', '₅': '<sub>5</sub>', '₆': '<sub>6</sub>', '₇': '<sub>7</sub>',
-            '₈': '<sub>8</sub>', '₉': '<sub>9</sub>', '₊': '<sub>+</sub>', '₋': '<sub>-</sub>',
-            'ₐ': '<sub>a</sub>', 'ₑ': '<sub>e</sub>', 'ₒ': '<sub>o</sub>', 'ₓ': '<sub>x</sub>',
-            'ₕ': '<sub>h</sub>', 'ₖ': '<sub>k</sub>', 'ₗ': '<sub>l</sub>', 'ₘ': '<sub>m</sub>',
-            'ₙ': '<sub>n</sub>', 'ₚ': '<sub>p</sub>', 'ₛ': '<sub>s</sub>', 'ₜ': '<sub>t</sub>'
-        }
+        # Unicode subscript mapping using comprehensions
+        sub_digits = {chr(0x2080 + i): f'<sub>{i}</sub>' for i in range(10)}
+        sub_chars = {chr(c): f'<sub>{ch}</sub>' for c, ch in [
+            (0x208A, '+'), (0x208B, '-'), (0x2090, 'a'), (0x2091, 'e'),
+            (0x2092, 'o'), (0x2093, 'x'), (0x2095, 'h'), (0x2096, 'k'),
+            (0x2097, 'l'), (0x2098, 'm'), (0x2099, 'n'), (0x209A, 'p'),
+            (0x209B, 's'), (0x209C, 't')
+        ]}
+        subscript_map = {**sub_digits, **sub_chars}
         
         # Replace Unicode superscripts/subscripts with HTML
         for char, html in superscript_map.items():
