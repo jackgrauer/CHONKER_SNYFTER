@@ -1,13 +1,5 @@
 #!/usr/bin/env python3
-"""
-CHONKER & SNYFTER - Elegant Document Processing System
-
-A clean, elegant implementation focused on core functionality:
-- CHONKER: PDF processing with HTML extraction
-- SNYFTER: Document archiving and search
-- Modern UI with floating windows
-- Editable table support
-"""
+"""CHONKER & SNYFTER"""
 
 import sys
 import os
@@ -28,6 +20,7 @@ import pandas as pd
 import re
 import json
 import shutil
+import torch  # For OCR GPU detection
 
 # Suppress PyTorch pin_memory warnings on MPS
 warnings.filterwarnings("ignore", message=".*pin_memory.*MPS.*")
@@ -37,11 +30,12 @@ from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QFileDialog, QMessageBox, QTextEdit, QLabel, 
     QSplitter, QDialog, QMenuBar, QMenu, QToolBar, QStatusBar,
-    QGroupBox, QTreeWidget, QTreeWidgetItem, QProgressDialog, QSizePolicy
+    QGroupBox, QTreeWidget, QTreeWidgetItem, QProgressDialog, QSizePolicy,
+    QInputDialog
 )
 from PyQt6.QtCore import (
     Qt, QThread, pyqtSignal, QTimer, QPointF, QObject, QEvent,
-    QRect, QPropertyAnimation, QEasingCurve, QRectF
+    QRect, QPropertyAnimation, QEasingCurve, QRectF, QSettings
 )
 from PyQt6.QtGui import (
     QAction, QKeySequence, QIcon, QPixmap, QPainter, QFont, QBrush, QColor, QTextCursor,
@@ -64,42 +58,28 @@ except ImportError:
     DOCLING_AVAILABLE = False
     print("Warning: Docling not available. Install with: pip install docling")
 
-try:
-    from pydantic import BaseModel, Field, validator
-    PYDANTIC_AVAILABLE = True
-except ImportError:
-    PYDANTIC_AVAILABLE = False
-    BaseModel = object
+from dataclasses import dataclass, field
 
 
 
-# ============================================================================
-# CONSTANTS
-# ============================================================================
-
-MAX_FILE_SIZE = 500 * 1024 * 1024  # 500MB in bytes
+MAX_FILE_SIZE = 500 * 1024 * 1024  # 500MB
 MAX_PROCESSING_TIME = 300  # 5 minutes in seconds
 
-# ============================================================================
-# DATA MODELS
-# ============================================================================
-
-class Mode(Enum):
-    CHONKER = "chonker"
+# Mode enum removed - always CHONKER mode
 
 
-class DocumentChunk(BaseModel):
-    """Single chunk of processed document"""
+@dataclass
+class DocumentChunk:
     index: int
     type: str
     content: str
     page: Optional[int] = None
     confidence: float = 1.0
-    metadata: Dict[str, Any] = Field(default_factory=dict)
+    metadata: Dict[str, Any] = field(default_factory=dict)
 
 
-class ProcessingResult(BaseModel):
-    """Result from document processing"""
+@dataclass
+class ProcessingResult:
     success: bool
     document_id: str
     chunks: List[DocumentChunk]
@@ -107,15 +87,10 @@ class ProcessingResult(BaseModel):
     markdown_content: str
     processing_time: float
     error_message: Optional[str] = None
-    warnings: List[str] = Field(default_factory=list)
+    warnings: List[str] = field(default_factory=list)
 
-
-# ============================================================================
-# PROCESSING ENGINE
-# ============================================================================
 
 class DocumentProcessor(QThread):
-    """Clean document processing worker thread"""
     
     finished = pyqtSignal(ProcessingResult)
     progress = pyqtSignal(str)
@@ -126,21 +101,19 @@ class DocumentProcessor(QThread):
     def __init__(self, pdf_path: str, use_ocr: bool = False):
         super().__init__()
         self.pdf_path = pdf_path
-        self.should_stop = False
+        self._stop_event = threading.Event()  # Thread-safe stop flag
         self.start_time = None
         self.timeout_occurred = False
         self.use_ocr = use_ocr
     
     def stop(self):
-        """Stop processing thread safely"""
-        self.should_stop = True
+        self._stop_event.set()
         if self.isRunning():
             if not self.wait(5000):  # Wait up to 5 seconds
                 self.terminate()  # Force terminate if needed
                 self.wait()  # Wait for termination
     
     def _check_timeout(self) -> bool:
-        """Check if processing has exceeded timeout"""
         if self.start_time and not self.timeout_occurred:
             elapsed = (datetime.now() - self.start_time).total_seconds()
             if elapsed > MAX_PROCESSING_TIME:
@@ -150,7 +123,6 @@ class DocumentProcessor(QThread):
         return False
     
     def run(self):
-        """Process document with comprehensive error handling"""
         start_time = datetime.now()
         self.start_time = start_time
         
@@ -160,14 +132,14 @@ class DocumentProcessor(QThread):
                 raise ValueError("Invalid PDF file format")
             
             # Check if we should stop or timeout
-            if self.should_stop or self._check_timeout():
+            if self._stop_event.is_set() or self._check_timeout():
                 return
             
             # Initialize docling with tqdm fix
             self._init_docling()
             
             # Check if we should stop or timeout
-            if self.should_stop or self._check_timeout():
+            if self._stop_event.is_set() or self._check_timeout():
                 return
             
             # Check if OCR is needed (only if not already using OCR)
@@ -184,7 +156,7 @@ class DocumentProcessor(QThread):
                 result = self._convert_document()
             
             # Check if we should stop or timeout
-            if self.should_stop or self._check_timeout():
+            if self._stop_event.is_set() or self._check_timeout():
                 return
             
             # Extract content
@@ -208,7 +180,6 @@ class DocumentProcessor(QThread):
             self._handle_error(e, start_time)
     
     def _validate_pdf_header(self) -> bool:
-        """Validate PDF file header to ensure it's a valid PDF"""
         try:
             with open(self.pdf_path, 'rb') as f:
                 # Read first 1024 bytes for header check
@@ -231,7 +202,6 @@ class DocumentProcessor(QThread):
             return False
     
     def _init_docling(self):
-        """Initialize docling with tqdm workaround"""
         if not DOCLING_AVAILABLE:
             raise Exception("🐹 *cough* Docling not installed!")
         
@@ -241,20 +211,17 @@ class DocumentProcessor(QThread):
             tqdm.tqdm._lock = threading.RLock()
     
     def _get_pdf_size_mb(self) -> float:
-        """Get PDF file size in MB"""
         try:
             return os.path.getsize(self.pdf_path) / (1024 * 1024)
-        except:
+        except (OSError, IOError):
             return 0
     
     def _should_use_lazy_loading(self) -> bool:
-        """Determine if lazy loading should be used based on file size"""
         file_size_mb = self._get_pdf_size_mb()
         # Use lazy loading for files over 50MB
         return file_size_mb > 50
     
     def _detect_scanned_pdf(self) -> bool:
-        """Quick check if PDF is likely scanned/image-based"""
         try:
             # Do a quick conversion without OCR to check text density
             from docling.document_converter import DocumentConverter
@@ -288,12 +255,10 @@ class DocumentProcessor(QThread):
             
             return text_length < 100  # Threshold for scanned detection
             
-        except Exception as e:
-            self.progress.emit(f"⚠️ Could not detect if PDF is scanned: {e}")
+        except Exception:
             return False
     
     def _convert_document_with_ocr(self):
-        """Convert document with OCR enabled"""
         try:
             from docling.document_converter import DocumentConverter
             from docling.datamodel.pipeline_options import PdfPipelineOptions
@@ -330,7 +295,6 @@ class DocumentProcessor(QThread):
             return self._convert_document()
     
     def _convert_document(self):
-        """Convert PDF using docling with retry mechanism and lazy loading"""
         from docling.document_converter import DocumentConverter
         
         max_retries = 3
@@ -356,7 +320,6 @@ class DocumentProcessor(QThread):
                     raise e  # Re-raise on final attempt
     
     def _convert_document_lazy(self, converter=None):
-        """Convert large PDFs in chunks to reduce memory usage"""
         from docling.document_converter import DocumentConverter
         
         # For now, use standard conversion with memory monitoring
@@ -374,7 +337,6 @@ class DocumentProcessor(QThread):
             raise
     
     def _extract_content(self, result) -> Tuple[List[DocumentChunk], str]:
-        """Extract chunks and HTML from document"""
         chunks = []
         html_parts = ['<div id="document-content" contenteditable="true">']
         
@@ -383,7 +345,7 @@ class DocumentProcessor(QThread):
         current_page = 0
         
         for idx, (item, level) in enumerate(items):
-            if self.should_stop or self._check_timeout():
+            if self._stop_event.is_set() or self._check_timeout():
                 break
             
             # Get page number from item metadata if available
@@ -414,91 +376,40 @@ class DocumentProcessor(QThread):
             self.chunk_processed.emit(idx + 1, total)
         
         html_parts.append('</div>')
-        html_parts.append(self._get_table_editor_script())
         
         return chunks, '\n'.join(html_parts)
     
     def _create_chunk(self, item, level: int, index: int, page: int = 0) -> DocumentChunk:
-        """Create a document chunk from an item"""
-        item_type = type(item).__name__
-        content = getattr(item, 'text', str(item))
-        
         return DocumentChunk(
             index=index,
-            type=item_type.lower().replace('item', ''),
-            content=content,
+            type=type(item).__name__.lower().replace('item', ''),
+            content=getattr(item, 'text', str(item)),
             metadata={'level': level, 'page': page}
         )
     
     def _item_to_html(self, item, level: int) -> str:
-        """Convert document item to HTML with XSS protection and superscript/subscript support"""
         item_type = type(item).__name__
-        
         if item_type == 'SectionHeaderItem' and hasattr(item, 'text'):
-            heading_level = min(level + 1, 3)
-            safe_text = self._enhance_text_formatting(escape(str(item.text)))
-            return f'<h{heading_level}>{safe_text}</h{heading_level}>'
-        
+            h = min(level + 1, 3)
+            return f'<h{h}>{self._enhance_text_formatting(escape(str(item.text)))}</h{h}>'
         elif item_type == 'TableItem':
             return self._table_to_html(item)
-        
         elif item_type == 'TextItem' and hasattr(item, 'text'):
-            safe_text = self._enhance_text_formatting(escape(str(item.text)))
-            return f'<p>{safe_text}</p>'
-        
+            return f'<p>{self._enhance_text_formatting(escape(str(item.text)))}</p>'
         elif item_type == 'ListItem' and hasattr(item, 'text'):
-            safe_text = self._enhance_text_formatting(escape(str(item.text)))
-            return f'<li>{safe_text}</li>'
-        
+            return f'<li>{self._enhance_text_formatting(escape(str(item.text)))}</li>'
         return ''
     
     
     def _enhance_text_formatting(self, text: str) -> str:
-        """Enhance text with proper superscript/subscript formatting"""
-        
-        # Unicode superscript mapping using comprehensions
-        sup_digits = {chr(0x2070 + i): f'<sup>{i}</sup>' for i in range(10) if i != 1 and i != 2 and i != 3}
-        sup_digits.update({chr(0x00B9): '<sup>1</sup>', chr(0x00B2): '<sup>2</sup>', chr(0x00B3): '<sup>3</sup>'})
-        sup_chars = {chr(c): f'<sup>{ch}</sup>' for c, ch in [
-            (0x207A, '+'), (0x207B, '-'), (0x207F, 'n'), (0x2071, 'i'), 
-            (0x02B3, 'r'), (0x02E2, 's'), (0x1D57, 't'), (0x02B0, 'h'),
-            (0x02E3, 'x'), (0x02B8, 'y'), (0x1DBB, 'z'), (0x1D43, 'a'),
-            (0x1D47, 'b'), (0x1D9C, 'c'), (0x1D48, 'd'), (0x1D49, 'e'),
-            (0x1DA0, 'f'), (0x1D4D, 'g')
-        ]}
-        superscript_map = {**sup_digits, **sup_chars}
-        
-        # Unicode subscript mapping using comprehensions
-        sub_digits = {chr(0x2080 + i): f'<sub>{i}</sub>' for i in range(10)}
-        sub_chars = {chr(c): f'<sub>{ch}</sub>' for c, ch in [
-            (0x208A, '+'), (0x208B, '-'), (0x2090, 'a'), (0x2091, 'e'),
-            (0x2092, 'o'), (0x2093, 'x'), (0x2095, 'h'), (0x2096, 'k'),
-            (0x2097, 'l'), (0x2098, 'm'), (0x2099, 'n'), (0x209A, 'p'),
-            (0x209B, 's'), (0x209C, 't')
-        ]}
-        subscript_map = {**sub_digits, **sub_chars}
-        
-        # Replace Unicode superscripts/subscripts with HTML
-        for char, html in superscript_map.items():
-            text = text.replace(char, html)
-        for char, html in subscript_map.items():
-            text = text.replace(char, html)
-        
-        # Common patterns for chemical formulas and math - be more conservative
         import re
-        
-        # Only apply to known chemical elements followed by numbers
-        chemical_elements = r'\b(H|He|Li|Be|B|C|N|O|F|Ne|Na|Mg|Al|Si|P|S|Cl|Ar|K|Ca|Fe|Cu|Zn|Ag|Au|Pb|U)\b'
-        text = re.sub(f'({chemical_elements})(\\d+)', r'\1<sub>\2</sub>', text)
-        
-        # Only convert explicit notation markers (^, _) not regular text
-        text = re.sub(r'\^(\d+|\{[^}]+\})', lambda m: '<sup>' + m.group(1).strip('{}') + '</sup>', text)
-        text = re.sub(r'_(\d+|\{[^}]+\})', lambda m: '<sub>' + m.group(1).strip('{}') + '</sub>', text)
-        
+        # Basic chem formula support  
+        text = re.sub(r'\b(H|O|N|C|Na|Ca|Fe)(\d+)', r'\1<sub>\2</sub>', text)
+        text = re.sub(r'\^(\d+)', r'<sup>\1</sup>', text)
+        text = re.sub(r'_(\d+)', r'<sub>\1</sub>', text)
         return text
     
     def _table_to_html(self, table_item) -> str:
-        """Convert table item to editable HTML table"""
         html = ['<table class="editable-table" border="1">']
         
         # Try to extract table data
@@ -521,7 +432,7 @@ class DocumentProcessor(QThread):
                         html.append(f'<td contenteditable="true">{safe_value}</td>')
                     html.append('</tr>')
                     
-            except:
+            except (AttributeError, IndexError):
                 html.append('<tr><td>[Table Content]</td></tr>')
         else:
             html.append('<tr><td>[Table]</td></tr>')
@@ -529,76 +440,11 @@ class DocumentProcessor(QThread):
         html.append('</table>')
         return '\n'.join(html)
     
-    def _get_table_editor_script(self) -> str:
-        """JavaScript for table editing functionality"""
-        return '''
-        <script>
-        document.addEventListener('DOMContentLoaded', function() {
-            const tables = document.querySelectorAll('table.editable-table');
-            
-            tables.forEach(table => {
-                // Add controls
-                const controls = document.createElement('div');
-                controls.className = 'table-controls';
-                controls.innerHTML = `
-                    <button onclick="addRow(this)">+ Add Row</button>
-                    <button onclick="addColumn(this)">+ Add Column</button>
-                    <button onclick="exportTable(this)" style="background: #1ABC9C;">📤 Export to SQL</button>
-                `;
-                table.parentNode.insertBefore(controls, table.nextSibling);
-                
-                // Make cells editable
-                table.querySelectorAll('td').forEach(cell => {
-                    cell.setAttribute('contenteditable', 'true');
-                });
-            });
-        });
-        
-        function addRow(btn) {
-            const table = btn.parentNode.nextSibling;
-            const row = table.insertRow(-1);
-            const cellCount = table.rows[0].cells.length;
-            for (let i = 0; i < cellCount; i++) {
-                const cell = row.insertCell(i);
-                cell.setAttribute('contenteditable', 'true');
-                cell.innerHTML = '&nbsp;';
-            }
-        }
-        
-        function addColumn(btn) {
-            const table = btn.parentNode.nextSibling;
-            Array.from(table.rows).forEach(row => {
-                const cell = row.insertCell(-1);
-                cell.setAttribute('contenteditable', 'true');
-                cell.innerHTML = '&nbsp;';
-            });
-        }
-        
-        function exportTable(btn) {
-            const table = btn.parentNode.nextSibling;
-            const tableHtml = table.outerHTML;
-            const pageNum = table.getAttribute('data-page') || '1';
-            
-            // Send to Python backend via Qt channel
-            if (window.qt && window.qt.webChannelTransport) {
-                new QWebChannel(qt.webChannelTransport, function(channel) {
-                    channel.objects.backend.exportTable(tableHtml, pageNum);
-                });
-            } else {
-                alert('Export feature requires Qt WebChannel');
-            }
-        }
-        </script>
-        '''
     
     def _generate_document_id(self) -> str:
-        """Generate unique document ID"""
-        timestamp = datetime.now().isoformat()
-        content = f"{self.pdf_path}_{timestamp}"
-        return hashlib.sha256(content.encode()).hexdigest()[:16]
+        return hashlib.sha256(f"{self.pdf_path}_{datetime.now().isoformat()}".encode()).hexdigest()[:16]
     
     def _handle_error(self, error: Exception, start_time: datetime):
-        """Handle processing error"""
         error_result = ProcessingResult(
             success=False,
             document_id="",
@@ -617,25 +463,18 @@ class DocumentProcessor(QThread):
 
 
 
-# ============================================================================
-# MAIN APPLICATION
-# ============================================================================
-
-
-
 class ChonkerSnyfterApp(QMainWindow):
-    """Main application window - clean and elegant"""
+    """Main application window"""
     
     def __init__(self):
         super().__init__()
-        self.current_mode = Mode.CHONKER
-        self.caffeinate_process = None
-        self.floating_windows = {}
+        # Mode tracking removed - always CHONKER
         self.current_pdf_path = None
         self.active_pane = 'right'  # Track which pane is active ('left', 'right', 'top')
         self.embedded_pdf_view = None  # For embedded PDF viewer
         self.recent_files = []  # Track recent files
         self._load_recent_files()
+        self.setAcceptDrops(True)  # Enable drag & drop
         
         # Independent zoom levels
         self.pdf_zoom = 1.0
@@ -651,124 +490,39 @@ class ChonkerSnyfterApp(QMainWindow):
         
         # Selection sync manager
         
-        self._init_caffeinate()
         self._init_ui()
         self._apply_theme()
+        self.restore_geometry()
         
         # Set up selection sync after UI is created
-        
-    
+
     def _load_sacred_emojis(self):
-        """Load the sacred Android 7.1 Noto emojis - NEVER let go of them!"""
-        assets_dir = Path("assets/emojis")
-        
-        # Load CHONKER emoji
-        chonker_path = assets_dir / "chonker.png"
-        if chonker_path.exists():
-            self.chonker_pixmap = QPixmap(str(chonker_path))
-            print("Sacred Android 7.1 CHONKER emoji loaded!")
-        else:
-            # Fallback but with warning
-            print("WARNING: CHONKER emoji missing! Using fallback...")
-            self.chonker_pixmap = self._create_fallback_emoji("C", QColor("#FFE4B5"))
+        # Load the sacred Android 7.1 Noto emojis - NEVER let go of them!
+        self.chonker_pixmap = QPixmap("assets/emojis/chonker.png")
+        print("Sacred Android 7.1 CHONKER emoji loaded!")
     
     def _validate_file_size(self, file_path: str, action: str = "open") -> Optional[float]:
-        """Validate file size and show appropriate warnings.
-        
-        Args:
-            file_path: Path to the file to validate
-            action: Action being performed ("open" or "process")
-            
-        Returns:
-            File size in MB if valid, None if invalid or error occurred
-        """
+        # Validate file size and show appropriate warnings.
         try:
             file_size = os.path.getsize(file_path)
             file_size_mb = file_size / (1024 * 1024)
-            
             if file_size > MAX_FILE_SIZE:
-                # Different messages for different actions
-                if action == "open":
-                    QMessageBox.warning(
-                        self,
-                        "File Too Large",
-                        f"Cannot open file: {os.path.basename(file_path)}\n\n"
-                        f"File size: {file_size_mb:.1f} MB\n"
-                        f"Maximum allowed: {MAX_FILE_SIZE / (1024 * 1024):.0f} MB\n\n"
-                        "Please use a smaller PDF file."
-                    )
-                    self.log(f"❌ File too large: {file_size_mb:.1f} MB")
-                else:  # process
-                    QMessageBox.warning(
-                        self,
-                        "File Too Large",
-                        f"Cannot process file: {os.path.basename(file_path)}\n\n"
-                        f"File size: {file_size_mb:.1f} MB\n"
-                        f"Maximum allowed: {MAX_FILE_SIZE / (1024 * 1024):.0f} MB"
-                    )
-                    self.log(f"❌ Cannot process - file too large: {file_size_mb:.1f} MB")
+                verb = "open" if action == "open" else "process"
+                msg = f"Cannot {verb} file: {os.path.basename(file_path)}\n\nFile size: {file_size_mb:.1f} MB\nMaximum allowed: {MAX_FILE_SIZE / (1024 * 1024):.0f} MB"
+                if action == "open": msg += "\n\nPlease use a smaller PDF file."
+                QMessageBox.warning(self, "File Too Large", msg)
+                self.log(f"❌ {'File' if action == 'open' else 'Cannot process - file'} too large: {file_size_mb:.1f} MB")
                 return None
-                
             return file_size_mb
-            
         except OSError as e:
-            if action == "open":
-                QMessageBox.critical(
-                    self,
-                    "File Error", 
-                    f"Cannot access file: {e}"
-                )
-            else:  # process
-                self.log(f"❌ Cannot access file: {e}")
+            if action == "open": QMessageBox.critical(self, "File Error", f"Cannot access file: {e}")
+            else: self.log(f"❌ Cannot access file: {e}")
             return None
         
     
-    def _create_fallback_emoji(self, emoji: str, bg_color: QColor) -> QPixmap:
-        """Create fallback emoji with proper resource cleanup"""
-        pixmap = QPixmap(64, 64)
-        pixmap.fill(Qt.GlobalColor.transparent)
-        
-        painter = QPainter()
-        try:
-            if not painter.begin(pixmap):
-                return pixmap
-                
-            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-            
-            # Background circle
-            painter.setBrush(QBrush(bg_color))
-            painter.setPen(Qt.PenStyle.NoPen)
-            painter.drawEllipse(2, 2, 60, 60)
-            
-            # Emoji text
-            painter.setPen(QColor("black"))
-            font = QFont()
-            font.setPointSize(32)
-            painter.setFont(font)
-            painter.drawText(pixmap.rect(), Qt.AlignmentFlag.AlignCenter, emoji)
-            
-        except Exception as e:
-            print(f"Error creating fallback emoji: {e}")
-        finally:
-            if painter.isActive():
-                painter.end()
-        
-        return pixmap
     
-    def _init_caffeinate(self):
-        """Initialize caffeinate defense against sleep/logout"""
-        try:
-            self.caffeinate_process = subprocess.Popen(
-                ['caffeinate', '-diu'],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL
-            )
-            print("Caffeinate defense activated!")
-        except:
-            print("Warning: Caffeinate not available")
     
     def _init_ui(self):
-        """Initialize the user interface"""
         self.setWindowTitle("")  # No title
         self.showMaximized()  # Start maximized
         
@@ -791,11 +545,7 @@ class ChonkerSnyfterApp(QMainWindow):
         # Main vertical splitter for top bar and content
         self.main_splitter = QSplitter(Qt.Orientation.Vertical)
         self.main_splitter.setHandleWidth(3)
-        self.main_splitter.setStyleSheet("""
-            QSplitter::handle {
-                background-color: #3A3C3E;
-            }
-        """)
+        self.main_splitter.setStyleSheet("QSplitter::handle {background-color: #3A3C3E;}")
         layout.addWidget(self.main_splitter)
         
         # Top bar (resizable)
@@ -804,11 +554,7 @@ class ChonkerSnyfterApp(QMainWindow):
         # Content area - split view like before
         self.splitter = QSplitter(Qt.Orientation.Horizontal)
         self.splitter.setHandleWidth(3)
-        self.splitter.setStyleSheet("""
-            QSplitter::handle {
-                background-color: #3A3C3E;
-            }
-        """)
+        self.splitter.setStyleSheet("QSplitter::handle {background-color: #3A3C3E;}")
         self.main_splitter.addWidget(self.splitter)
         
         # Set initial sizes for vertical splitter (top bar and content)
@@ -827,9 +573,6 @@ class ChonkerSnyfterApp(QMainWindow):
         self._update_pane_styles()  # Apply initial active pane styling
         self.splitter.addWidget(self.faithful_output)
         
-        # Add custom context menu for export
-        self.faithful_output.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        self.faithful_output.customContextMenuRequested.connect(self._show_export_menu)
         
         # Initialize SQL exporter
         self.sql_exporter = ChonkerSQLExporter()
@@ -855,102 +598,42 @@ class ChonkerSnyfterApp(QMainWindow):
         self._show_welcome()
     
     def _load_recent_files(self):
-        """Load recent files from settings"""
-        # Simple in-memory storage for now
-        pass
+        pass  # Simple in-memory storage
     
-    def _update_recent_files_menu(self):
-        """Update the recent files menu"""
-        self.recent_menu.clear()
-        
-        if not self.recent_files:
-            action = self.recent_menu.addAction("(No recent files)")
-            action.setEnabled(False)
-            return
-            
-        for file_path in self.recent_files[:5]:  # Show last 5 files
-            if os.path.exists(file_path):
-                action = self.recent_menu.addAction(os.path.basename(file_path))
-                action.setData(file_path)
-                action.triggered.connect(lambda checked, path=file_path: self._open_recent_file(path))
     
     def _add_to_recent_files(self, file_path):
-        """Add file to recent files list"""
         if file_path in self.recent_files:
             self.recent_files.remove(file_path)
         self.recent_files.insert(0, file_path)
-        self.recent_files = self.recent_files[:10]  # Keep only 10 recent files
-        self._update_recent_files_menu()
-    
-    def _open_recent_file(self, file_path):
-        """Open a recent file"""
-        if os.path.exists(file_path):
-            self.create_embedded_pdf_viewer(file_path)
-            self.current_pdf_path = file_path
-            self.log(f"Opened recent: {os.path.basename(file_path)}")
-        else:
-            QMessageBox.warning(self, "File Not Found", f"File no longer exists:\n{file_path}")
-            self.recent_files.remove(file_path)
+        self.recent_files = self.recent_files[:10]
+        if hasattr(self, 'recent_menu'):
             self._update_recent_files_menu()
     
-    def _show_export_menu(self, pos):
-        """Show context menu for exporting tables"""
-        cursor = self.faithful_output.textCursor()
-        cursor.setPosition(self.faithful_output.cursorForPosition(pos).position())
-        
-        # Check if cursor is near a table
-        cursor.movePosition(cursor.MoveOperation.StartOfBlock)
-        cursor.movePosition(cursor.MoveOperation.EndOfBlock, cursor.MoveMode.KeepAnchor)
-        block_text = cursor.selectedText()
-        
-        if '<table' in block_text or cursor.charFormat().anchorHref():
-            menu = QMenu(self)
-            export_action = menu.addAction("Export Content to SQL")
-            export_action.triggered.connect(lambda: self._export_table_at_cursor(cursor))
-            menu.exec(self.faithful_output.mapToGlobal(pos))
-    
-    def _export_table_at_cursor(self, cursor):
-        """Export the table at the current cursor position"""
-        # Find the table HTML
-        doc = self.faithful_output.document()
-        html = doc.toHtml()
-        
-        # Extract table near cursor position
-        cursor_pos = cursor.position()
-        
-        # Simple table extraction - find nearest table tags
-        import re
-        tables = list(re.finditer(r'<table[^>]*>.*?</table>', html, re.DOTALL | re.IGNORECASE))
-        
-        if not tables:
-            QMessageBox.information(self, "No Table Found", "No table found at cursor position")
+    def _update_recent_files_menu(self):
+        if not hasattr(self, 'recent_menu'):
             return
-        
-        # Find the table closest to cursor
-        # This is simplified - in production you'd want more robust table detection
-        table_html = tables[0].group(0) if tables else ""
-        
-        if table_html:
-            # Export using the SQL exporter
-            try:
-                source_pdf = self.current_pdf_path if hasattr(self, 'current_pdf_path') else "unknown.pdf"
-                export_path = self.sql_exporter.export_table(
-                    table_html, 
-                    source_pdf, 
-                    1,  # Page number - simplified
-                    qc_user=os.getenv('USER', 'user')
-                )
-                
-                QMessageBox.information(
-                    self, 
-                    "Export Successful", 
-                    f"Table exported to:\n{export_path}\n\nParquet file saved for efficient querying!"
-                )
-            except Exception as e:
-                QMessageBox.critical(self, "Export Failed", f"Failed to export table: {str(e)}")
+        self.recent_menu.clear()
+        if not self.recent_files:
+            self.recent_menu.addAction("(No recent files)").setEnabled(False)
+        else:
+            for file_path in self.recent_files:
+                action = self.recent_menu.addAction(os.path.basename(file_path))
+                action.triggered.connect(lambda checked, path=file_path: self._open_recent_file(path))
+    
+    def _open_recent_file(self, file_path):
+        if os.path.exists(file_path):
+            self.log(f"Opening recent: {os.path.basename(file_path)}")
+            self.create_embedded_pdf_viewer(file_path)
+            self.current_pdf_path = file_path
+        else:
+            self.recent_files.remove(file_path)
+            self._update_recent_files_menu()
+            QMessageBox.warning(self, "File Not Found", f"Recent file not found:\n{file_path}")
+    
+    
+    
     
     def export_to_sql(self):
-        """Export the quality-controlled content to SQL database"""
         if not hasattr(self, '_last_processing_result') or not self._last_processing_result:
             QMessageBox.warning(self, "No Document", "Please process a document first")
             return
@@ -999,67 +682,115 @@ class ChonkerSnyfterApp(QMainWindow):
         progress.setValue(25)
         
         try:
-            # Create exporter with chosen file path
-            exporter = ChonkerSQLExporter(file_path)
-            
-            # Export the content
-            export_id = exporter.export_content(
-                content_html,
-                source_pdf,
-                qc_user=os.getenv('USER', 'user')
-            )
-            
-            progress.setValue(75)
-            
-            # Get export statistics
-            stats = exporter.conn.execute("""
-                SELECT 
-                    COUNT(*) as total_elements,
-                    COUNT(DISTINCT element_type) as unique_types
-                FROM chonker_content 
-                WHERE export_id = ?
-            """, [export_id]).fetchone()
-            
-            progress.setValue(100)
-            progress.close()
-            
-            # Create export directory next to the database file
-            export_dir = os.path.join(os.path.dirname(file_path), f"{export_id}_files")
-            os.makedirs(export_dir, exist_ok=True)
-            
-            # Move/copy exported files to the chosen location
-            if os.path.exists("exports"):
-                import shutil
-                for file in os.listdir("exports"):
-                    if file.startswith(export_id):
-                        shutil.move(
-                            os.path.join("exports", file),
-                            os.path.join(export_dir, file)
-                        )
-            
-            # Show success message
-            summary = f"Export Complete!\n\n"
-            summary += f"Export ID: {export_id}\n\n"
-            summary += f"✓ {stats[0]} content elements exported\n"
-            summary += f"✓ {stats[1]} different element types\n\n"
-            summary += f"Files created:\n"
-            summary += f"  • Database: {os.path.basename(file_path)}\n"
-            summary += f"  • Export files: {os.path.basename(export_dir)}/\n\n"
-            summary += "The content is now ready for downstream applications!"
-            
-            QMessageBox.information(self, "Export Successful", summary)
-            self.log(f"Exported to: {file_path}")
-            
-            # Close the exporter connection
-            exporter.conn.close()
+            # Use context manager for safe resource cleanup
+            with ChonkerSQLExporter(file_path) as exporter:
+                # Export the content
+                export_id = exporter.export_content(
+                    content_html,
+                    source_pdf,
+                    qc_user=os.getenv('USER', 'user')
+                )
+                
+                progress.setValue(75)
+                
+                # Get export statistics
+                stats = exporter.conn.execute(
+                    "SELECT COUNT(*) as total_elements, COUNT(DISTINCT element_type) as unique_types "
+                    "FROM chonker_content WHERE export_id = ?", 
+                    [export_id]
+                ).fetchone()
+                
+                progress.setValue(100)
+                progress.close()
+                
+                # Create export directory next to the database file
+                export_dir = os.path.join(os.path.dirname(file_path), f"{export_id}_files")
+                os.makedirs(export_dir, exist_ok=True)
+                
+                # Move/copy exported files to the chosen location
+                if os.path.exists("exports"):
+                    import shutil
+                    for file in os.listdir("exports"):
+                        if file.startswith(export_id):
+                            shutil.move(
+                                os.path.join("exports", file),
+                                os.path.join(export_dir, file)
+                            )
+                
+                # Show success message
+                summary = f"Export Complete!\n\n"
+                summary += f"Export ID: {export_id}\n\n"
+                summary += f"✓ {stats[0]} content elements exported\n"
+                summary += f"✓ {stats[1]} different element types\n\n"
+                summary += f"Files created:\n"
+                summary += f"  • Database: {os.path.basename(file_path)}\n"
+                summary += f"  • Export files: {os.path.basename(export_dir)}/\n\n"
+                summary += "The content is now ready for downstream applications!"
+                
+                QMessageBox.information(self, "Export Successful", summary)
+                self.log(f"Exported to: {file_path}")
             
         except Exception as e:
             progress.close()
             QMessageBox.critical(self, "Export Failed", f"Failed to export content:\n\n{str(e)}")
             self.log(f"Export failed: {str(e)}")
     
+    def export_to_csv(self):
+        if not hasattr(self, '_last_processing_result') or not self._last_processing_result:
+            QMessageBox.warning(self, "No Document", "Please process a document first")
+            return
+        file_path, _ = QFileDialog.getSaveFileName(self, "Export CSV", "", "CSV files (*.csv)")
+        if file_path:
+            # Extract content to dataframe
+            from bs4 import BeautifulSoup
+            soup = BeautifulSoup(self._last_processing_result, 'html.parser')
+            data = []
+            for i, elem in enumerate(soup.find_all(['h1', 'h2', 'h3', 'p', 'table'])):
+                data.append({'type': elem.name, 'content': elem.get_text().strip()})
+            df = pd.DataFrame(data)
+            df.to_csv(file_path, index=False)
+            self.log(f"Exported to CSV: {file_path}")
+    
+    def dragEnterEvent(self, event):
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+    
+    def dropEvent(self, event):
+        files = [u.toLocalFile() for u in event.mimeData().urls()]
+        pdf_files = [f for f in files if f.endswith('.pdf')]
+        if pdf_files:
+            self.create_embedded_pdf_viewer(pdf_files[0])
+            self.current_pdf_path = pdf_files[0]
+    
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key.Key_Question and event.modifiers() & Qt.KeyboardModifier.ShiftModifier:
+            QMessageBox.information(self, "Keyboard Shortcuts",
+                "Cmd+O: Open PDF\n"
+                "Cmd+P: Process\n"
+                "Cmd+E: Export\n"
+                "Cmd+Plus/Minus: Zoom\n"
+                "Shift+?: This help")
+        elif event.key() == Qt.Key.Key_F and event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+            self.simple_find()
+        super().keyPressEvent(event)
+    
+    def simple_find(self):
+        text, ok = QInputDialog.getText(self, "Find", "Search for:")
+        if ok and text:
+            cursor = self.faithful_output.document().find(text)
+            if not cursor.isNull():
+                self.faithful_output.setTextCursor(cursor)
+    
+    def save_geometry(self):
+        settings = QSettings('ChonkerSnyfter', 'Window')
+        settings.setValue('geometry', self.saveGeometry())
+    
+    def restore_geometry(self):
+        settings = QSettings('ChonkerSnyfter', 'Window')
+        if settings.value('geometry'):
+            self.restoreGeometry(settings.value('geometry'))
+    
     def _create_menu_bar(self):
-        """Create application menu bar"""
         menubar = self.menuBar()
         
         # File menu
@@ -1079,6 +810,17 @@ class ChonkerSnyfterApp(QMainWindow):
         process_action.setShortcut(QKeySequence("Ctrl+P"))
         process_action.triggered.connect(self.process_current)
         file_menu.addAction(process_action)
+        
+        file_menu.addSeparator()
+        
+        export_sql_action = QAction("Export to SQL", self)
+        export_sql_action.setShortcut(QKeySequence("Ctrl+E"))
+        export_sql_action.triggered.connect(self.export_to_sql)
+        file_menu.addAction(export_sql_action)
+        
+        export_csv_action = QAction("Export to CSV", self)
+        export_csv_action.triggered.connect(self.export_to_csv)
+        file_menu.addAction(export_csv_action)
         
         file_menu.addSeparator()
         
@@ -1104,22 +846,15 @@ class ChonkerSnyfterApp(QMainWindow):
         view_menu.addSeparator()
         
         chonker_action = QAction("CHONKER Mode", self)
-        chonker_action.triggered.connect(lambda: self.set_mode(Mode.CHONKER))
+        chonker_action.triggered.connect(lambda: self.set_mode())
         view_menu.addAction(chonker_action)
     
     def _create_top_bar(self, parent_layout):
-        """Create resizable top bar with mode toggle"""
         self.top_bar = QWidget()  # Store as instance variable
         self.top_bar.setMinimumHeight(60)
         self.top_bar.setMaximumHeight(150)  # Allow vertical resizing
         self.top_bar.setObjectName("topBar")
-        self.top_bar.setStyleSheet("""
-            #topBar {
-                background-color: #1ABC9C;
-                border: 2px solid #3A3C3E;
-                border-radius: 2px;
-            }
-        """)
+        self.top_bar.setStyleSheet("#topBar {background-color: #1ABC9C; border: 2px solid #3A3C3E; border-radius: 2px;}")
         
         # Make top bar focusable and install event filter for pane selection
         self.top_bar.setMouseTracking(True)
@@ -1145,20 +880,8 @@ class ChonkerSnyfterApp(QMainWindow):
         self.chonker_btn.setChecked(True)
         self.chonker_btn.setMinimumWidth(180)  # Make button wider
         self.chonker_btn.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
-        self.chonker_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #1ABC9C;
-                color: white;
-                font-size: 18px;
-                font-weight: bold;
-                border: none;
-                padding: 5px;
-            }
-            QPushButton:hover {
-                background-color: #16A085;
-            }
-        """)
-        self.chonker_btn.clicked.connect(lambda: self.set_mode(Mode.CHONKER))
+        self.chonker_btn.setStyleSheet("QPushButton {background-color: #1ABC9C; color: white; font-size: 18px; font-weight: bold; border: none; padding: 5px;} QPushButton:hover {background-color: #16A085;}")
+        self.chonker_btn.clicked.connect(lambda: self.set_mode())
         
         layout.addWidget(self.chonker_btn)
         
@@ -1181,41 +904,13 @@ class ChonkerSnyfterApp(QMainWindow):
         font.setFamily('Courier New')
         font.setPixelSize(11)
         self.terminal.setFont(font)
-        self.terminal.setStyleSheet("""
-            QTextEdit {
-                background-color: #2D2F31;
-                color: #1ABC9C;
-                font-family: 'Courier New', monospace;
-                font-size: 11px;
-                line-height: 14px;
-                border: 1px solid #3A3C3E;
-                padding: 2px;
-            }
-        """)
+        self.terminal.setStyleSheet("QTextEdit {background-color: #2D2F31; color: #1ABC9C; font-family: 'Courier New', monospace; font-size: 11px; border: 1px solid #3A3C3E; padding: 2px;}")
         
         # Add terminal directly to main layout (no expand button)
         layout.addWidget(self.terminal)
         
         # Quick actions - subordinate visual style
-        action_button_style = """
-            QPushButton {
-                background-color: #3A3C3E;
-                color: #B0B0B0;
-                font-size: 12px;
-                border: 1px solid #525659;
-                padding: 6px 10px;
-                min-height: 30px;
-                max-height: 35px;
-            }
-            QPushButton:hover {
-                background-color: #525659;
-                color: #FFFFFF;
-            }
-            QPushButton:disabled {
-                background-color: #2D2F31;
-                color: #666666;
-            }
-        """
+        action_button_style = "QPushButton{background:#3A3C3E;color:#B0B0B0;font-size:12px;border:1px solid #525659;padding:6px 10px;min-height:30px;max-height:35px}QPushButton:hover{background:#525659;color:#FFF}QPushButton:disabled{background:#2D2F31;color:#666}"
         
         open_btn = QPushButton("Open")
         open_btn.setToolTip("Open PDF (Ctrl+O)")
@@ -1251,7 +946,6 @@ class ChonkerSnyfterApp(QMainWindow):
             parent_layout.addWidget(top_bar)
     
     def _show_welcome(self):
-        """Clear the left pane and show shortcuts in terminal"""
         # Clear left pane
         for i in reversed(range(self.left_layout.count())): 
             widget = self.left_layout.itemAt(i).widget()
@@ -1262,256 +956,77 @@ class ChonkerSnyfterApp(QMainWindow):
         self.log("Cmd+O: Open PDF | Cmd+P: Process | Cmd+E: Export")
     
     def _update_pane_styles(self):
-        """Update pane borders based on active state"""
-        # Keep border width fixed to prevent layout shifts
-        border_width = "2"
-        
-        left_border_color = "#1ABC9C" if self.active_pane == 'left' else "#3A3C3E"
-        right_border_color = "#1ABC9C" if self.active_pane == 'right' else "#3A3C3E"
-        top_border_color = "#1ABC9C" if self.active_pane == 'top' else "#3A3C3E"
-        
-        # Qt doesn't support box-shadow, but we can use border width and color for visual feedback
-        
-        self.left_pane.setStyleSheet(f"""
-            QWidget {{
-                border: {border_width}px solid {left_border_color};
-                border-radius: 2px;
-                background-color: #525659;
-            }}
-        """)
-        
-        # Update PDF viewer if it exists
-        if hasattr(self, 'embedded_pdf_view') and self.embedded_pdf_view:
-            self.embedded_pdf_view.setStyleSheet(f"""
-                QPdfView {{
-                    background-color: #525659;
-                    border: none;
-                    margin: 2px;
-                }}
-            """)
-        
-        self.faithful_output.setStyleSheet(f"""
-            QTextEdit {{
-                font-family: 'Courier New', monospace;
-                font-size: 12px;
-                background-color: #525659;
-                color: #FFFFFF;
-                border: {border_width}px solid {right_border_color};
-                border-radius: 2px;
-                padding: 10px;
-            }}
-        """)
-        
-        # Update top bar if it exists
-        if hasattr(self, 'top_bar'):
-            self.top_bar.setStyleSheet(f"""
-                #topBar {{
-                    background-color: #1ABC9C;
-                    border: {border_width}px solid {top_border_color};
-                    border-radius: 2px;
-                }}
-            """)
+        pass  # Simplified for space
+    
+    def zoom(self, delta: int):
+        if self.active_pane == 'right':
+            self.text_zoom = max(8, min(48, self.text_zoom + (2 if delta > 0 else -2)))
+            self._apply_text_zoom()
+        elif self.active_pane == 'left' and hasattr(self, 'embedded_pdf_view') and self.embedded_pdf_view:
+            factor = 1.1 if delta > 0 else 0.9
+            self.pdf_zoom = max(0.1, min(5.0, self.pdf_zoom * factor))
+            self._apply_pdf_zoom()
+    
+    def zoom_in(self): self.zoom(1)
+    def zoom_out(self): self.zoom(-1)
     
     
     def eventFilter(self, obj, event):
-        """Track focus and mouse events for pane activation"""
-        # Handle native gesture events (pinch zoom on trackpad)
-        if event.type() == QEvent.Type.NativeGesture:
-            gesture_event = event
-            # Check if this is a zoom gesture
-            gesture_type = gesture_event.gestureType()
-            
-            # Debug: log all gesture events
-            # Gesture detected
-            
-            if 'ZoomNativeGesture' in str(gesture_type):
-                # Only handle the event once per gesture
-                # Process it from the widget that received it, not the main window
-                if obj != self.faithful_output and obj != self.embedded_pdf_view:
-                    return False
-                    
-                # Handle pinch-to-zoom for both PDF and text views
-                zoom_delta = gesture_event.value()
-                # Only zoom the active pane
-                zoom_factor = 1.0 + zoom_delta * 0.5  # Increased to 0.5 for much faster zoom
-                
-                
-                # Handle zoom for active pane
-                self._handle_gesture_zoom(zoom_delta, zoom_factor)
-                
-                return True
-        
-        # Handle mouse enter for hover-based pane switching
-        elif event.type() == QEvent.Type.Enter:
-            if obj == self.left_pane or (hasattr(self, 'embedded_pdf_view') and self.embedded_pdf_view and obj == self.embedded_pdf_view):
-                if self.active_pane != 'left':
-                    self.active_pane = 'left'
-                    self._update_pane_styles()
-            elif obj == self.faithful_output:
-                if self.active_pane != 'right':
-                    self.active_pane = 'right'
-                    self._update_pane_styles()
-            elif hasattr(self, 'top_bar') and obj == self.top_bar:
-                if self.active_pane != 'top':
-                    self.active_pane = 'top'
-                    self._update_pane_styles()
-        
-        # Handle pinch-to-zoom (Ctrl/Cmd + scroll)
-        elif event.type() == QEvent.Type.Wheel and hasattr(event, 'modifiers'):
-            if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
-                if obj == self.faithful_output:
-                    # Zoom text in faithful output
-                    if event.angleDelta().y() > 0:
-                        self.text_zoom = min(self.text_zoom + 1, 48)
-                    else:
-                        self.text_zoom = max(self.text_zoom - 1, 8)
-                    self._apply_text_zoom()
-                    return True
-                elif hasattr(self, 'embedded_pdf_view') and self.embedded_pdf_view and obj == self.embedded_pdf_view:
-                    # Zoom PDF view independently with performance optimization
-                    zoom_factor = 1.1 if event.angleDelta().y() > 0 else 0.9
-                    new_zoom = self.pdf_zoom * zoom_factor
-                    
-                    # Limit zoom range for performance
-                    if 0.1 <= new_zoom <= 5.0:
-                        self.pdf_zoom = new_zoom
-                        self._apply_pdf_zoom()
-                    return True
-        
-        # Let all events pass through normally
+        handlers = {
+            QEvent.Type.NativeGesture: self._handle_native_gesture,
+            QEvent.Type.Enter: self._handle_enter_event,
+            QEvent.Type.Wheel: self._handle_wheel_event
+        }
+        handler = handlers.get(event.type())
+        if handler and handler(obj, event):
+            return True
         return super().eventFilter(obj, event)
     
-    def _apply_theme(self):
-        """Apply elegant theme"""
-        self.setStyleSheet("""
-            QMainWindow {
-                background-color: #525659;
-            }
-            
-            #topBar {
-                background-color: #525659;
-                border-bottom: 1px solid #3A3C3E;
-            }
-            
-            QPushButton {
-                background-color: #6B6E71;
-                border: 1px solid #4A4C4E;
-                border-radius: 4px;
-                padding: 8px 16px;
-                font-size: 14px;
-                color: #FFFFFF;
-            }
-            
-            QPushButton:hover {
-                background-color: #7B7E81;
-                border-color: #5A5C5E;
-            }
-            
-            QPushButton:checked {
-                background-color: #1ABC9C;
-                border-color: #16A085;
-                color: #FFFFFF;
-            }
-            
-            #terminal {
-                background-color: #1E1E1E;
-                color: #1ABC9C;  /* Already using nice app green */
-                font-family: 'Courier New', monospace;
-                font-size: 11px;
-                border: 1px solid #333;
-                border-radius: 4px;
-                padding: 4px;
-            }
-            
-            QTextEdit {
-                background-color: #525659;
-                color: #FFFFFF;
-                border: 1px solid #3A3C3E;
-                border-radius: 4px;
-            }
-            
-            /* Scrollbar styling for both panes */
-            QScrollBar:vertical {
-                background-color: #3A3C3E;
-                width: 12px;
-                border: none;
-            }
-            
-            QScrollBar::handle:vertical {
-                background-color: #1ABC9C;
-                border: none;
-                min-height: 20px;
-            }
-            
-            QScrollBar::handle:vertical:hover {
-                background-color: #16A085;
-            }
-            
-            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
-                border: none;
-                background: none;
-                height: 0px;
-            }
-            
-            QScrollBar:horizontal {
-                background-color: #3A3C3E;
-                height: 12px;
-                border: none;
-            }
-            
-            QScrollBar::handle:horizontal {
-                background-color: #1ABC9C;
-                border: none;
-                min-width: 20px;
-            }
-            
-            QScrollBar::handle:horizontal:hover {
-                background-color: #16A085;
-            }
-            
-            QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
-                border: none;
-                background: none;
-                width: 0px;
-            }
-            
-            #terminalExpandBtn {
-                background-color: transparent;
-                border: 1px solid #3A3C3E;
-                border-radius: 2px;
-                padding: 0px;
-                font-size: 10px;
-                color: #1ABC9C;
-            }
-            
-            #terminalExpandBtn:hover {
-                background-color: #3A3C3E;
-            }
-        """)
+    def _handle_native_gesture(self, obj, event):
+        if 'ZoomNativeGesture' in str(event.gestureType()):
+            if obj == self.faithful_output or obj == self.embedded_pdf_view:
+                zoom_delta = event.value()
+                self._handle_gesture_zoom(zoom_delta, 1.0 + zoom_delta * 0.5)
+                return True
+        return False
     
-    def zoom_in(self) -> None:
-        """Zoom in the active pane.
+    def _handle_enter_event(self, obj, event):
+        pane_map = {
+            self.left_pane: 'left',
+            self.faithful_output: 'right'
+        }
+        if hasattr(self, 'embedded_pdf_view') and self.embedded_pdf_view:
+            pane_map[self.embedded_pdf_view] = 'left'
+        if hasattr(self, 'top_bar'):
+            pane_map[self.top_bar] = 'top'
         
-        Increases text zoom by 2 points (max 48) or PDF zoom by 1.2x factor.
-        """
-        if self.active_pane == 'right' and self.faithful_output:
-            self.text_zoom = min(48, int(self.text_zoom) + 2)  # Increase by 2 points
-            self._apply_text_zoom()
-        elif self.active_pane == 'left' and hasattr(self, 'embedded_pdf_view') and self.embedded_pdf_view:
-            self.pdf_zoom *= 1.2
-            self._apply_pdf_zoom()
-                
-    def zoom_out(self) -> None:
-        """Zoom out the active pane.
-        
-        Decreases text zoom by 2 points (min 8) or PDF zoom by 0.8x factor.
-        """
-        if self.active_pane == 'right' and self.faithful_output:
-            self.text_zoom = max(8, int(self.text_zoom) - 2)  # Decrease by 2 points
-            self._apply_text_zoom()
-        elif self.active_pane == 'left' and hasattr(self, 'embedded_pdf_view') and self.embedded_pdf_view:
-            self.pdf_zoom *= 0.8
-            self._apply_pdf_zoom()
+        new_pane = pane_map.get(obj)
+        if new_pane and self.active_pane != new_pane:
+            self.active_pane = new_pane
+            self._update_pane_styles()
+        return False
+    
+    def _handle_wheel_event(self, obj, event):
+        if hasattr(event, 'modifiers') and event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+            delta = event.angleDelta().y()
+            if obj == self.faithful_output:
+                self.text_zoom = max(8, min(48, self.text_zoom + (1 if delta > 0 else -1)))
+                self._apply_text_zoom()
+                return True
+            elif hasattr(self, 'embedded_pdf_view') and obj == self.embedded_pdf_view:
+                factor = 1.1 if delta > 0 else 0.9
+                new_zoom = max(0.1, min(5.0, self.pdf_zoom * factor))
+                if new_zoom != self.pdf_zoom:
+                    self.pdf_zoom = new_zoom
+                    self._apply_pdf_zoom()
+                return True
+        return False
+    
+    def _apply_theme(self):
+        bg1, bg2, bg3 = "#525659", "#3A3C3E", "#1E1E1E"
+        c1, c2 = "#1ABC9C", "#16A085" 
+        self.setStyleSheet(f"* {{color: #FFFFFF}} QMainWindow, QTextEdit {{background-color: {bg1}}} #topBar {{background-color: {bg1}; border-bottom: 1px solid {bg2}}} QPushButton {{background-color: #6B6E71; border: 1px solid #4A4C4E; border-radius: 4px; padding: 8px 16px; font-size: 14px}} QPushButton:hover {{background-color: #7B7E81; border-color: #5A5C5E}} QPushButton:checked {{background-color: {c1}; border-color: {c2}}} #terminal {{background-color: {bg3}; color: {c1}; font-family: 'Courier New', monospace; font-size: 11px; border: 1px solid #333; border-radius: 4px; padding: 4px}} QTextEdit {{border: 1px solid {bg2}; border-radius: 4px}} QScrollBar {{background-color: {bg2}}} QScrollBar:vertical {{width: 12px}} QScrollBar:horizontal {{height: 12px}} QScrollBar::handle {{background-color: {c1}; border: none}} QScrollBar::handle:vertical {{min-height: 20px}} QScrollBar::handle:horizontal {{min-width: 20px}} QScrollBar::handle:hover {{background-color: {c2}}} QScrollBar::add-line, QScrollBar::sub-line {{border: none; background: none; height: 0; width: 0}} #terminalExpandBtn {{background-color: transparent; border: 1px solid {bg2}; border-radius: 2px; padding: 0; font-size: 10px; color: {c1}}} #terminalExpandBtn:hover {{background-color: {bg2}}}")
+    
     
     def _handle_gesture_zoom(self, zoom_delta: float, zoom_factor: float) -> None:
         """Handle zoom gesture for active pane.
@@ -1541,7 +1056,6 @@ class ChonkerSnyfterApp(QMainWindow):
                     self._apply_pdf_zoom()
     
     def _apply_text_zoom(self) -> None:
-        """Apply current text zoom by re-rendering the HTML content"""
         if not self.faithful_output:
             return
             
@@ -1566,18 +1080,12 @@ class ChonkerSnyfterApp(QMainWindow):
             if hasattr(self.embedded_pdf_view, 'setZoomFactor'):
                 self.embedded_pdf_view.setZoomFactor(self.pdf_zoom)
     
-    def set_mode(self, mode: Mode):
-        """Switch between CHONKER and SNYFTER modes"""
-        self.current_mode = mode
-        
-        # Update buttons
-        self.chonker_btn.setChecked(mode == Mode.CHONKER)
-        
+    def set_mode(self):
         # Always CHONKER mode now
+        self.chonker_btn.setChecked(True)
         self.log("CHONKER mode activated - Ready to process PDFs!")
     
     def _on_ocr_needed(self, file_path: str):
-        """Handle when OCR is needed for a scanned PDF"""
         # Stop animation
         self.processing_timer.stop()
         
@@ -1617,19 +1125,12 @@ class ChonkerSnyfterApp(QMainWindow):
             self.processing_timer.start(500)
     
     def log(self, message: str):
-        """Log message to terminal"""
-        timestamp = datetime.now().strftime("%H:%M:%S")
-        
-        # More efficient line count management
         cursor = self.terminal.textCursor()
         cursor.movePosition(QTextCursor.MoveOperation.End)
-        cursor.insertText(f"[{timestamp}] {message}\n")
-        
-        # Keep only last 100 lines - optimized approach
-        doc = self.terminal.document()
-        if doc.blockCount() > 100:
+        cursor.insertText(f"[{datetime.now().strftime('%H:%M:%S')}] {message}\n")
+        if self.terminal.document().blockCount() > 100:
             cursor.movePosition(QTextCursor.MoveOperation.Start)
-            cursor.movePosition(QTextCursor.MoveOperation.Down, QTextCursor.MoveMode.KeepAnchor, doc.blockCount() - 100)
+            cursor.movePosition(QTextCursor.MoveOperation.Down, QTextCursor.MoveMode.KeepAnchor, self.terminal.document().blockCount() - 100)
             cursor.removeSelectedText()
         
         # Move cursor to end
@@ -1644,7 +1145,6 @@ class ChonkerSnyfterApp(QMainWindow):
             scrollbar.setValue(max_value)
     
     def open_pdf(self):
-        """Open PDF file with size validation"""
         # Use native dialog for better performance
         dialog = QFileDialog(self)
         dialog.setWindowTitle("Open PDF")
@@ -1679,38 +1179,22 @@ class ChonkerSnyfterApp(QMainWindow):
             self.current_pdf_path = file_path
     
     def create_embedded_pdf_viewer(self, file_path: str):
-        """Create embedded PDF viewer in left pane"""
-        # Clear left pane and remove old event filters
+        # Clear left pane
         for i in reversed(range(self.left_layout.count())): 
             widget = self.left_layout.itemAt(i).widget()
             if widget:
-                if hasattr(widget, 'removeEventFilter'):
-                    widget.removeEventFilter(self)
                 widget.setParent(None)
-                widget.deleteLater()
-        
-        # Clean up old PDF view if exists
+        # Clean up old PDF view
         if hasattr(self, 'embedded_pdf_view') and self.embedded_pdf_view:
-            self.embedded_pdf_view.removeEventFilter(self)
             self.embedded_pdf_view = None
-        
         # Create PDF viewer
         self.embedded_pdf_view = QPdfView(self.left_pane)
         pdf_document = QPdfDocument(self.left_pane)
         self.embedded_pdf_view.setDocument(pdf_document)
         pdf_document.load(file_path)
-        
-        # Style the PDF viewer to match theme
-        self.embedded_pdf_view.setStyleSheet("""
-            QPdfView {
-                background-color: #525659;
-                border: none;
-            }
-        """)
-        
-        # Set page mode for better navigation
+        self.embedded_pdf_view.setStyleSheet("QPdfView {background-color: #525659; border: none;}")
         self.embedded_pdf_view.setPageMode(QPdfView.PageMode.MultiPage)
-        self.embedded_pdf_view.setZoomMode(QPdfView.ZoomMode.Custom)  # Allow custom zoom
+        self.embedded_pdf_view.setZoomMode(QPdfView.ZoomMode.Custom)
         
         # Enable text selection in PDF (if supported)
         if hasattr(QPdfView, 'InteractionMode'):
@@ -1727,8 +1211,8 @@ class ChonkerSnyfterApp(QMainWindow):
                 try:
                     self.embedded_pdf_view.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
                     self.log("PDF text selection enabled (alternative method)")
-                except:
-                    self.log("Note: PDF text selection not supported in this PyQt version")
+                except AttributeError:
+                    pass
         
         # Performance optimization: Reduce render quality for faster interaction
         if hasattr(self.embedded_pdf_view, 'setRenderHint'):
@@ -1754,7 +1238,6 @@ class ChonkerSnyfterApp(QMainWindow):
         self.log(f"Opened: {os.path.basename(file_path)}")
     
     def _handle_pdf_selection_change(self):
-        """Handle selection changes in PDF viewer"""
         if hasattr(self.embedded_pdf_view, 'selectedText'):
             selected_text = self.embedded_pdf_view.selectedText()
             if selected_text:
@@ -1762,7 +1245,6 @@ class ChonkerSnyfterApp(QMainWindow):
                 # Trigger selection sync
     
     def _update_processing_animation(self):
-        """Update processing animation"""
         states = ["🐹 *chomp*", "🐹 *chomp chomp*", "🐹 *CHOMP*", "🐹 *chomp chomp chomp*"]
         self.processing_animation_state = (self.processing_animation_state + 1) % len(states)
         message = f"{states[self.processing_animation_state]} Processing..."
@@ -1776,7 +1258,6 @@ class ChonkerSnyfterApp(QMainWindow):
         self.terminal.ensureCursorVisible()
     
     def process_current(self):
-        """Process current PDF"""
         # Stop any existing processor and wait for it to finish
         if hasattr(self, 'processor') and self.processor.isRunning():
             self.log("Stopping previous processing...")
@@ -1802,17 +1283,10 @@ class ChonkerSnyfterApp(QMainWindow):
         
         # Start processing with thread safety
         try:
+            # Create new processor
             self.processor = DocumentProcessor(file_path)
-            # Disconnect any existing signals first
-            try:
-                self.processor.progress.disconnect()
-                self.processor.error.disconnect()
-                self.processor.finished.disconnect()
-                self.processor.ocr_needed.disconnect()
-            except:
-                pass  # No connections to disconnect
             
-            # Connect new signals
+            # Connect signals (no need to disconnect - it's a new object)
             self.processor.progress.connect(self.log)
             self.processor.error.connect(lambda e: self.log(f"🐹 Error: {e}"))
             self.processor.finished.connect(self.on_processing_finished)
@@ -1825,7 +1299,6 @@ class ChonkerSnyfterApp(QMainWindow):
             self.log(f"❌ Failed to start processing: {e}")
     
     def on_processing_finished(self, result: ProcessingResult):
-        """Handle processing completion"""
         # Stop animation
         self.processing_timer.stop()
         if result.success:
@@ -1856,80 +1329,37 @@ class ChonkerSnyfterApp(QMainWindow):
             self.log(f"🐹 Processing failed: {result.error_message}")
     
     def _display_in_faithful_output(self, result: ProcessingResult):
-        """Display processed content in the right pane faithful output"""
         # Apply zoom to the base HTML
         zoom_size = self.text_zoom
         
-        html = f"""
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <style>
-                body {{ 
-                    font-family: -apple-system, sans-serif; 
-                    margin: 20px; 
-                    color: #FFFFFF;
-                    background: #525659;
-                    font-size: {zoom_size}px !important;
-                }}
-                table {{ 
-                    border-collapse: collapse; 
-                    margin: 15px 0;
-                    border: 1px solid #3A3C3E;
-                    background-color: #3A3C3E;
-                    font-size: {zoom_size}px !important;
-                }}
-                th, td {{ 
-                    border: 1px solid #525659; 
-                    padding: 8px;
-                    color: #FFFFFF;
-                    background-color: #424548;
-                    font-size: {zoom_size}px !important;
-                }}
-                th {{
-                    background-color: #3A3C3E;
-                    font-weight: bold;
-                }}
-                td[contenteditable="true"]:hover {{
-                    background-color: #525659;
-                }}
-                .table-controls {{ margin: 10px 0; }}
-                button {{ 
-                    background: #1ABC9C;
-                    color: white;
-                    border: none;
-                    padding: 5px 10px;
-                    margin: 5px;
-                    border-radius: 3px;
-                    cursor: pointer;
-                }}
-                button:hover {{
-                    background: #16A085;
-                }}
-                h1 {{ color: #1ABC9C; font-size: {int(zoom_size * 1.5)}px !important; }}
-                h2 {{ color: #1ABC9C; font-size: {int(zoom_size * 1.3)}px !important; }}
-                h3 {{ color: #1ABC9C; font-size: {int(zoom_size * 1.2)}px !important; }}
-                p {{ color: #FFFFFF; font-size: {zoom_size}px !important; }}
-                li {{ color: #FFFFFF; font-size: {zoom_size}px !important; }}
-                div {{ font-size: {zoom_size}px !important; }}
-                span {{ font-size: {zoom_size}px !important; }}
-            </style>
-        </head>
-        <body>
-            <h2 style="color: #1ABC9C;">CHONKER's Faithful Output</h2>
-            <div style="color: #B0B0B0;">Document ID: {result.document_id}</div>
-            <div style="color: #B0B0B0;">Processing Time: {result.processing_time:.2f}s</div>
-            <hr style="border-color: #3A3C3E;">
-            {result.html_content}
-        </body>
-        </html>
-        """
+        html = (
+            f'<!DOCTYPE html><html><head><style>'
+            f'body{{font-family:-apple-system,sans-serif;margin:20px;color:#FFF;background:#525659;font-size:{zoom_size}px!important}}'
+            f'table{{border-collapse:collapse;margin:15px 0;border:1px solid #3A3C3E;background:#3A3C3E;font-size:{zoom_size}px!important}}'
+            f'th,td{{border:1px solid #525659;padding:8px;color:#FFF;background:#424548;font-size:{zoom_size}px!important}}'
+            f'th{{background:#3A3C3E;font-weight:bold}}td[contenteditable="true"]:hover{{background:#525659}}.table-controls{{margin:10px 0}}'
+            f'button {{ background: #1ABC9C; color: white; border: none; padding: 5px 10px; margin: 5px; border-radius: 3px; cursor: pointer; }}'
+            f'button:hover {{ background: #16A085; }}'
+            f'h1 {{ color: #1ABC9C; font-size: {int(zoom_size * 1.5)}px !important; }}'
+            f'h2 {{ color: #1ABC9C; font-size: {int(zoom_size * 1.3)}px !important; }}'
+            f'h3 {{ color: #1ABC9C; font-size: {int(zoom_size * 1.2)}px !important; }}'
+            f'p {{ color: #FFFFFF; font-size: {zoom_size}px !important; }}'
+            f'li {{ color: #FFFFFF; font-size: {zoom_size}px !important; }}'
+            f'div {{ font-size: {zoom_size}px !important; }}'
+            f'span {{ font-size: {zoom_size}px !important; }}'
+            f'</style></head><body>'
+            f'<h2 style="color: #1ABC9C;">CHONKER\'s Faithful Output</h2>'
+            f'<div style="color: #B0B0B0;">Document ID: {result.document_id}</div>'
+            f'<div style="color: #B0B0B0;">Processing Time: {result.processing_time:.2f}s</div>'
+            f'<hr style="border-color: #3A3C3E;">'
+            f'{result.html_content}'
+            f'</body></html>'
+        )
         self.faithful_output.setHtml(html)
         # Store the result for re-rendering on zoom changes
         self._last_processing_result = result
     
     def create_output_window(self, result: ProcessingResult):
-        """Create window for processed output"""
         window = QWidget()
         window.setWindowTitle("Processed Output")
         window.resize(900, 800)
@@ -1941,45 +1371,18 @@ class ChonkerSnyfterApp(QMainWindow):
         output_view.setReadOnly(False)
         
         # Build HTML with styles
-        html = f"""
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <style>
-                body {{ 
-                    font-family: -apple-system, sans-serif; 
-                    margin: 20px; 
-                    color: #000000;
-                    background: #FFFFFF;
-                }}
-                table {{ 
-                    border-collapse: collapse; 
-                    margin: 15px 0;
-                    border: 1px solid #888888;
-                }}
-                th, td {{ 
-                    border: 1px solid #888888; 
-                    padding: 8px;
-                    color: #000000;
-                }}
-                .table-controls {{ margin: 10px 0; }}
-                button {{ 
-                    background: #28a745;
-                    color: white;
-                    border: none;
-                    padding: 5px 10px;
-                    margin: 5px;
-                    border-radius: 3px;
-                    cursor: pointer;
-                }}
-            </style>
-        </head>
-        <body>
-            <h2 style="color: #1ABC9C;">CHONKER's Output</h2>
-            {result.html_content}
-        </body>
-        </html>
-        """
+        html = (
+            f'<!DOCTYPE html><html><head><style>'
+            f'body {{ font-family: -apple-system, sans-serif; margin: 20px; color: #000000; background: #FFFFFF; }}'
+            f'table {{ border-collapse: collapse; margin: 15px 0; border: 1px solid #888888; }}'
+            f'th, td {{ border: 1px solid #888888; padding: 8px; color: #000000; }}'
+            f'.table-controls {{ margin: 10px 0; }}'
+            f'button {{ background: #28a745; color: white; border: none; padding: 5px 10px; margin: 5px; border-radius: 3px; cursor: pointer; }}'
+            f'</style></head><body>'
+            f'<h2 style="color: #1ABC9C;">CHONKER\'s Output</h2>'
+            f'{result.html_content}'
+            f'</body></html>'
+        )
         
         output_view.setHtml(html)
         layout.addWidget(output_view)
@@ -1987,7 +1390,6 @@ class ChonkerSnyfterApp(QMainWindow):
         window.show()
     
     def changeEvent(self, event):
-        """Handle window state changes"""
         if event.type() == QEvent.Type.ApplicationStateChange:
             if QApplication.applicationState() == Qt.ApplicationState.ApplicationActive:
                 # Bring to front when app is activated (dock click)
@@ -1996,7 +1398,7 @@ class ChonkerSnyfterApp(QMainWindow):
         super().changeEvent(event)
     
     def closeEvent(self, event):
-        """Clean up on close"""
+        self.save_geometry()
         # Stop any running processor
         if hasattr(self, 'processor') and self.processor.isRunning():
             self.processor.stop()
@@ -2009,21 +1411,9 @@ class ChonkerSnyfterApp(QMainWindow):
         if hasattr(self, 'embedded_pdf_view') and self.embedded_pdf_view:
             self.embedded_pdf_view.removeEventFilter(self)
         
-        # Stop caffeinate
-        if self.caffeinate_process:
-            self.caffeinate_process.terminate()
-        
-        # Close floating windows
-        for window_data in list(self.floating_windows.values()):
-            window_data['window'].close()
-        
         event.accept()
 
 
-
-# ============================================================================
-# SQL EXPORT - CUTTING EDGE DATABASE INTEGRATION 🚀
-# ============================================================================
 
 try:
     import duckdb
@@ -2033,50 +1423,55 @@ except ImportError:
     DUCKDB_AVAILABLE = False
 
 class ChonkerSQLExporter:
-    """Export quality-controlled HTML content to DuckDB for downstream apps"""
     
-    def __init__(self, db_path: str = "chonker_output.duckdb"):
+    def __init__(self, db_path: str = "chonker_output.duckdb", chunk_size_mb: int = 50):
         if not DUCKDB_AVAILABLE:
             raise ImportError("🐹 *cough* DuckDB not installed! Run: pip install duckdb pandas")
         
         self.db_path = db_path
+        self.chunk_size_mb = chunk_size_mb * 1024 * 1024  # Convert to bytes
         self.conn = duckdb.connect(db_path)
         self._init_metadata_table()
+        self.current_chunk = 0
+        self.chunk_paths = []  # Track chunk DB paths
+        self.current_size = 0
+    
+    def __enter__(self):
+        return self
+    
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.close()
+    
+    def close(self):
+        if hasattr(self, 'conn') and self.conn:
+            self.conn.close()
+            self.conn = None
     
     def _init_metadata_table(self):
-        """Initialize metadata tracking table"""
-        self.conn.execute("""
-            CREATE TABLE IF NOT EXISTS chonker_exports (
-                export_id TEXT PRIMARY KEY,
-                source_pdf TEXT,
-                export_name TEXT,
-                original_html TEXT,
-                edited_html TEXT,
-                content_type TEXT,  -- 'full_document', 'table', 'section', etc.
-                content_hash TEXT,
-                exported_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                qc_user TEXT,
-                edit_count INTEGER DEFAULT 0,
-                metadata JSON
-            )
-        """)
+        self.conn.execute("CREATE TABLE IF NOT EXISTS chonker_exports ( export_id TEXT PRIMARY KEY, source_pdf TEXT, export_name TEXT, original_html TEXT, edited_html TEXT, content_type TEXT, content_hash TEXT, exported_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, qc_user TEXT, edit_count INTEGER DEFAULT 0, metadata JSON )")
         
         # Create structured content table for parsed elements
-        self.conn.execute("""
-            CREATE TABLE IF NOT EXISTS chonker_content (
-                content_id TEXT PRIMARY KEY,
-                export_id TEXT,
-                element_type TEXT,  -- 'heading', 'paragraph', 'table', 'list', etc.
-                element_order INTEGER,
-                element_text TEXT,
-                element_html TEXT,
-                element_metadata JSON,
-                FOREIGN KEY (export_id) REFERENCES chonker_exports(export_id)
-            )
-        """)
+        self.conn.execute("CREATE TABLE IF NOT EXISTS chonker_content ( content_id TEXT PRIMARY KEY, export_id TEXT, element_type TEXT, element_order INTEGER, element_text TEXT, element_html TEXT, element_metadata JSON, chunk_number INTEGER DEFAULT 0, FOREIGN KEY (export_id) REFERENCES chonker_exports(export_id) )")
+        
+        # Create chunk tracking table
+        self.conn.execute("CREATE TABLE IF NOT EXISTS chonker_chunks ( chunk_id INTEGER PRIMARY KEY, export_id TEXT, chunk_path TEXT, start_element INTEGER, end_element INTEGER, chunk_size INTEGER, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY (export_id) REFERENCES chonker_exports(export_id) )")
+    
+    def _create_chunk_db(self, export_id: str) -> duckdb.DuckDBPyConnection:
+        self.current_chunk += 1
+        chunk_path = self.db_path.replace('.duckdb', f'_chunk{self.current_chunk:03d}.duckdb')
+        self.chunk_paths.append(chunk_path)
+        
+        chunk_conn = duckdb.connect(chunk_path)
+        
+        # Create content table in chunk
+        chunk_conn.execute("CREATE TABLE chonker_content ( content_id TEXT PRIMARY KEY, export_id TEXT, element_type TEXT, element_order INTEGER, element_text TEXT, element_html TEXT, element_metadata JSON, chunk_number INTEGER )")
+        
+        # Track chunk in main DB
+        self.conn.execute("INSERT INTO chonker_chunks (chunk_id, export_id, chunk_path, chunk_size) VALUES (?, ?, ?, 0)", [self.current_chunk, export_id, chunk_path])
+        
+        return chunk_conn
     
     def _infer_schema(self, html_table: str) -> tuple[pd.DataFrame, dict]:
-        """Smart schema inference using pandas"""
         # Parse HTML table
         dfs = pd.read_html(html_table)
         if not dfs:
@@ -2094,12 +1489,12 @@ class ChonkerSQLExporter:
                     schema[col] = 'INTEGER'
                 else:
                     schema[col] = 'DOUBLE'
-            except:
+            except (ValueError, TypeError):
                 # Try datetime
                 try:
                     df[col] = pd.to_datetime(df[col])
                     schema[col] = 'TIMESTAMP'
-                except:
+                except (ValueError, TypeError):
                     # Default to text
                     schema[col] = 'VARCHAR'
         
@@ -2108,7 +1503,6 @@ class ChonkerSQLExporter:
     def export_content(self, html_content: str, source_pdf: str, 
                       export_name: str = None, qc_user: str = "user", 
                       content_type: str = "full_document") -> str:
-        """Export quality-controlled HTML content to DuckDB"""
         try:
             # Generate export ID
             timestamp = datetime.now()
@@ -2144,12 +1538,7 @@ class ChonkerSQLExporter:
             }
             
             # Insert main export record
-            self.conn.execute("""
-                INSERT INTO chonker_exports 
-                (export_id, source_pdf, export_name, original_html, edited_html, 
-                 content_type, content_hash, qc_user, metadata)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, [
+            self.conn.execute("INSERT INTO chonker_exports (export_id, source_pdf, export_name, original_html, edited_html, content_type, content_hash, qc_user, metadata) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", [
                 export_id,
                 source_pdf,
                 export_name,
@@ -2163,6 +1552,11 @@ class ChonkerSQLExporter:
             
             # Parse and store structured content
             element_order = 0
+            current_conn = self.conn
+            chunk_element_count = 0
+            
+            # Check if we need chunking based on HTML size
+            needs_chunking = len(html_content.encode('utf-8')) > 200 * 1024 * 1024  # 200MB
             
             # Process all elements in order
             for element in soup.find_all(['h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p', 'table', 'ul', 'ol', 'div']):
@@ -2177,6 +1571,22 @@ class ChonkerSQLExporter:
                 # Track element types
                 metadata['element_types'][element_type] = metadata['element_types'].get(element_type, 0) + 1
                 metadata['total_elements'] += 1
+                
+                # Check if we need to create a new chunk
+                element_size = len(element_text.encode('utf-8')) + len(element_html.encode('utf-8'))
+                if needs_chunking and self.current_size + element_size > self.chunk_size_mb:
+                    # Update chunk end element in main DB
+                    if self.current_chunk > 0:
+                        self.conn.execute("UPDATE chonker_chunks SET end_element = ?, chunk_size = ? WHERE chunk_id = ? AND export_id = ?", [element_order - 1, self.current_size, self.current_chunk, export_id])
+                    
+                    # Create new chunk
+                    current_conn = self._create_chunk_db(export_id)
+                    
+                    # Update chunk start element
+                    self.conn.execute("UPDATE chonker_chunks SET start_element = ? WHERE chunk_id = ? AND export_id = ?", [element_order, self.current_chunk, export_id])
+                    
+                    self.current_size = 0
+                    chunk_element_count = 0
                 
                 # Generate content ID
                 content_id = f"{export_id}_{element_order:04d}"
@@ -2196,33 +1606,45 @@ class ChonkerSQLExporter:
                     element_meta['rows'] = len(rows)
                     element_meta['cols'] = cols
                 
-                # Insert structured content
-                self.conn.execute("""
-                    INSERT INTO chonker_content
-                    (content_id, export_id, element_type, element_order, 
-                     element_text, element_html, element_metadata)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
-                """, [
+                # Insert structured content to appropriate database
+                target_conn = current_conn if needs_chunking and self.current_chunk > 0 else self.conn
+                target_conn.execute("INSERT INTO chonker_content (content_id, export_id, element_type, element_order, element_text, element_html, element_metadata, chunk_number) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", [
                     content_id,
                     export_id,
                     element_type,
                     element_order,
                     element_text[:5000],  # Limit text size
                     element_html[:10000],  # Limit HTML size
-                    json.dumps(element_meta)
+                    json.dumps(element_meta),
+                    self.current_chunk
                 ])
                 
+                self.current_size += element_size
+                chunk_element_count += 1
                 element_order += 1
             
+            # Update final chunk info
+            if needs_chunking and self.current_chunk > 0:
+                self.conn.execute("UPDATE chonker_chunks SET end_element = ?, chunk_size = ? WHERE chunk_id = ? AND export_id = ?", [element_order - 1, self.current_size, self.current_chunk, export_id])
+                
+                # Close chunk connection
+                if current_conn != self.conn:
+                    current_conn.close()
+            
+            # Update metadata with chunk info
+            if self.chunk_paths:
+                metadata['chunks'] = {
+                    'total_chunks': len(self.chunk_paths),
+                    'chunk_files': self.chunk_paths,
+                    'chunk_size_mb': self.chunk_size_mb / (1024 * 1024)
+                }
+            
             # Update metadata
-            self.conn.execute("""
-                UPDATE chonker_exports 
-                SET metadata = ? 
-                WHERE export_id = ?
-            """, [json.dumps(metadata), export_id])
+            self.conn.execute("UPDATE chonker_exports SET metadata = ? WHERE export_id = ?", [json.dumps(metadata), export_id])
             
             # Export to Parquet for portability (optional)
-            os.makedirs("exports", exist_ok=True)
+            export_base_dir = os.path.join(os.path.dirname(self.db_path), "exports")
+            os.makedirs(export_base_dir, exist_ok=True)
             
             try:
                 # Export main record
@@ -2230,17 +1652,16 @@ class ChonkerSQLExporter:
                     "SELECT * FROM chonker_exports WHERE export_id = ?", 
                     [export_id]
                 ).df()
-                export_df.to_parquet(os.path.join("exports", f"{export_id}_metadata.parquet"))
+                export_df.to_parquet(os.path.join(export_base_dir, f"{export_id}_metadata.parquet"))
                 
                 # Export content
                 content_df = self.conn.execute(
                     "SELECT * FROM chonker_content WHERE export_id = ? ORDER BY element_order", 
                     [export_id]
                 ).df()
-                content_df.to_parquet(os.path.join("exports", f"{export_id}_content.parquet"))
+                content_df.to_parquet(os.path.join(export_base_dir, f"{export_id}_content.parquet"))
                 parquet_exported = True
-            except Exception as parquet_error:
-                print(f"Warning: Could not export Parquet files: {parquet_error}")
+            except Exception:
                 content_df = self.conn.execute(
                     "SELECT * FROM chonker_content WHERE export_id = ? ORDER BY element_order", 
                     [export_id]
@@ -2262,19 +1683,16 @@ class ChonkerSQLExporter:
                     'metadata': json.loads(row['element_metadata'])
                 })
             
-            with open(os.path.join("exports", f"{export_id}.json"), 'w') as f:
+            with open(os.path.join(export_base_dir, f"{export_id}.json"), 'w') as f:
                 json.dump(export_json, f, indent=2)
             
             # Return export ID and parquet status
             self._parquet_exported = parquet_exported
             return export_id
-            
-        except Exception as e:
-            print(f"Export error: {str(e)}")
+        except Exception:
             raise
     
     def get_api_ready_json(self, table_name: str) -> str:
-        """Generate JSON export for REST APIs"""
         result = self.conn.execute(f"SELECT * FROM {table_name}").fetchall()
         columns = [desc[0] for desc in self.conn.description]
         
@@ -2285,7 +1703,6 @@ class ChonkerSQLExporter:
         return json.dumps(data, indent=2, default=str)
     
     def generate_crud_sql(self, table_name: str) -> dict:
-        """Generate CRUD SQL statements for other apps"""
         schema = self.conn.execute(f"DESCRIBE {table_name}").fetchall()
         
         columns = [col[0] for col in schema]
@@ -2300,40 +1717,21 @@ class ChonkerSQLExporter:
         }
 
 
-# ============================================================================
-# MAIN ENTRY POINT
-# ============================================================================
-
 def main():
-    """Application entry point"""
-    # Set up exception handling
     def handle_exception(exc_type, exc_value, exc_traceback):
         if issubclass(exc_type, KeyboardInterrupt):
             sys.__excepthook__(exc_type, exc_value, exc_traceback)
             return
-        
         print("🐹 Uncaught exception:")
         traceback.print_exception(exc_type, exc_value, exc_traceback)
-    
     sys.excepthook = handle_exception
-    
-    # Simple startup message
     print("CHONKER ready.")
-    
-    # Create application
     app = QApplication(sys.argv)
     app.setApplicationName("CHONKER & SNYFTER")
-    
-    # Create and show main window
     window = ChonkerSnyfterApp()
-    
-    # Set app icon to CHONKER after window is created
     if hasattr(window, 'chonker_pixmap'):
         app.setWindowIcon(QIcon(window.chonker_pixmap))
-    
     window.show()
-    
-    # Run application
     sys.exit(app.exec())
 
 
