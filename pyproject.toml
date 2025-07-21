@@ -1,0 +1,35 @@
+[project]
+name = "chonker-snyfter"
+version = "2.0.0"
+description = "Elegant PDF processing with hamster wisdom"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "PyQt6>=6.6.0",
+    "PyQt6-WebEngine>=6.6.0",
+    "docling>=1.0.0",
+    "beautifulsoup4>=4.12.0",
+    "pytest>=7.4.0",
+    "pytest-cov>=4.1.0",
+    "duckdb>=1.0.0",
+    "pandas>=2.0.0",
+    "psutil>=5.9.0",
+]
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.uv]
+dev-dependencies = [
+    "black>=24.0.0",
+    "ruff>=0.5.0",
+]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.black]
+line-length = 120
+target-version = ['py311']

@@ -56,7 +56,7 @@ try:
     DOCLING_AVAILABLE = True
 except ImportError:
     DOCLING_AVAILABLE = False
-    print("Warning: Docling not available. Install with: pip install docling")
+    print("Warning: Docling not available. Install with: uv pip install docling")
 
 from dataclasses import dataclass, field
 
@@ -1426,7 +1426,7 @@ class ChonkerSQLExporter:
     
     def __init__(self, db_path: str = "chonker_output.duckdb", chunk_size_mb: int = 50):
         if not DUCKDB_AVAILABLE:
-            raise ImportError("🐹 *cough* DuckDB not installed! Run: pip install duckdb pandas")
+            raise ImportError("🐹 *cough* DuckDB not installed! Run: uv pip install duckdb pandas")
         
         self.db_path = db_path
         self.chunk_size_mb = chunk_size_mb * 1024 * 1024  # Convert to bytes
@@ -1728,6 +1728,11 @@ def main():
     print("CHONKER ready.")
     app = QApplication(sys.argv)
     app.setApplicationName("CHONKER & SNYFTER")
+    
+    # Fix Apple system font warning
+    font = app.font()
+    font.setFamily("Helvetica Neue" if sys.platform == "darwin" else "Arial")
+    app.setFont(font)
     window = ChonkerSnyfterApp()
     if hasattr(window, 'chonker_pixmap'):
         app.setWindowIcon(QIcon(window.chonker_pixmap))

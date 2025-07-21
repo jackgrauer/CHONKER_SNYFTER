@@ -7,7 +7,7 @@ default:
 
 # Run the main application (streamlined version - 1,827 lines)
 run:
-    source venv/bin/activate && python chonker_snyfter_elegant_v2.py
+    source .venv/bin/activate && python chonker_snyfter_elegant_v2.py
 
 # Launch CHONKER in background (no timeout issues!)
 launch:
@@ -25,15 +25,15 @@ status:
 # phoenix:
 #     ./launch_chonker_phoenix.sh
 # phoenix-direct:
-#     source venv/bin/activate && python chonker_phoenix.py
+#     source .venv/bin/activate && python chonker_phoenix.py
 
 # Run tests
 test:
-    source venv/bin/activate && python -m pytest tests/
+    source .venv/bin/activate && python -m pytest tests/
 
 # Run performance benchmarks
 bench:
-    source venv/bin/activate && python feature_optimization.py
+    source .venv/bin/activate && python feature_optimization.py
 
 # Clean up Python cache files
 clean:
@@ -44,28 +44,28 @@ clean:
 
 # Install dependencies
 install:
-    python3 -m venv venv
-    source venv/bin/activate && pip install -r requirements.txt
+    uv venv
+    source .venv/bin/activate && uv pip install -r requirements.txt
 
 # Update dependencies
 update:
-    source venv/bin/activate && pip install --upgrade -r requirements.txt
+    source .venv/bin/activate && uv pip install --upgrade -r requirements.txt
 
 # Format code with black
 format:
-    source venv/bin/activate && black *.py
+    source .venv/bin/activate && black *.py
 
 # Lint code
 lint:
-    source venv/bin/activate && ruff check *.py
+    source .venv/bin/activate && ruff check *.py
 
 # Type check with mypy
 typecheck:
-    source venv/bin/activate && mypy *.py
+    source .venv/bin/activate && mypy *.py
 
 # Run security audit
 security:
-    source venv/bin/activate && python -m pytest tests/test_security.py -v
+    source .venv/bin/activate && python -m pytest tests/test_security.py -v
 
 # Git status
 status:
@@ -88,7 +88,7 @@ reset:
 
 # Development mode - run with auto-reload
 dev:
-    source venv/bin/activate && python chonker_snyfter_elegant_v2.py --debug
+    source .venv/bin/activate && python chonker_snyfter_elegant_v2.py --debug
 
 # Check what's actually working
 check-features:
