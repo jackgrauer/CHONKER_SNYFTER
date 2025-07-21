@@ -42,3 +42,5 @@ build/
 
 # Turbo
 .turbo/
+*.duckdb
+*.duckdb.wal
