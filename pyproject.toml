@@ -1,5 +1,5 @@
 [project]
-name = "chonker-snyfter"
+name = "chonker"
 version = "2.0.0"
 description = "Elegant PDF processing with hamster wisdom"
 readme = "README.md"

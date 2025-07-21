@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Simple launcher for CHONKER SNYFTER
+# Simple launcher for CHONKER
 
 # Check if virtual environment exists
 if [ ! -d ".venv" ]; then
@@ -10,4 +10,4 @@ fi
 
 # Activate virtual environment and run
 source .venv/bin/activate
-python chonker_snyfter_elegant_v2.py "$@"
+python chonker.py "$@"

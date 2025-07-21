@@ -1,6 +1,6 @@
 #!/bin/bash
 
-echo "🚀 Migrating CHONKER SNYFTER to uv..."
+echo "🚀 Migrating CHONKER to uv..."
 echo "====================================="
 
 # Check if uv is installed
@@ -32,4 +32,4 @@ echo "To activate the new environment, run:"
 echo "  source .venv/bin/activate"
 echo ""
 echo "Then you can run CHONKER with:"
-echo "  python chonker_snyfter_elegant_v2.py"
+echo "  python chonker.py"

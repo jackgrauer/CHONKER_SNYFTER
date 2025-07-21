@@ -1,4 +1,4 @@
-# CHONKER SNYFTER 🐹
+# CHONKER 🐹
 
 Elegant PDF processing with hamster wisdom. Extract, edit, and export PDF content to SQL databases.
 
@@ -18,7 +18,7 @@ Elegant PDF processing with hamster wisdom. Extract, edit, and export PDF conten
 
 # Or manually
 source .venv/bin/activate
-python chonker_snyfter_elegant_v2.py
+python chonker.py
 ```
 
 ## Installation
@@ -26,7 +26,7 @@ python chonker_snyfter_elegant_v2.py
 ```bash
 # Clone the repository
 git clone <your-repo-url>
-cd CHONKER_SNYFTER
+cd CHONKER
 
 # Install uv (if not already installed)
 curl -LsSf https://astral.sh/uv/install.sh | sh
@@ -52,8 +52,8 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 ## Project Structure
 
 ```
-CHONKER_SNYFTER/
-├── chonker_snyfter_elegant_v2.py  # Main application (1,745 lines)
+CHONKER/
+├── chonker.py                     # Main application (1,745 lines)
 ├── assets/emojis/chonker.png      # UI icon
 ├── pyproject.toml                  # Modern Python config
 ├── requirements.txt                # Dependencies

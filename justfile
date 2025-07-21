@@ -1,4 +1,4 @@
-# CHONKER & SNYFTER Justfile
+# CHONKER Justfile
 # Commands for common development tasks
 
 # Default command - show available commands
@@ -7,7 +7,7 @@ default:
 
 # Run the main application (streamlined version - 1,827 lines)
 run:
-    source .venv/bin/activate && python chonker_snyfter_elegant_v2.py
+    source .venv/bin/activate && python chonker.py
 
 # Launch CHONKER in background (no timeout issues!)
 launch:
@@ -88,7 +88,7 @@ reset:
 
 # Development mode - run with auto-reload
 dev:
-    source .venv/bin/activate && python chonker_snyfter_elegant_v2.py --debug
+    source .venv/bin/activate && python chonker.py --debug
 
 # Check what's actually working
 check-features:
@@ -101,19 +101,3 @@ check-features:
     @echo "✅ No-timeout launcher: WORKING"
     @echo "✅ Sacred hamster emoji: PRESERVED"
 
-# Launch autonomous SNYFTER development
-develop-snyfter:
-    ./launch_snyfter_development.sh
-
-# Monitor SNYFTER development progress
-monitor-snyfter:
-    @echo "Monitoring latest SNYFTER development log..."
-    @tail -f logs/snyfter_dev_*.log | tail -f -n +1
-
-# Check SNYFTER development status
-snyfter-status:
-    @if [ -f snyfter_development_summary.md ]; then \
-        cat snyfter_development_summary.md; \
-    else \
-        echo "No SNYFTER development summary found yet"; \
-    fi

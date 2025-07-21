@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""CHONKER & SNYFTER"""
+"""CHONKER - PDF Processing with Hamster Wisdom"""
 
 import sys
 import os
@@ -463,7 +463,7 @@ class DocumentProcessor(QThread):
 
 
 
-class ChonkerSnyfterApp(QMainWindow):
+class ChonkerApp(QMainWindow):
     """Main application window"""
     
     def __init__(self):
@@ -782,11 +782,11 @@ class ChonkerSnyfterApp(QMainWindow):
                 self.faithful_output.setTextCursor(cursor)
     
     def save_geometry(self):
-        settings = QSettings('ChonkerSnyfter', 'Window')
+        settings = QSettings('Chonker', 'Window')
         settings.setValue('geometry', self.saveGeometry())
     
     def restore_geometry(self):
-        settings = QSettings('ChonkerSnyfter', 'Window')
+        settings = QSettings('Chonker', 'Window')
         if settings.value('geometry'):
             self.restoreGeometry(settings.value('geometry'))
     
@@ -1727,13 +1727,13 @@ def main():
     sys.excepthook = handle_exception
     print("CHONKER ready.")
     app = QApplication(sys.argv)
-    app.setApplicationName("CHONKER & SNYFTER")
+    app.setApplicationName("CHONKER")
     
     # Fix Apple system font warning
     font = app.font()
     font.setFamily("Helvetica Neue" if sys.platform == "darwin" else "Arial")
     app.setFont(font)
-    window = ChonkerSnyfterApp()
+    window = ChonkerApp()
     if hasattr(window, 'chonker_pixmap'):
         app.setWindowIcon(QIcon(window.chonker_pixmap))
     window.show()
