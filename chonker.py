@@ -726,73 +726,177 @@ class ChonkerApp(QMainWindow):
                                 os.path.join(export_dir, file)
                             )
                 
-                # Now also create Arrow dataset export if PyArrow is available
-                arrow_path = None
+                # Now also create Arrow-style tables inside DuckDB if PyArrow is available
                 arrow_elements = 0
                 if PYARROW_AVAILABLE:
-                    progress.setLabelText("Creating Arrow dataset...")
+                    progress.setLabelText("Creating rich metadata tables...")
                     progress.setValue(60)
                     
-                    # Create Arrow dataset in the export directory
-                    arrow_dataset_path = os.path.join(export_dir, "arrow_dataset")
-                    arrow_exporter = ArrowDatasetExporter(arrow_dataset_path)
+                    # Create Arrow-style tables directly in DuckDB
+                    from bs4 import BeautifulSoup
+                    soup = BeautifulSoup(content_html, 'html.parser')
                     
-                    # Generate document ID (same as export_id for consistency)
-                    doc_id = export_id
+                    # Prepare data for style metadata table
+                    style_data = []
+                    semantic_data = []
+                    element_order = 0
                     
-                    # Export to Arrow format
-                    arrow_result = arrow_exporter.export_document_dataset(
-                        doc_id=doc_id,
-                        html_content=content_html,
-                        source_pdf=source_pdf
-                    )
+                    for element in soup.find_all(['h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p', 'table', 'ul', 'ol', 'li', 'div']):
+                        if not element.get_text(strip=True):
+                            continue
+                        
+                        element_id = f"{export_id}_{element_order:04d}"
+                        
+                        # Extract style information
+                        style_info = {
+                            'element_id': element_id,
+                            'style_bold': element.name in ['b', 'strong'] or bool(element.find(['b', 'strong'])),
+                            'style_italic': element.name in ['i', 'em'] or bool(element.find(['i', 'em'])),
+                            'style_underline': element.name == 'u' or bool(element.find('u')),
+                            'font_size': None,
+                            'color': None
+                        }
+                        
+                        # Extract inline styles if present
+                        style_attr = element.get('style', '')
+                        if style_attr:
+                            styles = dict(item.split(':') for item in style_attr.split(';') if ':' in item)
+                            style_info['font_size'] = styles.get('font-size', '').strip() or None
+                            style_info['color'] = styles.get('color', '').strip() or None
+                        
+                        style_data.append(style_info)
+                        
+                        # Semantic analysis
+                        text = element.get_text(strip=True).lower()
+                        semantic_role = 'body_text'
+                        
+                        if element.name in ['h1', 'h2', 'h3', 'h4', 'h5', 'h6']:
+                            semantic_role = 'header'
+                        elif element.name == 'table':
+                            semantic_role = 'data_table'
+                        elif element.name in ['ul', 'ol', 'li']:
+                            semantic_role = 'list'
+                        elif element.name == 'p':
+                            if any(term in text for term in ['revenue', 'income', 'profit', 'loss', 'cost', 'expense', '$']):
+                                semantic_role = 'financial_text'
+                            elif re.search(r'\b\d{4}\b|\b\d{1,2}/\d{1,2}/\d{2,4}\b', text):
+                                semantic_role = 'dated_text'
+                            elif text.strip().endswith('?'):
+                                semantic_role = 'question'
+                            elif len(text.split()) < 10:
+                                semantic_role = 'caption'
+                        
+                        semantic_data.append({
+                            'element_id': element_id,
+                            'semantic_role': semantic_role,
+                            'confidence_score': 0.95,  # Fixed high confidence for rule-based classification
+                            'word_count': len(element.get_text(strip=True).split()),
+                            'char_count': len(element.get_text(strip=True))
+                        })
+                        
+                        element_order += 1
+                        arrow_elements += 1
                     
-                    # Extract element count from result
-                    import re
-                    match = re.search(r'Exported (\d+) elements', arrow_result)
-                    if match:
-                        arrow_elements = int(match.group(1))
-                    
-                    arrow_path = arrow_dataset_path
+                    # Create tables in DuckDB
+                    if style_data:
+                        style_df = pd.DataFrame(style_data)
+                        exporter.conn.execute("CREATE TABLE IF NOT EXISTS chonker_styles (element_id TEXT, style_bold BOOLEAN, style_italic BOOLEAN, style_underline BOOLEAN, font_size TEXT, color TEXT)")
+                        exporter.conn.execute("INSERT INTO chonker_styles SELECT * FROM style_df")
+                        
+                        semantic_df = pd.DataFrame(semantic_data)
+                        exporter.conn.execute("CREATE TABLE IF NOT EXISTS chonker_semantics (element_id TEXT, semantic_role TEXT, confidence_score DOUBLE, word_count INTEGER, char_count INTEGER)")
+                        exporter.conn.execute("INSERT INTO chonker_semantics SELECT * FROM semantic_df")
+                        
+                        # Create indexes for efficient querying
+                        exporter.conn.execute("CREATE INDEX IF NOT EXISTS idx_styles_bold ON chonker_styles(style_bold)")
+                        exporter.conn.execute("CREATE INDEX IF NOT EXISTS idx_semantics_role ON chonker_semantics(semantic_role)")
+                        exporter.conn.execute("CREATE INDEX IF NOT EXISTS idx_styles_element ON chonker_styles(element_id)")
+                        exporter.conn.execute("CREATE INDEX IF NOT EXISTS idx_semantics_element ON chonker_semantics(element_id)")
                     
                     # Create example query script
                     example_script = f'''#!/usr/bin/env python3
 """
-Query examples for the exported data
-Generated by CHONKER on {datetime.now().isoformat()}
+Query examples for the CHONKER unified export
+Generated on {datetime.now().isoformat()}
 
-This export contains both:
-1. DuckDB database: {os.path.basename(file_path)}
-2. Arrow dataset: arrow_dataset/
+Everything is in ONE file: {os.path.basename(file_path)}
+- Content and edit history in chonker_content table
+- Style metadata in chonker_styles table  
+- Semantic roles in chonker_semantics table
 """
 
-# === OPTION 1: Query with DuckDB ===
 import duckdb
+import pandas as pd
+
+# Connect to the database
 conn = duckdb.connect("{os.path.basename(file_path)}")
 
-# Get all content
-content_df = conn.execute("SELECT * FROM chonker_content WHERE export_id = '{export_id}'").df()
-print(f"Found {{len(content_df)}} elements in DuckDB")
+# === Example 1: Basic content query ===
+content_df = conn.execute("""
+    SELECT * FROM chonker_content 
+    WHERE export_id = '{export_id}'
+    ORDER BY element_order
+""").df()
+print(f"Found {{len(content_df)}} content elements")
 
-# === OPTION 2: Query with PyArrow ===
-import pyarrow.dataset as ds
-dataset = ds.dataset("arrow_dataset", format="parquet", partitioning="hive")
+# === Example 2: Find all bold headers ===
+bold_headers = conn.execute("""
+    SELECT c.element_text, s.style_bold, sem.semantic_role
+    FROM chonker_content c
+    JOIN chonker_styles s ON c.content_id = s.element_id
+    JOIN chonker_semantics sem ON c.content_id = sem.element_id
+    WHERE s.style_bold = true 
+    AND sem.semantic_role = 'header'
+    AND c.export_id = '{export_id}'
+""").df()
+print(f"\\nFound {{len(bold_headers)}} bold headers")
 
-# Find bold headers
-bold_headers = dataset.to_table(
-    filter=(ds.field("style_bold") == True) & 
-           (ds.field("semantic_role") == "header")
-).to_pandas()
-print(f"\\nFound {{len(bold_headers)}} bold headers in Arrow dataset")
+# === Example 3: Financial text analysis ===
+financial = conn.execute("""
+    SELECT c.element_text, c.element_type, sem.word_count
+    FROM chonker_content c
+    JOIN chonker_semantics sem ON c.content_id = sem.element_id
+    WHERE sem.semantic_role = 'financial_text'
+    AND c.export_id = '{export_id}'
+""").df()
+print(f"\\nFound {{len(financial)}} financial paragraphs")
 
-# === OPTION 3: Combine both sources ===
-# DuckDB has edit history, Arrow has style metadata
-# You can join them on element_id for complete picture
+# === Example 4: Edited content ===
+edited = conn.execute("""
+    SELECT c.element_text, e.edit_count, e.qc_user
+    FROM chonker_content c
+    JOIN chonker_exports e ON c.export_id = e.export_id
+    WHERE e.edit_count > 0
+    AND c.export_id = '{export_id}'
+""").df()
+print(f"\\nFound {{len(edited)}} edited elements")
+
+# === Example 5: Complex query - Style + Semantics + Content ===
+complex_query = conn.execute("""
+    SELECT 
+        c.element_type,
+        c.element_text,
+        s.style_bold,
+        s.style_italic,
+        s.color,
+        sem.semantic_role,
+        sem.word_count
+    FROM chonker_content c
+    LEFT JOIN chonker_styles s ON c.content_id = s.element_id
+    LEFT JOIN chonker_semantics sem ON c.content_id = sem.element_id
+    WHERE c.export_id = '{export_id}'
+    ORDER BY c.element_order
+""").df()
+
+# Close connection
+conn.close()
 '''
                     
-                    with open(os.path.join(export_dir, "query_examples.py"), 'w') as f:
-                        f.write(example_script)
-                    os.chmod(os.path.join(export_dir, "query_examples.py"), 0o755)
+                    # Only create query examples if export directory exists
+                    if os.path.exists(export_dir):
+                        with open(os.path.join(export_dir, "query_examples.py"), 'w') as f:
+                            f.write(example_script)
+                        os.chmod(os.path.join(export_dir, "query_examples.py"), 0o755)
                 
                 progress.setValue(100)
                 progress.close()
@@ -800,20 +904,24 @@ print(f"\\nFound {{len(bold_headers)}} bold headers in Arrow dataset")
                 # Show success message
                 summary = f"Export Complete!\n\n"
                 summary += f"Export ID: {export_id}\n\n"
-                summary += f"✓ {stats[0]} content elements in DuckDB\n"
-                if arrow_path:
-                    summary += f"✓ {arrow_elements} elements in Arrow dataset\n"
+                summary += f"✓ {stats[0]} content elements exported\n"
+                if arrow_elements > 0:
+                    summary += f"✓ {arrow_elements} elements with style metadata\n"
                 summary += f"✓ {stats[1]} different element types\n\n"
-                summary += f"Files created:\n"
-                summary += f"  • Database: {os.path.basename(file_path)}\n"
-                if arrow_path:
-                    summary += f"  • Arrow dataset: {os.path.basename(export_dir)}/arrow_dataset/\n"
-                summary += f"  • Parquet files: {os.path.basename(export_dir)}/*.parquet\n"
-                summary += f"  • Query examples: {os.path.basename(export_dir)}/query_examples.py\n\n"
-                summary += "All your data in one place! Query with SQL or PyArrow."
+                summary += f"Everything in ONE file: {os.path.basename(file_path)}\n\n"
+                summary += "Tables included:\n"
+                summary += "  • chonker_content - Full text and structure\n"
+                summary += "  • chonker_exports - Edit history and metadata\n"
+                if arrow_elements > 0:
+                    summary += "  • chonker_styles - Bold, italic, colors, fonts\n"
+                    summary += "  • chonker_semantics - Headers, financial text, etc.\n"
+                summary += "\n"
+                if os.path.exists(export_dir):
+                    summary += f"Query examples: {os.path.basename(export_dir)}/query_examples.py\n\n"
+                summary += "Query with SQL JOINs across all tables!"
                 
                 QMessageBox.information(self, "Export Successful", summary)
-                self.log(f"Exported to: {file_path} (with Arrow dataset)")
+                self.log(f"Exported to: {file_path} (unified export with all metadata)")
             
         except Exception as e:
             progress.close()

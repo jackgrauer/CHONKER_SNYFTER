@@ -44,10 +44,13 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 
 ## Export Formats
 
-- **DuckDB**: Full-featured SQL database with metadata and content tables
-- **Arrow Dataset**: Partitioned Parquet files with rich metadata for big data analytics
-- **JSON**: Structured data for APIs and web apps
-- **CSV**: Simple tabular export
+- **DuckDB Export (Cmd+E)**: Single `.duckdb` file containing:
+  - All document content and structure
+  - Style metadata (bold, italic, colors, fonts)
+  - Semantic classifications (headers, financial text, etc.)
+  - Edit history and version tracking
+  - Full SQL query capabilities with JOINs
+- **CSV Export**: Simple tabular format for spreadsheets
 
 ## Project Structure
 
@@ -88,29 +91,42 @@ just clean
 
 ## Unified Export (Cmd+E)
 
-When you export with Cmd+E, CHONKER creates everything in one place:
+CHONKER exports EVERYTHING into a single `.duckdb` file with multiple tables:
 
-**What you get:**
-- `your_export.duckdb` - SQL database with full text and edit history
-- `export_id_files/` folder containing:
-  - `*.parquet` - Columnar data files
-  - `arrow_dataset/` - Partitioned dataset with rich metadata
-  - `query_examples.py` - Ready-to-run query examples
+**Tables in your export:**
+- `chonker_content` - Full text, HTML, and document structure
+- `chonker_exports` - Export metadata and edit history
+- `chonker_styles` - Style information (bold, italic, colors, fonts)
+- `chonker_semantics` - Semantic roles (headers, financial text, etc.)
 
-**Query your data two ways:**
+**Example queries:**
 ```python
-# SQL queries with DuckDB
 import duckdb
 conn = duckdb.connect("your_export.duckdb")
-df = conn.execute("SELECT * FROM chonker_content").df()
 
-# Analytics with PyArrow
-import pyarrow.dataset as ds
-dataset = ds.dataset("export_id_files/arrow_dataset")
-bold_headers = dataset.to_table(
-    filter=(ds.field("style_bold") == True)
-).to_pandas()
+# Find all bold headers about revenue
+bold_revenue = conn.execute("""
+    SELECT c.element_text, s.style_bold, sem.semantic_role
+    FROM chonker_content c
+    JOIN chonker_styles s ON c.content_id = s.element_id
+    JOIN chonker_semantics sem ON c.content_id = sem.element_id
+    WHERE s.style_bold = true 
+    AND sem.semantic_role = 'header'
+    AND c.element_text LIKE '%revenue%'
+""").df()
+
+# Get all edited financial paragraphs
+edited_financial = conn.execute("""
+    SELECT c.element_text, e.edit_count, sem.word_count
+    FROM chonker_content c
+    JOIN chonker_exports e ON c.export_id = e.export_id
+    JOIN chonker_semantics sem ON c.content_id = sem.element_id
+    WHERE e.edit_count > 0 
+    AND sem.semantic_role = 'financial_text'
+""").df()
 ```
+
+One file. All your data. Full SQL power.
 
 ## Recent Updates (2025-07-20)
 
