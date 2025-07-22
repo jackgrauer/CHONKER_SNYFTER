@@ -39,8 +39,7 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 
 - **Cmd+O**: Open PDF
 - **Cmd+P**: Process document
-- **Cmd+E**: Export to SQL
-- **Cmd+Shift+E**: Export to Arrow Dataset
+- **Cmd+E**: Export (creates both SQL database and Arrow dataset)
 - **Cmd+Q**: Quit application
 
 ## Export Formats
@@ -87,28 +86,35 @@ just format
 just clean
 ```
 
-## Arrow Dataset Export
+## Unified Export (Cmd+E)
 
-The new Arrow Dataset export feature provides:
-- **Partitioned storage**: Data organized by document ID and element type
-- **Rich metadata**: Includes style information (bold, italic, colors) and semantic roles
-- **Efficient queries**: Use PyArrow's dataset API for fast filtering and aggregation
-- **Example queries**: Auto-generated Python script with query examples
+When you export with Cmd+E, CHONKER creates everything in one place:
 
-Example usage:
+**What you get:**
+- `your_export.duckdb` - SQL database with full text and edit history
+- `export_id_files/` folder containing:
+  - `*.parquet` - Columnar data files
+  - `arrow_dataset/` - Partitioned dataset with rich metadata
+  - `query_examples.py` - Ready-to-run query examples
+
+**Query your data two ways:**
 ```python
+# SQL queries with DuckDB
+import duckdb
+conn = duckdb.connect("your_export.duckdb")
+df = conn.execute("SELECT * FROM chonker_content").df()
+
+# Analytics with PyArrow
 import pyarrow.dataset as ds
-dataset = ds.dataset("path/to/export", format="parquet")
-# Find all bold headers about revenue
+dataset = ds.dataset("export_id_files/arrow_dataset")
 bold_headers = dataset.to_table(
-    filter=(ds.field("style_bold") == True) & 
-           (ds.field("semantic_role") == "header")
+    filter=(ds.field("style_bold") == True)
 ).to_pandas()
 ```
 
 ## Recent Updates (2025-07-20)
 
-- **Added Arrow Dataset Export**: New PyArrow-based export for big data workflows
+- **Unified Export**: Single command creates both DuckDB and Arrow datasets
 - **Migrated to uv**: Replaced pip with the blazing-fast uv package manager
 - **Cleaned codebase**: Removed 40+ unnecessary files, keeping only essentials
 - **Modern Python setup**: Added pyproject.toml for standard Python packaging
