@@ -10,7 +10,6 @@ import threading
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any
 from datetime import datetime
-from enum import Enum
 import traceback
 from html import escape
 import time
@@ -20,7 +19,9 @@ import pandas as pd
 import re
 import json
 import shutil
-import torch  # For OCR GPU detection
+import urllib.request
+import urllib.parse
+import ssl
 
 # Try to import pyarrow
 try:
@@ -53,7 +54,6 @@ from PyQt6.QtGui import (
 )
 from PyQt6.QtPdf import QPdfDocument
 from PyQt6.QtPdfWidgets import QPdfView
-
 # Third-party imports with graceful fallbacks
 try:
     from bs4 import BeautifulSoup
@@ -74,6 +74,13 @@ from dataclasses import dataclass, field
 
 MAX_FILE_SIZE = 500 * 1024 * 1024  # 500MB
 MAX_PROCESSING_TIME = 300  # 5 minutes in seconds
+# UI Constants
+TEXT_ZOOM_MIN = 8
+TEXT_ZOOM_MAX = 48
+PDF_ZOOM_MIN = 0.25
+PDF_ZOOM_MAX = 4.0
+ANIMATION_INTERVAL = 500  # ms
+THREAD_WAIT_TIMEOUT = 5000  # ms
 
 # Mode enum removed - always CHONKER mode
 
@@ -119,7 +126,7 @@ class DocumentProcessor(QThread):
     def stop(self):
         self._stop_event.set()
         if self.isRunning():
-            if not self.wait(5000):  # Wait up to 5 seconds
+            if not self.wait(THREAD_WAIT_TIMEOUT):  # Wait up to 5 seconds
                 self.terminate()  # Force terminate if needed
                 self.wait()  # Wait for termination
     
@@ -278,7 +285,7 @@ class DocumentProcessor(QThread):
             pipeline_options = PdfPipelineOptions()
             pipeline_options.do_ocr = True  # Enable OCR
             pipeline_options.ocr_options = {
-                "use_gpu": torch.cuda.is_available() or torch.backends.mps.is_available()
+                "use_gpu": False  # Simplified - docling handles GPU detection
             }
             
             converter = DocumentConverter(
@@ -412,7 +419,6 @@ class DocumentProcessor(QThread):
     
     
     def _enhance_text_formatting(self, text: str) -> str:
-        import re
         # Basic chem formula support  
         text = re.sub(r'\b(H|O|N|C|Na|Ca|Fe)(\d+)', r'\1<sub>\2</sub>', text)
         text = re.sub(r'\^(\d+)', r'<sup>\1</sup>', text)
@@ -468,11 +474,6 @@ class DocumentProcessor(QThread):
         self.error.emit(str(error))
         self.finished.emit(error_result)
 
-
-
-
-
-
 class ChonkerApp(QMainWindow):
     """Main application window"""
     
@@ -485,6 +486,7 @@ class ChonkerApp(QMainWindow):
         self.recent_files = []  # Track recent files
         self._load_recent_files()
         self.setAcceptDrops(True)  # Enable drag & drop
+        self._temp_files = []  # Track temp files for cleanup
         
         # Independent zoom levels
         self.pdf_zoom = 1.0
@@ -512,21 +514,19 @@ class ChonkerApp(QMainWindow):
         print("Sacred Android 7.1 CHONKER emoji loaded!")
     
     def _validate_file_size(self, file_path: str, action: str = "open") -> Optional[float]:
-        # Validate file size and show appropriate warnings.
         try:
-            file_size = os.path.getsize(file_path)
-            file_size_mb = file_size / (1024 * 1024)
-            if file_size > MAX_FILE_SIZE:
-                verb = "open" if action == "open" else "process"
-                msg = f"Cannot {verb} file: {os.path.basename(file_path)}\n\nFile size: {file_size_mb:.1f} MB\nMaximum allowed: {MAX_FILE_SIZE / (1024 * 1024):.0f} MB"
-                if action == "open": msg += "\n\nPlease use a smaller PDF file."
-                QMessageBox.warning(self, "File Too Large", msg)
-                self.log(f"❌ {'File' if action == 'open' else 'Cannot process - file'} too large: {file_size_mb:.1f} MB")
+            file_size_mb = os.path.getsize(file_path) / (1024 * 1024)
+            if file_size_mb > MAX_FILE_SIZE / (1024 * 1024):
+                msg = f"Cannot {action} file: {os.path.basename(file_path)}\nSize: {file_size_mb:.1f} MB (max: {MAX_FILE_SIZE / (1024 * 1024):.0f} MB)"
+                if action == "open": 
+                    QMessageBox.warning(self, "File Too Large", f"File is {file_size_mb:.0f}MB (max {MAX_FILE_SIZE/(1024*1024):.0f}MB)")
+                self.log(f"❌ File too large: {file_size_mb:.1f} MB")
                 return None
             return file_size_mb
         except OSError as e:
-            if action == "open": QMessageBox.critical(self, "File Error", f"Cannot access file: {e}")
-            else: self.log(f"❌ Cannot access file: {e}")
+            if action == "open": 
+                QMessageBox.critical(self, "File Error", "Cannot access file")
+            self.log(f"❌ Cannot access file: {e}")
             return None
         
     
@@ -691,14 +691,23 @@ class ChonkerApp(QMainWindow):
                 action.triggered.connect(lambda checked, path=file_path: self._open_recent_file(path))
     
     def _open_recent_file(self, file_path):
-        if os.path.exists(file_path):
+        # Check if it's a URL from recent files
+        if file_path.startswith("[URL] "):
+            url = file_path[6:]  # Remove "[URL] " prefix
+            try:
+                downloaded_path = self._download_pdf_from_url(url)
+                self.create_embedded_pdf_viewer(downloaded_path)
+                self.current_pdf_path = downloaded_path
+            except Exception as e:
+                QMessageBox.warning(self, "Download Failed", "Download failed")
+        elif os.path.exists(file_path):
             self.log(f"Opening recent: {os.path.basename(file_path)}")
             self.create_embedded_pdf_viewer(file_path)
             self.current_pdf_path = file_path
         else:
             self.recent_files.remove(file_path)
             self._update_recent_files_menu()
-            QMessageBox.warning(self, "File Not Found", f"Recent file not found:\n{file_path}")
+            QMessageBox.warning(self, "File Not Found", "File not found")
     
     
     
@@ -731,7 +740,6 @@ class ChonkerApp(QMainWindow):
         current_html = self.faithful_output.toHtml()
         
         # Extract just the body content (remove Qt's HTML wrapper)
-        from bs4 import BeautifulSoup
         soup = BeautifulSoup(current_html, 'html.parser')
         body = soup.find('body')
         if body:
@@ -778,7 +786,6 @@ class ChonkerApp(QMainWindow):
                 
                 # Move/copy exported files to the chosen location
                 if os.path.exists("exports"):
-                    import shutil
                     for file in os.listdir("exports"):
                         if file.startswith(export_id):
                             shutil.move(
@@ -793,7 +800,6 @@ class ChonkerApp(QMainWindow):
                     progress.setValue(60)
                     
                     # Create Arrow-style tables directly in DuckDB
-                    from bs4 import BeautifulSoup
                     soup = BeautifulSoup(content_html, 'html.parser')
                     
                     # Prepare data for style metadata table
@@ -873,119 +879,18 @@ class ChonkerApp(QMainWindow):
                         exporter.conn.execute("CREATE INDEX IF NOT EXISTS idx_styles_element ON chonker_styles(element_id)")
                         exporter.conn.execute("CREATE INDEX IF NOT EXISTS idx_semantics_element ON chonker_semantics(element_id)")
                     
-                    # Create example query script
-                    example_script = f'''#!/usr/bin/env python3
-"""
-Query examples for the CHONKER unified export
-Generated on {datetime.now().isoformat()}
-
-Everything is in ONE file: {os.path.basename(file_path)}
-- Content and edit history in chonker_content table
-- Style metadata in chonker_styles table  
-- Semantic roles in chonker_semantics table
-"""
-
-import duckdb
-import pandas as pd
-
-# Connect to the database
-conn = duckdb.connect("{os.path.basename(file_path)}")
-
-# === Example 1: Basic content query ===
-content_df = conn.execute("""
-    SELECT * FROM chonker_content 
-    WHERE export_id = '{export_id}'
-    ORDER BY element_order
-""").df()
-print(f"Found {{len(content_df)}} content elements")
-
-# === Example 2: Find all bold headers ===
-bold_headers = conn.execute("""
-    SELECT c.element_text, s.style_bold, sem.semantic_role
-    FROM chonker_content c
-    JOIN chonker_styles s ON c.content_id = s.element_id
-    JOIN chonker_semantics sem ON c.content_id = sem.element_id
-    WHERE s.style_bold = true 
-    AND sem.semantic_role = 'header'
-    AND c.export_id = '{export_id}'
-""").df()
-print(f"\\nFound {{len(bold_headers)}} bold headers")
-
-# === Example 3: Financial text analysis ===
-financial = conn.execute("""
-    SELECT c.element_text, c.element_type, sem.word_count
-    FROM chonker_content c
-    JOIN chonker_semantics sem ON c.content_id = sem.element_id
-    WHERE sem.semantic_role = 'financial_text'
-    AND c.export_id = '{export_id}'
-""").df()
-print(f"\\nFound {{len(financial)}} financial paragraphs")
-
-# === Example 4: Edited content ===
-edited = conn.execute("""
-    SELECT c.element_text, e.edit_count, e.qc_user
-    FROM chonker_content c
-    JOIN chonker_exports e ON c.export_id = e.export_id
-    WHERE e.edit_count > 0
-    AND c.export_id = '{export_id}'
-""").df()
-print(f"\\nFound {{len(edited)}} edited elements")
-
-# === Example 5: Complex query - Style + Semantics + Content ===
-complex_query = conn.execute("""
-    SELECT 
-        c.element_type,
-        c.element_text,
-        s.style_bold,
-        s.style_italic,
-        s.color,
-        sem.semantic_role,
-        sem.word_count
-    FROM chonker_content c
-    LEFT JOIN chonker_styles s ON c.content_id = s.element_id
-    LEFT JOIN chonker_semantics sem ON c.content_id = sem.element_id
-    WHERE c.export_id = '{export_id}'
-    ORDER BY c.element_order
-""").df()
-
-# Close connection
-conn.close()
-'''
-                    
-                    # Only create query examples if export directory exists
-                    if os.path.exists(export_dir):
-                        with open(os.path.join(export_dir, "query_examples.py"), 'w') as f:
-                            f.write(example_script)
-                        os.chmod(os.path.join(export_dir, "query_examples.py"), 0o755)
+                    # Query examples are in the README
                 
                 progress.setValue(100)
                 progress.close()
                 
                 # Show success message
-                summary = f"Export Complete!\n\n"
-                summary += f"Export ID: {export_id}\n\n"
-                summary += f"✓ {stats[0]} content elements exported\n"
-                if arrow_elements > 0:
-                    summary += f"✓ {arrow_elements} elements with style metadata\n"
-                summary += f"✓ {stats[1]} different element types\n\n"
-                summary += f"Everything in ONE file: {os.path.basename(file_path)}\n\n"
-                summary += "Tables included:\n"
-                summary += "  • chonker_content - Full text and structure\n"
-                summary += "  • chonker_exports - Edit history and metadata\n"
-                if arrow_elements > 0:
-                    summary += "  • chonker_styles - Bold, italic, colors, fonts\n"
-                    summary += "  • chonker_semantics - Headers, financial text, etc.\n"
-                summary += "\n"
-                if os.path.exists(export_dir):
-                    summary += f"Query examples: {os.path.basename(export_dir)}/query_examples.py\n\n"
-                summary += "Query with SQL JOINs across all tables!"
-                
-                QMessageBox.information(self, "Export Successful", summary)
+                QMessageBox.information(self, "Export Successful", f"Exported {stats[0]} rows to {os.path.basename(file_path)}")
                 self.log(f"Exported to: {file_path} (unified export with all metadata)")
             
         except Exception as e:
             progress.close()
-            QMessageBox.critical(self, "Export Failed", f"Failed to export content:\n\n{str(e)}")
+            QMessageBox.critical(self, "Export Failed", "Export failed")
             self.log(f"Export failed: {str(e)}")
     
     def export_to_csv(self):
@@ -995,7 +900,6 @@ conn.close()
         file_path, _ = QFileDialog.getSaveFileName(self, "Export CSV", "", "CSV files (*.csv)")
         if file_path:
             # Extract content to dataframe
-            from bs4 import BeautifulSoup
             soup = BeautifulSoup(self._last_processing_result, 'html.parser')
             data = []
             for i, elem in enumerate(soup.find_all(['h1', 'h2', 'h3', 'p', 'table'])):
@@ -1004,25 +908,106 @@ conn.close()
             df.to_csv(file_path, index=False)
             self.log(f"Exported to CSV: {file_path}")
     
+    def _is_url(self, text: str) -> bool:
+        """Check if text is a URL"""
+        return text.startswith(('http://', 'https://', 'ftp://'))
+    
+    def _download_pdf_from_url(self, url: str) -> str:
+        """Download PDF from URL to temp file"""
+        try:
+            self.log(f"📥 Downloading from {urllib.parse.urlparse(url).netloc}...")
+            
+            # Create SSL context
+            ssl_context = ssl.create_default_context()
+            
+            # Headers to avoid bot detection
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Chonker PDF Processor)',
+                'Accept': 'application/pdf,*/*'
+            }
+            
+            request = urllib.request.Request(url, headers=headers)
+            
+            # Create temp file
+            temp_file = tempfile.NamedTemporaryFile(suffix='.pdf', delete=False, prefix='chonker_')
+            self._temp_files.append(temp_file.name)
+            
+            # Download with progress
+            with urllib.request.urlopen(request, context=ssl_context) as response:
+                # Check content type
+                content_type = response.headers.get('Content-Type', '')
+                if 'pdf' not in content_type.lower() and not url.endswith('.pdf'):
+                    self.log("⚠️ Warning: URL may not be a PDF file")
+                
+                total_size = int(response.headers.get('Content-Length', 0))
+                downloaded = 0
+                block_size = 8192
+                
+                while True:
+                    chunk = response.read(block_size)
+                    if not chunk:
+                        break
+                    temp_file.write(chunk)
+                    downloaded += len(chunk)
+                    
+                    if total_size:
+                        percent = (downloaded / total_size) * 100
+                        mb_downloaded = downloaded / (1024 * 1024)
+                        self.log(f"📥 Downloaded: {mb_downloaded:.1f}MB ({percent:.0f}%)")
+                
+                temp_file.close()
+                self.log(f"✅ Download complete: {os.path.basename(temp_file.name)}")
+                return temp_file.name
+                
+        except Exception as e:
+            self.log(f"❌ Download failed: {str(e)}")
+            if 'temp_file' in locals() and hasattr(temp_file, 'name'):
+                try:
+                    os.unlink(temp_file.name)
+                except:
+                    pass
+            raise Exception(f"Failed to download PDF: {str(e)}")
+    
+    
     def dragEnterEvent(self, event):
         if event.mimeData().hasUrls():
             event.acceptProposedAction()
     
     def dropEvent(self, event):
-        files = [u.toLocalFile() for u in event.mimeData().urls()]
+        urls = event.mimeData().urls()
+        
+        # Check if any are web URLs
+        for url in urls:
+            url_string = url.toString()
+            if self._is_url(url_string):
+                # Handle URL drop
+                try:
+                    file_path = self._download_pdf_from_url(url_string)
+                    self.create_embedded_pdf_viewer(file_path)
+                    self.current_pdf_path = file_path
+                    self._add_to_recent_files(f"[URL] {url_string}")
+                    return
+                except Exception as e:
+                    QMessageBox.warning(self, "Download Failed", str(e))
+                    return
+        
+        # Otherwise handle as file drops
+        files = [u.toLocalFile() for u in urls]
         pdf_files = [f for f in files if f.endswith('.pdf')]
         if pdf_files:
             self.create_embedded_pdf_viewer(pdf_files[0])
             self.current_pdf_path = pdf_files[0]
     
     def keyPressEvent(self, event):
-        if event.key() == Qt.Key.Key_Question and event.modifiers() & Qt.KeyboardModifier.ShiftModifier:
+        if event.key() == Qt.Key.Key_Question:
             QMessageBox.information(self, "Keyboard Shortcuts",
-                "Cmd+O: Open PDF\n"
-                "Cmd+P: Process\n"
-                "Cmd+E: Export (SQL + Arrow)\n"
+                "Cmd+O: Open PDF from File\n"
+                "Cmd+U: Open PDF from URL\n"
+                "Cmd+P: Process Document\n"
+                "Cmd+E: Export to DuckDB\n"
+                "Cmd+F: Toggle Search\n"
                 "Cmd+Plus/Minus: Zoom\n"
-                "Shift+?: This help")
+                "?: This help")
         elif event.key() == Qt.Key.Key_F and event.modifiers() & Qt.KeyboardModifier.ControlModifier:
             self.simple_find()
         super().keyPressEvent(event)
@@ -1146,6 +1131,13 @@ conn.close()
         open_action.triggered.connect(self.open_pdf)
         file_menu.addAction(open_action)
         
+        open_url_action = QAction("Open from URL", self)
+        open_url_action.setShortcut("Ctrl+U")
+        open_url_action.triggered.connect(self._toggle_url_input)
+        file_menu.addAction(open_url_action)
+        
+        file_menu.addSeparator()
+        
         # Add recent files menu
         self.recent_menu = file_menu.addMenu("Recent Files")
         self._update_recent_files_menu()
@@ -1257,18 +1249,36 @@ conn.close()
         # Quick actions - subordinate visual style
         action_button_style = "QPushButton{background:#3A3C3E;color:#B0B0B0;font-size:12px;border:1px solid #525659;padding:6px 10px;min-height:30px;max-height:35px}QPushButton:hover{background:#525659;color:#FFF}QPushButton:disabled{background:#2D2F31;color:#666}"
         
-        open_btn = QPushButton("Open")
-        open_btn.setToolTip("Open PDF (Ctrl+O)")
-        open_btn.clicked.connect(self.open_pdf)
-        open_btn.setShortcut(QKeySequence.StandardKey.Open)
-        open_btn.setStyleSheet(action_button_style)
+        # Open from File button
+        open_file_btn = QPushButton("Open File")
+        open_file_btn.setToolTip("Open PDF from file (Ctrl+O)")
+        open_file_btn.clicked.connect(self.open_pdf)
+        open_file_btn.setShortcut(QKeySequence.StandardKey.Open)
+        open_file_btn.setStyleSheet(action_button_style)
         
-        process_btn = QPushButton("Process")
+        # Open from URL button
+        open_url_btn = QPushButton("Open URL")
+        open_url_btn.setToolTip("Open PDF from URL (Ctrl+U)")
+        open_url_btn.clicked.connect(self._toggle_url_input)
+        open_url_btn.setShortcut(QKeySequence("Ctrl+U"))
+        open_url_btn.setStyleSheet(action_button_style)
+        self.open_url_btn = open_url_btn
+        
+        # URL input field (hidden by default)
+        self.url_input = QLineEdit()
+        self.url_input.setPlaceholderText("Enter PDF URL and press Enter...")
+        self.url_input.setMaximumWidth(300)
+        self.url_input.setMinimumWidth(250)
+        self.url_input.hide()
+        self.url_input.returnPressed.connect(self._handle_url_input)
+        self.url_input.setStyleSheet("QLineEdit{background:#2D2F31;color:#1ABC9C;border:1px solid #1ABC9C;padding:5px;font-size:11px}QLineEdit:focus{border-color:#16A085}")
+        
+        process_btn = QPushButton("Extract to HTML")
         process_btn.setToolTip("Process (Ctrl+P)")
         process_btn.clicked.connect(self.process_current)
         process_btn.setStyleSheet(action_button_style)
         
-        export_btn = QPushButton("Export")
+        export_btn = QPushButton("Export to .duckdb")
         export_btn.setToolTip("Export quality-controlled content to SQL (Cmd+E)")
         export_btn.clicked.connect(self.export_to_sql)
         export_btn.setEnabled(False)  # Disabled until processing is done
@@ -1277,7 +1287,9 @@ conn.close()
         self.export_btn = export_btn  # Store reference
         
         # Add action buttons directly to main layout
-        layout.addWidget(open_btn)
+        layout.addWidget(open_file_btn)
+        layout.addWidget(open_url_btn)
+        layout.addWidget(self.url_input)
         layout.addWidget(process_btn)
         layout.addWidget(export_btn)
         
@@ -1290,6 +1302,49 @@ conn.close()
         else:
             parent_layout.addWidget(top_bar)
     
+    def _toggle_url_input(self):
+        """Toggle the URL input field visibility"""
+        if self.url_input.isHidden():
+            self.url_input.show()
+            self.url_input.setFocus()
+            # Check clipboard for URL
+            clipboard = QApplication.clipboard()
+            clipboard_text = clipboard.text()
+            if self._is_url(clipboard_text):
+                self.url_input.setText(clipboard_text)
+                self.url_input.selectAll()
+        else:
+            self.url_input.hide()
+            self.url_input.clear()
+    
+    def _handle_url_input(self):
+        """Handle URL input when Enter is pressed"""
+        url = self.url_input.text().strip()
+        if not url:
+            return
+            
+        if not self._is_url(url):
+            QMessageBox.warning(self, "Invalid URL", "Invalid URL")
+            return
+        
+        try:
+            # Download PDF
+            file_path = self._download_pdf_from_url(url)
+            
+            # Open the downloaded PDF
+            self.create_embedded_pdf_viewer(file_path)
+            self.current_pdf_path = file_path
+            
+            # Add URL to recent files
+            self._add_to_recent_files(f"[URL] {url}")
+            
+            # Hide and clear the input
+            self.url_input.hide()
+            self.url_input.clear()
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Download Failed", str(e))
+    
     def _show_welcome(self):
         # Clear left pane
         for i in reversed(range(self.left_layout.count())): 
@@ -1298,19 +1353,19 @@ conn.close()
                 widget.setParent(None)
         
         # Show shortcuts in terminal
-        self.log("Cmd+O: Open PDF | Cmd+P: Process | Cmd+E: Export | Cmd+F: Toggle Search")
+        self.log("Cmd+O: Open File | Cmd+U: Open URL | Cmd+P: Process | Cmd+E: Export")
     
     def _update_pane_styles(self):
         pass  # Simplified for space
     
     def zoom(self, delta: int):
         if self.active_pane == 'right':
-            self.text_zoom = max(8, min(48, self.text_zoom + (2 if delta > 0 else -2)))
-            self._apply_text_zoom()
+            self.text_zoom = max(TEXT_ZOOM_MIN, min(TEXT_ZOOM_MAX, self.text_zoom + (2 if delta > 0 else -2)))
+            self._apply_zoom()
         elif self.active_pane == 'left' and hasattr(self, 'embedded_pdf_view') and self.embedded_pdf_view:
             factor = 1.1 if delta > 0 else 0.9
             self.pdf_zoom = max(0.1, min(5.0, self.pdf_zoom * factor))
-            self._apply_pdf_zoom()
+            self._apply_zoom()
     
     def zoom_in(self): self.zoom(1)
     def zoom_out(self): self.zoom(-1)
@@ -1327,9 +1382,6 @@ conn.close()
             return True
         return super().eventFilter(obj, event)
     
-    def resizeEvent(self, event):
-        """Handle window resize"""
-        super().resizeEvent(event)
     
     def _handle_native_gesture(self, obj, event):
         if 'ZoomNativeGesture' in str(event.gestureType()):
@@ -1359,73 +1411,66 @@ conn.close()
         if hasattr(event, 'modifiers') and event.modifiers() & Qt.KeyboardModifier.ControlModifier:
             delta = event.angleDelta().y()
             if obj == self.faithful_output:
-                self.text_zoom = max(8, min(48, self.text_zoom + (1 if delta > 0 else -1)))
-                self._apply_text_zoom()
+                self.text_zoom = max(TEXT_ZOOM_MIN, min(TEXT_ZOOM_MAX, self.text_zoom + (1 if delta > 0 else -1)))
+                self._apply_zoom()
                 return True
             elif hasattr(self, 'embedded_pdf_view') and obj == self.embedded_pdf_view:
                 factor = 1.1 if delta > 0 else 0.9
                 new_zoom = max(0.1, min(5.0, self.pdf_zoom * factor))
                 if new_zoom != self.pdf_zoom:
                     self.pdf_zoom = new_zoom
-                    self._apply_pdf_zoom()
+                    self._apply_zoom()
                 return True
         return False
     
     def _apply_theme(self):
+        # Theme colors
         bg1, bg2, bg3 = "#525659", "#3A3C3E", "#1E1E1E"
-        c1, c2 = "#1ABC9C", "#16A085" 
-        self.setStyleSheet(f"* {{color: #FFFFFF}} QMainWindow, QTextEdit {{background-color: {bg1}}} #topBar {{background-color: {bg1}; border-bottom: 1px solid {bg2}}} QPushButton {{background-color: #6B6E71; border: 1px solid #4A4C4E; border-radius: 4px; padding: 8px 16px; font-size: 14px}} QPushButton:hover {{background-color: #7B7E81; border-color: #5A5C5E}} QPushButton:checked {{background-color: {c1}; border-color: {c2}}} #terminal {{background-color: {bg3}; color: {c1}; font-family: 'Courier New', monospace; font-size: 11px; border: 1px solid #333; border-radius: 4px; padding: 4px}} QTextEdit {{border: 1px solid {bg2}; border-radius: 4px}} QScrollBar {{background-color: {bg2}}} QScrollBar:vertical {{width: 12px}} QScrollBar:horizontal {{height: 12px}} QScrollBar::handle {{background-color: {c1}; border: none}} QScrollBar::handle:vertical {{min-height: 20px}} QScrollBar::handle:horizontal {{min-width: 20px}} QScrollBar::handle:hover {{background-color: {c2}}} QScrollBar::add-line, QScrollBar::sub-line {{border: none; background: none; height: 0; width: 0}} #terminalExpandBtn {{background-color: transparent; border: 1px solid {bg2}; border-radius: 2px; padding: 0; font-size: 10px; color: {c1}}} #terminalExpandBtn:hover {{background-color: {bg2}}} #searchWidget {{background-color: {bg2}; border-bottom: 2px solid {c1}}} #searchInput {{background-color: {bg1}; border: 1px solid {c1}; border-radius: 4px; padding: 5px 10px; color: #FFFFFF; selection-background-color: {c1}}} #searchInput:focus {{border-color: {c2}}} #matchLabel {{color: {c1}; font-size: 12px}} #prevButton, #nextButton {{background-color: {c1}; color: white; border: none; padding: 5px 15px; font-size: 12px}} #prevButton:hover, #nextButton:hover {{background-color: {c2}}} #closeButton {{background-color: transparent; color: {c1}; border: 1px solid {c1}; padding: 2px}} #closeButton:hover {{background-color: {c1}; color: white}}")
+        c1, c2 = "#1ABC9C", "#16A085"
+        
+        # Build CSS - compact but structured
+        css = f"""
+        * {{color: #FFFFFF}}
+        QMainWindow, QTextEdit {{background-color: {bg1}}}
+        #topBar {{background-color: {bg1}; border-bottom: 1px solid {bg2}}}
+        QPushButton {{background: #6B6E71; border: 1px solid #4A4C4E; border-radius: 4px; padding: 8px 16px; font-size: 14px}}
+        QPushButton:hover {{background: #7B7E81; border-color: #5A5C5E}}
+        QPushButton:checked {{background: {c1}; border-color: {c2}}}
+        #terminal {{background: {bg3}; color: {c1}; font: 11px 'Courier New'; border: 1px solid #333; border-radius: 4px; padding: 4px}}
+        QTextEdit {{border: 1px solid {bg2}; border-radius: 4px}}
+        QScrollBar {{background: {bg2}}}
+        QScrollBar:vertical {{width: 12px}} QScrollBar:horizontal {{height: 12px}}
+        QScrollBar::handle {{background: {c1}; border: none}}
+        QScrollBar::handle:vertical {{min-height: 20px}} QScrollBar::handle:horizontal {{min-width: 20px}}
+        QScrollBar::handle:hover {{background: {c2}}}
+        QScrollBar::add-line, QScrollBar::sub-line {{border: none; background: none; height: 0; width: 0}}
+        #searchWidget {{background: {bg2}; border-bottom: 2px solid {c1}}}
+        #searchInput {{background: {bg1}; border: 1px solid {c1}; border-radius: 4px; padding: 5px 10px; color: #FFF; selection-background-color: {c1}}}
+        #searchInput:focus {{border-color: {c2}}}
+        #matchLabel {{color: {c1}; font-size: 12px}}
+        #prevButton, #nextButton {{background: {c1}; color: white; border: none; padding: 5px 15px; font-size: 12px}}
+        #prevButton:hover, #nextButton:hover {{background: {c2}}}
+        #closeButton {{background: transparent; color: {c1}; border: 1px solid {c1}; padding: 2px}}
+        #closeButton:hover {{background: {c1}; color: white}}
+        """
+        self.setStyleSheet(css)
     
     
     def _handle_gesture_zoom(self, zoom_delta: float, zoom_factor: float) -> None:
-        """Handle zoom gesture for active pane.
-        
-        Args:
-            zoom_delta: The zoom delta value from the gesture (-1.0 to 1.0)
-            zoom_factor: The calculated zoom factor (1.0 + zoom_delta * 0.5)
-        """
+        """Handle zoom gesture for active pane"""
+        if self.active_pane == 'right' and abs(zoom_delta) > 0.05:
+            self.text_zoom = max(TEXT_ZOOM_MIN, min(TEXT_ZOOM_MAX, int(self.text_zoom) + (1 if zoom_delta > 0 else -1)))
+            self._apply_zoom()
+        elif self.active_pane == 'left' and abs(zoom_delta) > 0.02:
+            self.pdf_zoom = max(PDF_ZOOM_MIN, min(PDF_ZOOM_MAX, self.pdf_zoom * zoom_factor))
+            self._apply_zoom()
+    
+    def _apply_zoom(self) -> None:
+        """Apply zoom to active pane"""
         if self.active_pane == 'right' and self.faithful_output:
-            # Zoom text pane by whole point sizes
-            if abs(zoom_delta) > 0.05:  # Threshold for triggering zoom
-                if zoom_delta > 0:
-                    new_size = min(48, int(self.text_zoom) + 1)
-                else:
-                    new_size = max(8, int(self.text_zoom) - 1)
-                
-                if new_size != int(self.text_zoom):
-                    self.text_zoom = new_size
-                    self._apply_text_zoom()
-        
-        elif self.active_pane == 'left' and hasattr(self, 'embedded_pdf_view') and self.embedded_pdf_view:
-            # Zoom PDF pane with threshold to reduce flicker
-            if abs(zoom_delta) > 0.02:  # Only zoom if delta is significant
-                new_zoom = self.pdf_zoom * zoom_factor
-                if 0.25 <= new_zoom <= 4.0:
-                    self.pdf_zoom = new_zoom
-                    self._apply_pdf_zoom()
-    
-    def _apply_text_zoom(self) -> None:
-        if not self.faithful_output:
-            return
-            
-        # Store the current content
-        current_html = self.faithful_output.toHtml()
-        
-        # Check if we have the processing result to re-render properly
-        if hasattr(self, '_last_processing_result'):
-            # Re-display with new zoom level
-            self._display_in_faithful_output(self._last_processing_result)
-            # Zoom applied via re-render
-        else:
-            # Simple approach: just log that we need content first
-            pass  # Zoom will apply when content loads
-    
-    def _apply_pdf_zoom(self) -> None:
-        """Apply current PDF zoom to the PDF view widget.
-        
-        Uses setZoomFactor if available on the embedded_pdf_view widget.
-        """
-        if hasattr(self, 'embedded_pdf_view') and self.embedded_pdf_view:
+            if hasattr(self, '_last_processing_result'):
+                self._display_in_faithful_output(self._last_processing_result)
+        elif self.active_pane == 'left' and hasattr(self, 'embedded_pdf_view'):
             if hasattr(self.embedded_pdf_view, 'setZoomFactor'):
                 self.embedded_pdf_view.setZoomFactor(self.pdf_zoom)
     
@@ -1450,28 +1495,19 @@ conn.close()
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
         
-        if reply == QMessageBox.StandardButton.Yes:
-            self.log("🔍 Reprocessing with OCR enabled...")
-            # Start new processor with OCR
-            self.processor = DocumentProcessor(file_path, use_ocr=True)
-            self.processor.progress.connect(self.log)
-            self.processor.error.connect(lambda e: self.log(f"🐹 Error: {e}"))
-            self.processor.finished.connect(self.on_processing_finished)
-            self.processor.start()
-            
-            # Restart animation
-            self.processing_timer.start(500)
-        else:
-            self.log("📄 Processing without OCR...")
-            # Continue without OCR - just process normally
-            self.processor = DocumentProcessor(file_path, use_ocr=False)
-            self.processor.progress.connect(self.log)
-            self.processor.error.connect(lambda e: self.log(f"🐹 Error: {e}"))
-            self.processor.finished.connect(self.on_processing_finished)
-            self.processor.start()
-            
-            # Restart animation
-            self.processing_timer.start(500)
+        # Process with or without OCR based on user response
+        use_ocr = reply == QMessageBox.StandardButton.Yes
+        self.log("🔍 Reprocessing with OCR enabled..." if use_ocr else "📄 Processing without OCR...")
+        
+        # Create and start processor
+        self.processor = DocumentProcessor(file_path, use_ocr=use_ocr)
+        self.processor.progress.connect(self.log)
+        self.processor.error.connect(lambda e: self.log(f"🐹 Error: {e}"))
+        self.processor.finished.connect(self.on_processing_finished)
+        self.processor.start()
+        
+        # Restart animation
+        self.processing_timer.start(ANIMATION_INTERVAL)
     
     def log(self, message: str):
         cursor = self.terminal.textCursor()
@@ -1612,7 +1648,7 @@ conn.close()
             self.log("Stopping previous processing...")
             self.processor.stop()
             # Wait for the thread to actually finish
-            if not self.processor.wait(5000):  # 5 second timeout
+            if not self.processor.wait(THREAD_WAIT_TIMEOUT):  # 5 second timeout
                 self.log("⚠️ Previous processing didn't stop cleanly")
                 return
         
@@ -1643,7 +1679,7 @@ conn.close()
             self.processor.start()
             
             # Start processing animation
-            self.processing_timer.start(500)  # Update every 500ms
+            self.processing_timer.start(ANIMATION_INTERVAL)  # Update every 500ms
         except Exception as e:
             self.log(f"❌ Failed to start processing: {e}")
     
@@ -1752,6 +1788,15 @@ conn.close()
         if hasattr(self, 'processor') and self.processor.isRunning():
             self.processor.stop()
         
+        # Clean up temporary files
+        for temp_file in self._temp_files:
+            try:
+                if os.path.exists(temp_file):
+                    os.unlink(temp_file)
+                    self.log(f"Cleaned up temp file: {os.path.basename(temp_file)}")
+            except Exception as e:
+                print(f"Failed to clean up {temp_file}: {e}")
+        
         # Remove all event filters to prevent memory leaks
         if hasattr(self, 'left_pane'):
             self.left_pane.removeEventFilter(self)
@@ -1762,352 +1807,12 @@ conn.close()
         
         event.accept()
 
-
-
 try:
     import duckdb
     import pandas as pd
     DUCKDB_AVAILABLE = True
 except ImportError:
     DUCKDB_AVAILABLE = False
-
-
-class ArrowDatasetExporter:
-    """Export documents to partitioned PyArrow datasets for efficient querying"""
-    
-    def __init__(self, base_path: str = "chonker_arrow_export"):
-        if not PYARROW_AVAILABLE:
-            raise ImportError("🐹 *cough* PyArrow not installed! Run: uv pip install pyarrow")
-        
-        self.base_path = base_path
-        os.makedirs(base_path, exist_ok=True)
-    
-    def _group_by_type(self, elements: List[Dict]) -> Dict[str, List[Dict]]:
-        """Group elements by their type"""
-        grouped = {}
-        for element in elements:
-            element_type = element.get('type', 'unknown')
-            if element_type not in grouped:
-                grouped[element_type] = []
-            grouped[element_type].append(element)
-        return grouped
-    
-    def _extract_style_info(self, element_html: str) -> Dict[str, Any]:
-        """Extract style information from HTML element"""
-        from bs4 import BeautifulSoup
-        
-        style_info = {
-            'bold': False,
-            'italic': False,
-            'underline': False,
-            'font_size': None,
-            'font_family': None,
-            'color': None,
-            'background_color': None
-        }
-        
-        if not element_html:
-            return style_info
-        
-        soup = BeautifulSoup(element_html, 'html.parser')
-        element = soup.find()
-        
-        if element:
-            # Check for bold
-            if element.name in ['b', 'strong'] or element.find(['b', 'strong']):
-                style_info['bold'] = True
-            
-            # Check for italic
-            if element.name in ['i', 'em'] or element.find(['i', 'em']):
-                style_info['italic'] = True
-            
-            # Check for underline
-            if element.name == 'u' or element.find('u'):
-                style_info['underline'] = True
-            
-            # Extract inline styles
-            style_attr = element.get('style', '')
-            if style_attr:
-                styles = dict(item.split(':') for item in style_attr.split(';') 
-                             if ':' in item)
-                style_info['font_size'] = styles.get('font-size', '').strip()
-                style_info['font_family'] = styles.get('font-family', '').strip()
-                style_info['color'] = styles.get('color', '').strip()
-                style_info['background_color'] = styles.get('background-color', '').strip()
-        
-        return style_info
-    
-    def _create_rich_table(self, elements: List[Dict], doc_id: str, element_type: str) -> pa.Table:
-        """Create a PyArrow table with rich metadata for elements"""
-        # Prepare data for table
-        data = {
-            'doc_id': [],
-            'element_type': [],
-            'element_id': [],
-            'element_order': [],
-            'plain_text': [],
-            'html_content': [],
-            'semantic_role': [],
-            'confidence_score': [],
-            'char_count': [],
-            'word_count': [],
-            # Style fields
-            'style_bold': [],
-            'style_italic': [],
-            'style_underline': [],
-            'style_font_size': [],
-            'style_font_family': [],
-            'style_color': [],
-            'style_background_color': [],
-            # Structural fields
-            'parent_id': [],
-            'depth_level': [],
-            'is_list_item': [],
-            'list_position': [],
-            # Table-specific fields (null for non-tables)
-            'table_rows': [],
-            'table_cols': [],
-            'table_cell_content': [],
-            # Timestamps
-            'extracted_at': [],
-            'modified_at': []
-        }
-        
-        timestamp = pd.Timestamp.now()
-        
-        for i, element in enumerate(elements):
-            # Extract style information
-            style_info = self._extract_style_info(element.get('html', ''))
-            
-            # Basic fields
-            data['doc_id'].append(doc_id)
-            data['element_type'].append(element_type)
-            data['element_id'].append(element.get('id', f"{doc_id}_{element_type}_{i:04d}"))
-            data['element_order'].append(element.get('order', i))
-            
-            # Text content
-            plain_text = element.get('text', '')
-            data['plain_text'].append(plain_text)
-            data['html_content'].append(element.get('html', ''))
-            data['char_count'].append(len(plain_text))
-            data['word_count'].append(len(plain_text.split()))
-            
-            # Semantic analysis
-            semantic_role = self._infer_semantic_role(element, element_type)
-            data['semantic_role'].append(semantic_role)
-            data['confidence_score'].append(element.get('confidence', 1.0))
-            
-            # Style fields
-            data['style_bold'].append(style_info['bold'])
-            data['style_italic'].append(style_info['italic'])
-            data['style_underline'].append(style_info['underline'])
-            data['style_font_size'].append(style_info['font_size'])
-            data['style_font_family'].append(style_info['font_family'])
-            data['style_color'].append(style_info['color'])
-            data['style_background_color'].append(style_info['background_color'])
-            
-            # Structural fields
-            data['parent_id'].append(element.get('parent_id'))
-            data['depth_level'].append(element.get('depth', 0))
-            data['is_list_item'].append(element_type in ['li', 'ul', 'ol'])
-            data['list_position'].append(element.get('list_position'))
-            
-            # Table-specific fields
-            if element_type == 'table':
-                data['table_rows'].append(element.get('rows'))
-                data['table_cols'].append(element.get('cols'))
-                data['table_cell_content'].append(json.dumps(element.get('cells', [])))
-            else:
-                data['table_rows'].append(None)
-                data['table_cols'].append(None)
-                data['table_cell_content'].append(None)
-            
-            # Timestamps
-            data['extracted_at'].append(timestamp)
-            data['modified_at'].append(timestamp)
-        
-        # Create PyArrow table with explicit schema
-        schema = pa.schema([
-            ('doc_id', pa.string()),
-            ('element_type', pa.string()),
-            ('element_id', pa.string()),
-            ('element_order', pa.int32()),
-            ('plain_text', pa.string()),
-            ('html_content', pa.string()),
-            ('semantic_role', pa.string()),
-            ('confidence_score', pa.float64()),
-            ('char_count', pa.int32()),
-            ('word_count', pa.int32()),
-            ('style_bold', pa.bool_()),
-            ('style_italic', pa.bool_()),
-            ('style_underline', pa.bool_()),
-            ('style_font_size', pa.string()),
-            ('style_font_family', pa.string()),
-            ('style_color', pa.string()),
-            ('style_background_color', pa.string()),
-            ('parent_id', pa.string()),
-            ('depth_level', pa.int32()),
-            ('is_list_item', pa.bool_()),
-            ('list_position', pa.int32()),
-            ('table_rows', pa.int32()),
-            ('table_cols', pa.int32()),
-            ('table_cell_content', pa.string()),
-            ('extracted_at', pa.timestamp('ns')),
-            ('modified_at', pa.timestamp('ns'))
-        ])
-        
-        return pa.Table.from_pydict(data, schema=schema)
-    
-    def _infer_semantic_role(self, element: Dict, element_type: str) -> str:
-        """Infer the semantic role of an element"""
-        text = element.get('text', '').lower()
-        
-        # Headers
-        if element_type in ['h1', 'h2', 'h3', 'h4', 'h5', 'h6']:
-            return 'header'
-        
-        # Tables
-        if element_type == 'table':
-            return 'data_table'
-        
-        # Lists
-        if element_type in ['ul', 'ol', 'li']:
-            return 'list'
-        
-        # Check text patterns for paragraphs
-        if element_type == 'p':
-            # Financial patterns
-            if any(term in text for term in ['revenue', 'income', 'profit', 'loss', 'cost', 'expense', '$']):
-                return 'financial_text'
-            
-            # Dates
-            if re.search(r'\b\d{4}\b|\b\d{1,2}/\d{1,2}/\d{2,4}\b', text):
-                return 'dated_text'
-            
-            # Questions
-            if text.strip().endswith('?'):
-                return 'question'
-            
-            # Short text might be captions
-            if len(text.split()) < 10:
-                return 'caption'
-        
-        return 'body_text'
-    
-    def export_document_dataset(self, doc_id: str, html_content: str, source_pdf: str = None) -> str:
-        """Export a document as a partitioned Arrow dataset"""
-        from bs4 import BeautifulSoup
-        
-        # Parse HTML content
-        soup = BeautifulSoup(html_content, 'html.parser')
-        
-        # Extract all elements with metadata
-        elements = []
-        element_order = 0
-        
-        for element in soup.find_all(['h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p', 'table', 'ul', 'ol', 'li', 'div']):
-            if not element.get_text(strip=True):
-                continue
-            
-            element_data = {
-                'type': element.name,
-                'text': element.get_text(strip=True),
-                'html': str(element),
-                'order': element_order,
-                'id': f"{doc_id}_{element_order:04d}"
-            }
-            
-            # Add table-specific metadata
-            if element.name == 'table':
-                rows = element.find_all('tr')
-                element_data['rows'] = len(rows)
-                element_data['cols'] = len(rows[0].find_all(['td', 'th'])) if rows else 0
-                
-                # Extract cell content
-                cells = []
-                for row in rows:
-                    row_cells = [cell.get_text(strip=True) for cell in row.find_all(['td', 'th'])]
-                    cells.append(row_cells)
-                element_data['cells'] = cells
-            
-            elements.append(element_data)
-            element_order += 1
-        
-        # Group elements by type
-        grouped_elements = self._group_by_type(elements)
-        
-        # Export each element type as a partition
-        export_count = 0
-        for element_type, typed_elements in grouped_elements.items():
-            if not typed_elements:
-                continue
-            
-            # Create rich table with metadata
-            table = self._create_rich_table(typed_elements, doc_id, element_type)
-            
-            # Write dataset with partitioning
-            ds.write_dataset(
-                table,
-                self.base_path,
-                format="parquet",
-                partitioning=ds.partitioning(
-                    pa.schema([
-                        ("doc_id", pa.string()),
-                        ("element_type", pa.string())
-                    ])
-                ),
-                existing_data_behavior="overwrite_or_ignore",
-                use_threads=True
-            )
-            export_count += len(typed_elements)
-        
-        # Create metadata file
-        metadata = {
-            'doc_id': doc_id,
-            'source_pdf': source_pdf,
-            'export_time': datetime.now().isoformat(),
-            'total_elements': len(elements),
-            'element_types': {k: len(v) for k, v in grouped_elements.items()},
-            'base_path': self.base_path
-        }
-        
-        metadata_path = os.path.join(self.base_path, f"_{doc_id}_metadata.json")
-        with open(metadata_path, 'w') as f:
-            json.dump(metadata, f, indent=2)
-        
-        return f"Exported {export_count} elements to {self.base_path}"
-    
-    def query_dataset(self, filter_expression=None, columns=None):
-        """Query the exported dataset"""
-        dataset = ds.dataset(self.base_path, format="parquet", partitioning="hive")
-        
-        if filter_expression:
-            return dataset.to_table(filter=filter_expression, columns=columns).to_pandas()
-        else:
-            return dataset.to_table(columns=columns).to_pandas()
-    
-    def find_bold_headers_about(self, keywords: List[str]) -> pd.DataFrame:
-        """Example query: Find all bold headers containing specific keywords"""
-        dataset = ds.dataset(self.base_path, format="parquet", partitioning="hive")
-        
-        # Build filter for keywords
-        keyword_filters = None
-        for keyword in keywords:
-            kw_filter = ds.field("plain_text").isin([keyword])
-            if keyword_filters is None:
-                keyword_filters = kw_filter
-            else:
-                keyword_filters = keyword_filters | kw_filter
-        
-        # Combine with other conditions
-        filter_expr = (
-            (ds.field("style_bold") == True) & 
-            (ds.field("semantic_role") == "header") &
-            keyword_filters
-        )
-        
-        return dataset.to_table(filter=filter_expr).to_pandas()
-
 
 class ChonkerSQLExporter:
     
@@ -2201,7 +1906,6 @@ class ChonkerSQLExporter:
                 export_name = f"export_{export_id}"
             
             # Parse HTML to extract structured content
-            from bs4 import BeautifulSoup
             soup = BeautifulSoup(html_content, 'html.parser')
             
             # Calculate content hash for tracking edits
