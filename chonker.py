@@ -41,7 +41,7 @@ from PyQt6.QtWidgets import (
     QPushButton, QFileDialog, QMessageBox, QTextEdit, QLabel, 
     QSplitter, QDialog, QMenuBar, QMenu, QToolBar, QStatusBar,
     QGroupBox, QTreeWidget, QTreeWidgetItem, QProgressDialog, QSizePolicy,
-    QInputDialog
+    QInputDialog, QLineEdit
 )
 from PyQt6.QtCore import (
     Qt, QThread, pyqtSignal, QTimer, QPointF, QObject, QEvent,
@@ -49,7 +49,7 @@ from PyQt6.QtCore import (
 )
 from PyQt6.QtGui import (
     QAction, QKeySequence, QIcon, QPixmap, QPainter, QFont, QBrush, QColor, QTextCursor,
-    QNativeGestureEvent
+    QNativeGestureEvent, QTextDocument
 )
 from PyQt6.QtPdf import QPdfDocument
 from PyQt6.QtPdfWidgets import QPdfView
@@ -552,14 +552,27 @@ class ChonkerApp(QMainWindow):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
         
-        # Main vertical splitter for top bar and content
+        # Main container widget to hold top bar and search widget
+        top_container = QWidget()
+        top_layout = QVBoxLayout(top_container)
+        top_layout.setContentsMargins(0, 0, 0, 0)
+        top_layout.setSpacing(0)
+        
+        # Main vertical splitter for top container and content
         self.main_splitter = QSplitter(Qt.Orientation.Vertical)
         self.main_splitter.setHandleWidth(3)
         self.main_splitter.setStyleSheet("QSplitter::handle {background-color: #3A3C3E;}")
         layout.addWidget(self.main_splitter)
         
-        # Top bar (resizable)
-        self._create_top_bar(self.main_splitter)
+        # Add the top container to the splitter
+        self.main_splitter.addWidget(top_container)
+        
+        # Top bar (inside container)
+        self._create_top_bar(top_layout)
+        
+        # Create search widget (hidden by default) and add it below top bar
+        self._create_search_widget()
+        top_layout.addWidget(self.search_widget)
         
         # Content area - split view like before
         self.splitter = QSplitter(Qt.Orientation.Horizontal)
@@ -606,6 +619,53 @@ class ChonkerApp(QMainWindow):
         
         # Welcome screen
         self._show_welcome()
+    
+    def _create_search_widget(self):
+        """Create the search widget with input field, buttons, and match count"""
+        self.search_widget = QWidget()
+        self.search_widget.setObjectName("searchWidget")
+        self.search_widget.setFixedHeight(40)
+        
+        # Create horizontal layout
+        layout = QHBoxLayout(self.search_widget)
+        layout.setContentsMargins(10, 5, 10, 5)
+        layout.setSpacing(10)
+        
+        # Search input
+        self.search_input = QLineEdit()
+        self.search_input.setPlaceholderText("Find in document...")
+        self.search_input.setObjectName("searchInput")
+        self.search_input.returnPressed.connect(lambda: self.find_text(forward=True))
+        self.search_input.textChanged.connect(self.update_match_count)
+        layout.addWidget(self.search_input)
+        
+        # Match count label
+        self.match_label = QLabel("")
+        self.match_label.setObjectName("matchLabel")
+        self.match_label.setMinimumWidth(80)
+        layout.addWidget(self.match_label)
+        
+        # Previous button
+        self.prev_button = QPushButton("Previous")
+        self.prev_button.setObjectName("prevButton")
+        self.prev_button.clicked.connect(lambda: self.find_text(forward=False))
+        layout.addWidget(self.prev_button)
+        
+        # Next button  
+        self.next_button = QPushButton("Next")
+        self.next_button.setObjectName("nextButton")
+        self.next_button.clicked.connect(lambda: self.find_text(forward=True))
+        layout.addWidget(self.next_button)
+        
+        # Close button
+        self.close_button = QPushButton("✕")
+        self.close_button.setObjectName("closeButton")
+        self.close_button.setFixedWidth(30)
+        self.close_button.clicked.connect(self.close_search)
+        layout.addWidget(self.close_button)
+        
+        # Hide by default
+        self.search_widget.hide()
     
     def _load_recent_files(self):
         pass  # Simple in-memory storage
@@ -968,11 +1028,103 @@ conn.close()
         super().keyPressEvent(event)
     
     def simple_find(self):
-        text, ok = QInputDialog.getText(self, "Find", "Search for:")
-        if ok and text:
-            cursor = self.faithful_output.document().find(text)
-            if not cursor.isNull():
-                self.faithful_output.setTextCursor(cursor)
+        """Toggle the search bar - show if hidden, hide if visible"""
+        if hasattr(self, 'search_widget'):
+            if self.search_widget.isHidden():
+                self.search_widget.show()
+                self.search_input.setFocus()
+                self.search_input.selectAll()
+            else:
+                self.close_search()
+    
+    def find_text(self, forward=True):
+        """Find text with direction support"""
+        search_text = self.search_input.text()
+        if not search_text:
+            return
+        
+        # Get current cursor position
+        cursor = self.faithful_output.textCursor()
+        
+        # Set search options
+        options = QTextDocument.FindFlag(0)
+        if not forward:
+            options = QTextDocument.FindFlag.FindBackward
+        
+        # Search from current position
+        found_cursor = self.faithful_output.document().find(search_text, cursor, options)
+        
+        if found_cursor.isNull():
+            # Wrap around search
+            if forward:
+                # Start from beginning
+                cursor.movePosition(QTextCursor.MoveOperation.Start)
+            else:
+                # Start from end
+                cursor.movePosition(QTextCursor.MoveOperation.End)
+            found_cursor = self.faithful_output.document().find(search_text, cursor, options)
+        
+        if not found_cursor.isNull():
+            self.faithful_output.setTextCursor(found_cursor)
+            self.update_match_count()
+        else:
+            self.match_label.setText("No matches")
+    
+    def update_match_count(self):
+        """Update the match count display"""
+        search_text = self.search_input.text()
+        if not search_text:
+            self.match_label.setText("")
+            return
+        
+        # Count total matches
+        doc = self.faithful_output.document()
+        cursor = QTextCursor(doc)
+        matches = []
+        
+        while True:
+            cursor = doc.find(search_text, cursor)
+            if cursor.isNull():
+                break
+            matches.append(cursor.position())
+        
+        total_matches = len(matches)
+        
+        if total_matches == 0:
+            self.match_label.setText("No matches")
+        else:
+            # Find current match index
+            current_cursor = self.faithful_output.textCursor()
+            current_pos = current_cursor.position()
+            
+            current_match = 0
+            for i, pos in enumerate(matches):
+                if pos <= current_pos:
+                    current_match = i + 1
+                else:
+                    break
+            
+            self.match_label.setText(f"{current_match} of {total_matches}")
+    
+    def close_search(self):
+        """Hide the search widget"""
+        # Disable updates to prevent flash
+        self.setUpdatesEnabled(False)
+        
+        # Clear selection first
+        cursor = self.faithful_output.textCursor()
+        cursor.clearSelection()
+        self.faithful_output.setTextCursor(cursor)
+        
+        # Clear fields
+        self.search_input.clear()
+        self.match_label.clear()
+        
+        # Hide widget
+        self.search_widget.hide()
+        
+        # Re-enable updates
+        self.setUpdatesEnabled(True)
     
     def save_geometry(self):
         settings = QSettings('Chonker', 'Window')
@@ -1146,7 +1298,7 @@ conn.close()
                 widget.setParent(None)
         
         # Show shortcuts in terminal
-        self.log("Cmd+O: Open PDF | Cmd+P: Process | Cmd+E: Export")
+        self.log("Cmd+O: Open PDF | Cmd+P: Process | Cmd+E: Export | Cmd+F: Toggle Search")
     
     def _update_pane_styles(self):
         pass  # Simplified for space
@@ -1174,6 +1326,10 @@ conn.close()
         if handler and handler(obj, event):
             return True
         return super().eventFilter(obj, event)
+    
+    def resizeEvent(self, event):
+        """Handle window resize"""
+        super().resizeEvent(event)
     
     def _handle_native_gesture(self, obj, event):
         if 'ZoomNativeGesture' in str(event.gestureType()):
@@ -1218,7 +1374,7 @@ conn.close()
     def _apply_theme(self):
         bg1, bg2, bg3 = "#525659", "#3A3C3E", "#1E1E1E"
         c1, c2 = "#1ABC9C", "#16A085" 
-        self.setStyleSheet(f"* {{color: #FFFFFF}} QMainWindow, QTextEdit {{background-color: {bg1}}} #topBar {{background-color: {bg1}; border-bottom: 1px solid {bg2}}} QPushButton {{background-color: #6B6E71; border: 1px solid #4A4C4E; border-radius: 4px; padding: 8px 16px; font-size: 14px}} QPushButton:hover {{background-color: #7B7E81; border-color: #5A5C5E}} QPushButton:checked {{background-color: {c1}; border-color: {c2}}} #terminal {{background-color: {bg3}; color: {c1}; font-family: 'Courier New', monospace; font-size: 11px; border: 1px solid #333; border-radius: 4px; padding: 4px}} QTextEdit {{border: 1px solid {bg2}; border-radius: 4px}} QScrollBar {{background-color: {bg2}}} QScrollBar:vertical {{width: 12px}} QScrollBar:horizontal {{height: 12px}} QScrollBar::handle {{background-color: {c1}; border: none}} QScrollBar::handle:vertical {{min-height: 20px}} QScrollBar::handle:horizontal {{min-width: 20px}} QScrollBar::handle:hover {{background-color: {c2}}} QScrollBar::add-line, QScrollBar::sub-line {{border: none; background: none; height: 0; width: 0}} #terminalExpandBtn {{background-color: transparent; border: 1px solid {bg2}; border-radius: 2px; padding: 0; font-size: 10px; color: {c1}}} #terminalExpandBtn:hover {{background-color: {bg2}}}")
+        self.setStyleSheet(f"* {{color: #FFFFFF}} QMainWindow, QTextEdit {{background-color: {bg1}}} #topBar {{background-color: {bg1}; border-bottom: 1px solid {bg2}}} QPushButton {{background-color: #6B6E71; border: 1px solid #4A4C4E; border-radius: 4px; padding: 8px 16px; font-size: 14px}} QPushButton:hover {{background-color: #7B7E81; border-color: #5A5C5E}} QPushButton:checked {{background-color: {c1}; border-color: {c2}}} #terminal {{background-color: {bg3}; color: {c1}; font-family: 'Courier New', monospace; font-size: 11px; border: 1px solid #333; border-radius: 4px; padding: 4px}} QTextEdit {{border: 1px solid {bg2}; border-radius: 4px}} QScrollBar {{background-color: {bg2}}} QScrollBar:vertical {{width: 12px}} QScrollBar:horizontal {{height: 12px}} QScrollBar::handle {{background-color: {c1}; border: none}} QScrollBar::handle:vertical {{min-height: 20px}} QScrollBar::handle:horizontal {{min-width: 20px}} QScrollBar::handle:hover {{background-color: {c2}}} QScrollBar::add-line, QScrollBar::sub-line {{border: none; background: none; height: 0; width: 0}} #terminalExpandBtn {{background-color: transparent; border: 1px solid {bg2}; border-radius: 2px; padding: 0; font-size: 10px; color: {c1}}} #terminalExpandBtn:hover {{background-color: {bg2}}} #searchWidget {{background-color: {bg2}; border-bottom: 2px solid {c1}}} #searchInput {{background-color: {bg1}; border: 1px solid {c1}; border-radius: 4px; padding: 5px 10px; color: #FFFFFF; selection-background-color: {c1}}} #searchInput:focus {{border-color: {c2}}} #matchLabel {{color: {c1}; font-size: 12px}} #prevButton, #nextButton {{background-color: {c1}; color: white; border: none; padding: 5px 15px; font-size: 12px}} #prevButton:hover, #nextButton:hover {{background-color: {c2}}} #closeButton {{background-color: transparent; color: {c1}; border: 1px solid {c1}; padding: 2px}} #closeButton:hover {{background-color: {c1}; color: white}}")
     
     
     def _handle_gesture_zoom(self, zoom_delta: float, zoom_factor: float) -> None:
