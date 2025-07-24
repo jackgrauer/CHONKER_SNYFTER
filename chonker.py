@@ -14,7 +14,6 @@ import traceback
 from html import escape
 import time
 import warnings
-import duckdb
 import pandas as pd
 import re
 import json
@@ -597,8 +596,6 @@ class ChonkerApp(QMainWindow):
         self.splitter.addWidget(self.faithful_output)
         
         
-        # Initialize SQL exporter
-        self.sql_exporter = ChonkerSQLExporter()
         self.splitter.setSizes([700, 700])
         
         # Set up focus tracking and mouse tracking
@@ -712,29 +709,29 @@ class ChonkerApp(QMainWindow):
     
     
     
-    def export_to_sql(self):
+    def export_to_parquet(self):
         if not hasattr(self, '_last_processing_result') or not self._last_processing_result:
             QMessageBox.warning(self, "No Document", "Please process a document first")
             return
         
         # Get suggested filename from source PDF
         source_pdf = self.current_pdf_path if hasattr(self, 'current_pdf_path') else "unknown.pdf"
-        suggested_name = os.path.basename(source_pdf).replace('.pdf', '_export.duckdb')
+        suggested_dir = os.path.basename(source_pdf).replace('.pdf', '_parquet')
         
-        # Show native file save dialog
-        file_path, _ = QFileDialog.getSaveFileName(
+        # Show directory selection dialog
+        dir_path = QFileDialog.getExistingDirectory(
             self,
-            "Export to DuckDB",
-            suggested_name,
-            "DuckDB Database (*.duckdb);;All Files (*)"
+            "Select Directory for Parquet Export",
+            os.path.expanduser("~"),
+            QFileDialog.Option.ShowDirsOnly
         )
         
-        if not file_path:
+        if not dir_path:
             return  # User cancelled
         
-        # Ensure .duckdb extension
-        if not file_path.endswith('.duckdb'):
-            file_path += '.duckdb'
+        # Create export directory
+        export_path = os.path.join(dir_path, suggested_dir)
+        os.makedirs(export_path, exist_ok=True)
         
         # Get the current content from the faithful output (which may have been edited)
         current_html = self.faithful_output.toHtml()
@@ -753,140 +750,150 @@ class ChonkerApp(QMainWindow):
             content_html = current_html
         
         # Show progress
-        progress = QProgressDialog("Exporting content to SQL...", None, 0, 100, self)
+        progress = QProgressDialog("Exporting content to Parquet...", None, 0, 100, self)
         progress.setWindowModality(Qt.WindowModality.WindowModal)
         progress.setMinimumDuration(0)
         progress.setCancelButton(None)  # Can't cancel
-        progress.setValue(25)
+        progress.setValue(10)
         
         try:
-            # Use context manager for safe resource cleanup
-            with ChonkerSQLExporter(file_path) as exporter:
-                # Export the content
-                export_id = exporter.export_content(
-                    content_html,
-                    source_pdf,
-                    qc_user=os.getenv('USER', 'user')
-                )
+            if not PYARROW_AVAILABLE:
+                raise ImportError("PyArrow not available. Install with: uv pip install pyarrow")
+            
+            # Generate export ID
+            timestamp = datetime.now()
+            export_id = f"{os.path.basename(source_pdf).replace('.pdf', '')}_{timestamp.strftime('%Y%m%d_%H%M%S')}"
+            export_id = re.sub(r'[^a-zA-Z0-9_]', '_', export_id)
+            
+            # Parse HTML content
+            soup = BeautifulSoup(content_html, 'html.parser')
+            
+            progress.setValue(20)
+            
+            # Prepare data for different tables
+            content_data = []
+            style_data = []
+            semantic_data = []
+            export_data = []
+            
+            # Export metadata
+            export_data.append({
+                'export_id': export_id,
+                'source_pdf': source_pdf,
+                'export_name': os.path.basename(export_path),
+                'original_html': self._last_processing_result.html_content if hasattr(self._last_processing_result, 'html_content') else content_html,
+                'edited_html': content_html,
+                'content_type': 'full_document',
+                'content_hash': hashlib.sha256(content_html.encode()).hexdigest()[:16],
+                'exported_at': timestamp,
+                'qc_user': os.getenv('USER', 'user'),
+                'edit_count': 1 if content_html != self._last_processing_result.html_content else 0,
+                'metadata': json.dumps({'chunks': len(self._last_processing_result.chunks) if hasattr(self._last_processing_result, 'chunks') else 0})
+            })
                 
-                progress.setValue(75)
+            progress.setValue(30)
+            
+            # Extract content elements
+            element_order = 0
+            
+            for element in soup.find_all(['h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p', 'table', 'ul', 'ol', 'li', 'div']):
+                if not element.get_text(strip=True):
+                    continue
                 
-                # Get export statistics
-                stats = exporter.conn.execute(
-                    "SELECT COUNT(*) as total_elements, COUNT(DISTINCT element_type) as unique_types "
-                    "FROM chonker_content WHERE export_id = ?", 
-                    [export_id]
-                ).fetchone()
+                element_id = f"{export_id}_{element_order:04d}"
+                content_id = f"content_{element_id}"
                 
-                progress.setValue(50)
+                # Extract page number from metadata if available
+                page_num = 0
+                if hasattr(self._last_processing_result, 'chunks') and element_order < len(self._last_processing_result.chunks):
+                    page_num = self._last_processing_result.chunks[element_order].metadata.get('page', 0)
                 
-                # Create export directory next to the database file
-                export_dir = os.path.join(os.path.dirname(file_path), f"{export_id}_files")
-                os.makedirs(export_dir, exist_ok=True)
+                # Content data
+                content_data.append({
+                    'content_id': content_id,
+                    'export_id': export_id,
+                    'element_type': element.name,
+                    'element_order': element_order,
+                    'element_text': element.get_text(strip=True),
+                    'element_html': str(element),
+                    'element_metadata': json.dumps({
+                        'level': 0,
+                        'page': page_num
+                    }),
+                    'chunk_number': 0
+                })
                 
-                # Move/copy exported files to the chosen location
-                if os.path.exists("exports"):
-                    for file in os.listdir("exports"):
-                        if file.startswith(export_id):
-                            shutil.move(
-                                os.path.join("exports", file),
-                                os.path.join(export_dir, file)
-                            )
+                # Extract style information
+                style_data.append({
+                    'element_id': element_id,
+                    'style_bold': element.name in ['b', 'strong'] or bool(element.find(['b', 'strong'])),
+                    'style_italic': element.name in ['i', 'em'] or bool(element.find(['i', 'em'])),
+                    'style_underline': element.name == 'u' or bool(element.find('u')),
+                    'font_size': element.get('style', '').split('font-size:')[-1].split(';')[0].strip() if 'font-size:' in element.get('style', '') else None,
+                    'color': element.get('style', '').split('color:')[-1].split(';')[0].strip() if 'color:' in element.get('style', '') else None
+                })
                 
-                # Now also create Arrow-style tables inside DuckDB if PyArrow is available
-                arrow_elements = 0
-                if PYARROW_AVAILABLE:
-                    progress.setLabelText("Creating rich metadata tables...")
-                    progress.setValue(60)
-                    
-                    # Create Arrow-style tables directly in DuckDB
-                    soup = BeautifulSoup(content_html, 'html.parser')
-                    
-                    # Prepare data for style metadata table
-                    style_data = []
-                    semantic_data = []
-                    element_order = 0
-                    
-                    for element in soup.find_all(['h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p', 'table', 'ul', 'ol', 'li', 'div']):
-                        if not element.get_text(strip=True):
-                            continue
-                        
-                        element_id = f"{export_id}_{element_order:04d}"
-                        
-                        # Extract style information
-                        style_info = {
-                            'element_id': element_id,
-                            'style_bold': element.name in ['b', 'strong'] or bool(element.find(['b', 'strong'])),
-                            'style_italic': element.name in ['i', 'em'] or bool(element.find(['i', 'em'])),
-                            'style_underline': element.name == 'u' or bool(element.find('u')),
-                            'font_size': None,
-                            'color': None
-                        }
-                        
-                        # Extract inline styles if present
-                        style_attr = element.get('style', '')
-                        if style_attr:
-                            styles = dict(item.split(':') for item in style_attr.split(';') if ':' in item)
-                            style_info['font_size'] = styles.get('font-size', '').strip() or None
-                            style_info['color'] = styles.get('color', '').strip() or None
-                        
-                        style_data.append(style_info)
-                        
-                        # Semantic analysis
-                        text = element.get_text(strip=True).lower()
-                        semantic_role = 'body_text'
-                        
-                        if element.name in ['h1', 'h2', 'h3', 'h4', 'h5', 'h6']:
-                            semantic_role = 'header'
-                        elif element.name == 'table':
-                            semantic_role = 'data_table'
-                        elif element.name in ['ul', 'ol', 'li']:
-                            semantic_role = 'list'
-                        elif element.name == 'p':
-                            if any(term in text for term in ['revenue', 'income', 'profit', 'loss', 'cost', 'expense', '$']):
-                                semantic_role = 'financial_text'
-                            elif re.search(r'\b\d{4}\b|\b\d{1,2}/\d{1,2}/\d{2,4}\b', text):
-                                semantic_role = 'dated_text'
-                            elif text.strip().endswith('?'):
-                                semantic_role = 'question'
-                            elif len(text.split()) < 10:
-                                semantic_role = 'caption'
-                        
-                        semantic_data.append({
-                            'element_id': element_id,
-                            'semantic_role': semantic_role,
-                            'confidence_score': 0.95,  # Fixed high confidence for rule-based classification
-                            'word_count': len(element.get_text(strip=True).split()),
-                            'char_count': len(element.get_text(strip=True))
-                        })
-                        
-                        element_order += 1
-                        arrow_elements += 1
-                    
-                    # Create tables in DuckDB
-                    if style_data:
-                        style_df = pd.DataFrame(style_data)
-                        exporter.conn.execute("CREATE TABLE IF NOT EXISTS chonker_styles (element_id TEXT, style_bold BOOLEAN, style_italic BOOLEAN, style_underline BOOLEAN, font_size TEXT, color TEXT)")
-                        exporter.conn.execute("INSERT INTO chonker_styles SELECT * FROM style_df")
-                        
-                        semantic_df = pd.DataFrame(semantic_data)
-                        exporter.conn.execute("CREATE TABLE IF NOT EXISTS chonker_semantics (element_id TEXT, semantic_role TEXT, confidence_score DOUBLE, word_count INTEGER, char_count INTEGER)")
-                        exporter.conn.execute("INSERT INTO chonker_semantics SELECT * FROM semantic_df")
-                        
-                        # Create indexes for efficient querying
-                        exporter.conn.execute("CREATE INDEX IF NOT EXISTS idx_styles_bold ON chonker_styles(style_bold)")
-                        exporter.conn.execute("CREATE INDEX IF NOT EXISTS idx_semantics_role ON chonker_semantics(semantic_role)")
-                        exporter.conn.execute("CREATE INDEX IF NOT EXISTS idx_styles_element ON chonker_styles(element_id)")
-                        exporter.conn.execute("CREATE INDEX IF NOT EXISTS idx_semantics_element ON chonker_semantics(element_id)")
-                    
-                    # Query examples are in the README
+                # Semantic analysis
+                text = element.get_text(strip=True).lower()
+                semantic_role = 'body_text'
                 
-                progress.setValue(100)
-                progress.close()
+                if element.name in ['h1', 'h2', 'h3', 'h4', 'h5', 'h6']:
+                    semantic_role = 'header'
+                elif element.name == 'table':
+                    semantic_role = 'data_table'
+                elif element.name in ['ul', 'ol', 'li']:
+                    semantic_role = 'list'
+                elif element.name == 'p':
+                    if any(term in text for term in ['revenue', 'income', 'profit', 'loss', 'cost', 'expense', '$']):
+                        semantic_role = 'financial_text'
+                    elif re.search(r'\b\d{4}\b|\b\d{1,2}/\d{1,2}/\d{2,4}\b', text):
+                        semantic_role = 'dated_text'
+                    elif text.strip().endswith('?'):
+                        semantic_role = 'question'
+                    elif len(text.split()) < 10:
+                        semantic_role = 'caption'
                 
-                # Show success message
-                QMessageBox.information(self, "Export Successful", f"Exported {stats[0]} rows to {os.path.basename(file_path)}")
-                self.log(f"Exported to: {file_path} (unified export with all metadata)")
+                semantic_data.append({
+                    'element_id': element_id,
+                    'semantic_role': semantic_role,
+                    'confidence_score': 0.95,
+                    'word_count': len(element.get_text(strip=True).split()),
+                    'char_count': len(element.get_text(strip=True))
+                })
+                
+                element_order += 1
+            
+            progress.setValue(60)
+            
+            # Convert to PyArrow tables and save as Parquet
+            import pyarrow as pa
+            import pyarrow.parquet as pq
+            
+            # Export metadata table
+            export_table = pa.Table.from_pandas(pd.DataFrame(export_data))
+            pq.write_table(export_table, os.path.join(export_path, 'chonker_exports.parquet'))
+            
+            # Content table
+            content_table = pa.Table.from_pandas(pd.DataFrame(content_data))
+            pq.write_table(content_table, os.path.join(export_path, 'chonker_content.parquet'))
+            
+            progress.setValue(80)
+            
+            # Style table
+            style_table = pa.Table.from_pandas(pd.DataFrame(style_data))
+            pq.write_table(style_table, os.path.join(export_path, 'chonker_styles.parquet'))
+            
+            # Semantics table
+            semantic_table = pa.Table.from_pandas(pd.DataFrame(semantic_data))
+            pq.write_table(semantic_table, os.path.join(export_path, 'chonker_semantics.parquet'))
+            
+            progress.setValue(100)
+            progress.close()
+            
+            # Show success message
+            QMessageBox.information(self, "Export Successful", 
+                f"Exported {len(content_data)} elements to Parquet files in:\n{export_path}")
+            self.log(f"Exported to Parquet: {export_path}")
             
         except Exception as e:
             progress.close()
@@ -1004,7 +1011,7 @@ class ChonkerApp(QMainWindow):
                 "Cmd+O: Open PDF from File\n"
                 "Cmd+U: Open PDF from URL\n"
                 "Cmd+P: Process Document\n"
-                "Cmd+E: Export to DuckDB\n"
+                "Cmd+E: Export to Parquet\n"
                 "Cmd+F: Toggle Search\n"
                 "Cmd+Plus/Minus: Zoom\n"
                 "?: This help")
@@ -1150,10 +1157,10 @@ class ChonkerApp(QMainWindow):
         
         file_menu.addSeparator()
         
-        export_sql_action = QAction("Export to SQL", self)
-        export_sql_action.setShortcut(QKeySequence("Ctrl+E"))
-        export_sql_action.triggered.connect(self.export_to_sql)
-        file_menu.addAction(export_sql_action)
+        export_parquet_action = QAction("Export to Parquet", self)
+        export_parquet_action.setShortcut(QKeySequence("Ctrl+E"))
+        export_parquet_action.triggered.connect(self.export_to_parquet)
+        file_menu.addAction(export_parquet_action)
         
         export_csv_action = QAction("Export to CSV", self)
         export_csv_action.triggered.connect(self.export_to_csv)
@@ -1278,9 +1285,9 @@ class ChonkerApp(QMainWindow):
         process_btn.clicked.connect(self.process_current)
         process_btn.setStyleSheet(action_button_style)
         
-        export_btn = QPushButton("Export to .duckdb")
-        export_btn.setToolTip("Export quality-controlled content to SQL (Cmd+E)")
-        export_btn.clicked.connect(self.export_to_sql)
+        export_btn = QPushButton("Export to Parquet")
+        export_btn.setToolTip("Export quality-controlled content to Parquet (Cmd+E)")
+        export_btn.clicked.connect(self.export_to_parquet)
         export_btn.setEnabled(False)  # Disabled until processing is done
         export_btn.setShortcut(QKeySequence("Ctrl+E"))  # Ctrl+E maps to Cmd+E on Mac
         export_btn.setStyleSheet(action_button_style)
@@ -1807,307 +1814,6 @@ class ChonkerApp(QMainWindow):
         
         event.accept()
 
-try:
-    import duckdb
-    import pandas as pd
-    DUCKDB_AVAILABLE = True
-except ImportError:
-    DUCKDB_AVAILABLE = False
-
-class ChonkerSQLExporter:
-    
-    def __init__(self, db_path: str = "chonker_output.duckdb", chunk_size_mb: int = 50):
-        if not DUCKDB_AVAILABLE:
-            raise ImportError("🐹 *cough* DuckDB not installed! Run: uv pip install duckdb pandas")
-        
-        self.db_path = db_path
-        self.chunk_size_mb = chunk_size_mb * 1024 * 1024  # Convert to bytes
-        self.conn = duckdb.connect(db_path)
-        self._init_metadata_table()
-        self.current_chunk = 0
-        self.chunk_paths = []  # Track chunk DB paths
-        self.current_size = 0
-    
-    def __enter__(self):
-        return self
-    
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        self.close()
-    
-    def close(self):
-        if hasattr(self, 'conn') and self.conn:
-            self.conn.close()
-            self.conn = None
-    
-    def _init_metadata_table(self):
-        self.conn.execute("CREATE TABLE IF NOT EXISTS chonker_exports ( export_id TEXT PRIMARY KEY, source_pdf TEXT, export_name TEXT, original_html TEXT, edited_html TEXT, content_type TEXT, content_hash TEXT, exported_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, qc_user TEXT, edit_count INTEGER DEFAULT 0, metadata JSON )")
-        
-        # Create structured content table for parsed elements
-        self.conn.execute("CREATE TABLE IF NOT EXISTS chonker_content ( content_id TEXT PRIMARY KEY, export_id TEXT, element_type TEXT, element_order INTEGER, element_text TEXT, element_html TEXT, element_metadata JSON, chunk_number INTEGER DEFAULT 0, FOREIGN KEY (export_id) REFERENCES chonker_exports(export_id) )")
-        
-        # Create chunk tracking table
-        self.conn.execute("CREATE TABLE IF NOT EXISTS chonker_chunks ( chunk_id INTEGER PRIMARY KEY, export_id TEXT, chunk_path TEXT, start_element INTEGER, end_element INTEGER, chunk_size INTEGER, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY (export_id) REFERENCES chonker_exports(export_id) )")
-    
-    def _create_chunk_db(self, export_id: str) -> duckdb.DuckDBPyConnection:
-        self.current_chunk += 1
-        chunk_path = self.db_path.replace('.duckdb', f'_chunk{self.current_chunk:03d}.duckdb')
-        self.chunk_paths.append(chunk_path)
-        
-        chunk_conn = duckdb.connect(chunk_path)
-        
-        # Create content table in chunk
-        chunk_conn.execute("CREATE TABLE chonker_content ( content_id TEXT PRIMARY KEY, export_id TEXT, element_type TEXT, element_order INTEGER, element_text TEXT, element_html TEXT, element_metadata JSON, chunk_number INTEGER )")
-        
-        # Track chunk in main DB
-        self.conn.execute("INSERT INTO chonker_chunks (chunk_id, export_id, chunk_path, chunk_size) VALUES (?, ?, ?, 0)", [self.current_chunk, export_id, chunk_path])
-        
-        return chunk_conn
-    
-    def _infer_schema(self, html_table: str) -> tuple[pd.DataFrame, dict]:
-        # Parse HTML table
-        dfs = pd.read_html(html_table)
-        if not dfs:
-            raise ValueError("No tables found in HTML")
-        
-        df = dfs[0]
-        
-        # Infer types
-        schema = {}
-        for col in df.columns:
-            # Try numeric first
-            try:
-                df[col] = pd.to_numeric(df[col])
-                if df[col].dtype == 'int64':
-                    schema[col] = 'INTEGER'
-                else:
-                    schema[col] = 'DOUBLE'
-            except (ValueError, TypeError):
-                # Try datetime
-                try:
-                    df[col] = pd.to_datetime(df[col])
-                    schema[col] = 'TIMESTAMP'
-                except (ValueError, TypeError):
-                    # Default to text
-                    schema[col] = 'VARCHAR'
-        
-        return df, schema
-    
-    def export_content(self, html_content: str, source_pdf: str, 
-                      export_name: str = None, qc_user: str = "user", 
-                      content_type: str = "full_document") -> str:
-        try:
-            # Generate export ID
-            timestamp = datetime.now()
-            export_id = f"{os.path.basename(source_pdf).replace('.pdf', '')}_{timestamp.strftime('%Y%m%d_%H%M%S')}"
-            export_id = re.sub(r'[^a-zA-Z0-9_]', '_', export_id)
-            
-            # Generate export name if not provided
-            if not export_name:
-                export_name = f"export_{export_id}"
-            
-            # Parse HTML to extract structured content
-            soup = BeautifulSoup(html_content, 'html.parser')
-            
-            # Calculate content hash for tracking edits
-            content_hash = hashlib.sha256(html_content.encode()).hexdigest()[:16]
-            
-            # Check if this exact content was already exported
-            existing = self.conn.execute(
-                "SELECT export_id FROM chonker_exports WHERE content_hash = ?",
-                [content_hash]
-            ).fetchone()
-            
-            if existing:
-                return existing[0]
-            
-            # Extract metadata
-            metadata = {
-                'source_pdf': source_pdf,
-                'export_time': timestamp.isoformat(),
-                'total_elements': 0,
-                'element_types': {}
-            }
-            
-            # Insert main export record
-            self.conn.execute("INSERT INTO chonker_exports (export_id, source_pdf, export_name, original_html, edited_html, content_type, content_hash, qc_user, metadata) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", [
-                export_id,
-                source_pdf,
-                export_name,
-                html_content[:10000],  # Store first 10KB for reference
-                html_content[:10000],  # Edited version (same initially)
-                content_type,
-                content_hash,
-                qc_user,
-                json.dumps(metadata)
-            ])
-            
-            # Parse and store structured content
-            element_order = 0
-            current_conn = self.conn
-            chunk_element_count = 0
-            
-            # Check if we need chunking based on HTML size
-            needs_chunking = len(html_content.encode('utf-8')) > 200 * 1024 * 1024  # 200MB
-            
-            # Process all elements in order
-            for element in soup.find_all(['h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p', 'table', 'ul', 'ol', 'div']):
-                element_type = element.name
-                element_text = element.get_text(strip=True)
-                element_html = str(element)
-                
-                # Skip empty elements
-                if not element_text:
-                    continue
-                
-                # Track element types
-                metadata['element_types'][element_type] = metadata['element_types'].get(element_type, 0) + 1
-                metadata['total_elements'] += 1
-                
-                # Check if we need to create a new chunk
-                element_size = len(element_text.encode('utf-8')) + len(element_html.encode('utf-8'))
-                if needs_chunking and self.current_size + element_size > self.chunk_size_mb:
-                    # Update chunk end element in main DB
-                    if self.current_chunk > 0:
-                        self.conn.execute("UPDATE chonker_chunks SET end_element = ?, chunk_size = ? WHERE chunk_id = ? AND export_id = ?", [element_order - 1, self.current_size, self.current_chunk, export_id])
-                    
-                    # Create new chunk
-                    current_conn = self._create_chunk_db(export_id)
-                    
-                    # Update chunk start element
-                    self.conn.execute("UPDATE chonker_chunks SET start_element = ? WHERE chunk_id = ? AND export_id = ?", [element_order, self.current_chunk, export_id])
-                    
-                    self.current_size = 0
-                    chunk_element_count = 0
-                
-                # Generate content ID
-                content_id = f"{export_id}_{element_order:04d}"
-                
-                # Store element metadata
-                element_meta = {
-                    'tag': element_type,
-                    'classes': element.get('class', []),
-                    'id': element.get('id'),
-                    'char_count': len(element_text)
-                }
-                
-                # Special handling for tables
-                if element_type == 'table':
-                    rows = element.find_all('tr')
-                    cols = len(rows[0].find_all(['td', 'th'])) if rows else 0
-                    element_meta['rows'] = len(rows)
-                    element_meta['cols'] = cols
-                
-                # Insert structured content to appropriate database
-                target_conn = current_conn if needs_chunking and self.current_chunk > 0 else self.conn
-                target_conn.execute("INSERT INTO chonker_content (content_id, export_id, element_type, element_order, element_text, element_html, element_metadata, chunk_number) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", [
-                    content_id,
-                    export_id,
-                    element_type,
-                    element_order,
-                    element_text[:5000],  # Limit text size
-                    element_html[:10000],  # Limit HTML size
-                    json.dumps(element_meta),
-                    self.current_chunk
-                ])
-                
-                self.current_size += element_size
-                chunk_element_count += 1
-                element_order += 1
-            
-            # Update final chunk info
-            if needs_chunking and self.current_chunk > 0:
-                self.conn.execute("UPDATE chonker_chunks SET end_element = ?, chunk_size = ? WHERE chunk_id = ? AND export_id = ?", [element_order - 1, self.current_size, self.current_chunk, export_id])
-                
-                # Close chunk connection
-                if current_conn != self.conn:
-                    current_conn.close()
-            
-            # Update metadata with chunk info
-            if self.chunk_paths:
-                metadata['chunks'] = {
-                    'total_chunks': len(self.chunk_paths),
-                    'chunk_files': self.chunk_paths,
-                    'chunk_size_mb': self.chunk_size_mb / (1024 * 1024)
-                }
-            
-            # Update metadata
-            self.conn.execute("UPDATE chonker_exports SET metadata = ? WHERE export_id = ?", [json.dumps(metadata), export_id])
-            
-            # Export to Parquet for portability (optional)
-            export_base_dir = os.path.join(os.path.dirname(self.db_path), "exports")
-            os.makedirs(export_base_dir, exist_ok=True)
-            
-            try:
-                # Export main record
-                export_df = self.conn.execute(
-                    "SELECT * FROM chonker_exports WHERE export_id = ?", 
-                    [export_id]
-                ).df()
-                export_df.to_parquet(os.path.join(export_base_dir, f"{export_id}_metadata.parquet"))
-                
-                # Export content
-                content_df = self.conn.execute(
-                    "SELECT * FROM chonker_content WHERE export_id = ? ORDER BY element_order", 
-                    [export_id]
-                ).df()
-                content_df.to_parquet(os.path.join(export_base_dir, f"{export_id}_content.parquet"))
-                parquet_exported = True
-            except Exception:
-                content_df = self.conn.execute(
-                    "SELECT * FROM chonker_content WHERE export_id = ? ORDER BY element_order", 
-                    [export_id]
-                ).df()
-                parquet_exported = False
-            
-            # Also export as single JSON for easy consumption
-            export_json = {
-                'export_id': export_id,
-                'metadata': metadata,
-                'content': []
-            }
-            
-            for _, row in content_df.iterrows():
-                export_json['content'].append({
-                    'type': row['element_type'],
-                    'text': row['element_text'],
-                    'html': row['element_html'],
-                    'metadata': json.loads(row['element_metadata'])
-                })
-            
-            with open(os.path.join(export_base_dir, f"{export_id}.json"), 'w') as f:
-                json.dump(export_json, f, indent=2)
-            
-            # Return export ID and parquet status
-            self._parquet_exported = parquet_exported
-            return export_id
-        except Exception:
-            raise
-    
-    def get_api_ready_json(self, table_name: str) -> str:
-        result = self.conn.execute(f"SELECT * FROM {table_name}").fetchall()
-        columns = [desc[0] for desc in self.conn.description]
-        
-        data = []
-        for row in result:
-            data.append(dict(zip(columns, row)))
-        
-        return json.dumps(data, indent=2, default=str)
-    
-    def generate_crud_sql(self, table_name: str) -> dict:
-        schema = self.conn.execute(f"DESCRIBE {table_name}").fetchall()
-        
-        columns = [col[0] for col in schema]
-        placeholders = ['?' for _ in columns]
-        
-        return {
-            'create': f"INSERT INTO {table_name} ({', '.join(columns)}) VALUES ({', '.join(placeholders)})",
-            'read': f"SELECT * FROM {table_name} WHERE id = ?",
-            'update': f"UPDATE {table_name} SET {', '.join([f'{col} = ?' for col in columns])} WHERE id = ?",
-            'delete': f"DELETE FROM {table_name} WHERE id = ?",
-            'schema': schema
-        }
-
-
 def main():
     def handle_exception(exc_type, exc_value, exc_traceback):
         if issubclass(exc_type, KeyboardInterrupt):
@@ -2128,9 +1834,9 @@ def main():
     if hasattr(window, 'chonker_pixmap'):
         app.setWindowIcon(QIcon(window.chonker_pixmap))
     window.show()
+    window.raise_()
+    window.activateWindow()
     sys.exit(app.exec())
-
 
 if __name__ == "__main__":
     main()
-
