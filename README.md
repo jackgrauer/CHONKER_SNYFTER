@@ -1,12 +1,12 @@
 # CHONKER 🐹
 
-Elegant PDF processing with hamster wisdom. Extract, edit, and export PDF content to SQL databases.
+Elegant PDF processing with hamster wisdom. Extract, edit, and export PDF content to Parquet format for high-performance analysis.
 
 ## Features
 
 - **ML-Powered Extraction**: Process PDFs with Docling's advanced ML models
 - **Quality Control**: Edit and refine extracted content before export
-- **Multi-Format Export**: Save to DuckDB, Arrow Dataset, JSON, or CSV
+- **Parquet Export**: Export to columnar Parquet format for blazing-fast analysis
 - **Clean UI**: Minimalist PyQt6 interface with hamster charm
 - **Fast**: Powered by uv package manager (10-100x faster than pip)
 
@@ -37,26 +37,61 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 
 ## Keyboard Shortcuts
 
-- **Cmd+O**: Open PDF
-- **Cmd+P**: Process document
-- **Cmd+E**: Export (creates both SQL database and Arrow dataset)
+- **Cmd+O**: Open PDF from File
+- **Cmd+U**: Open PDF from URL
+- **Cmd+P**: Extract to HTML
+- **Cmd+E**: Export to Parquet
+- **Cmd+F**: Toggle Search
 - **Cmd+Q**: Quit application
 
-## Export Formats
+## Export Format: Parquet
 
-- **DuckDB Export (Cmd+E)**: Single `.duckdb` file containing:
-  - All document content and structure
-  - Style metadata (bold, italic, colors, fonts)
-  - Semantic classifications (headers, financial text, etc.)
-  - Edit history and version tracking
-  - Full SQL query capabilities with JOINs
-- **CSV Export**: Simple tabular format for spreadsheets
+When you export (Cmd+E), CHONKER creates a directory with 4 Parquet files:
+
+### 1. `chonker_exports.parquet`
+Export metadata including:
+- Export ID and timestamp
+- Source PDF path
+- Original and edited HTML (for change tracking)
+- User who performed QC
+- Edit count
+
+### 2. `chonker_content.parquet`
+Document structure and content:
+- Element type (h1, p, table, etc.)
+- Element order (preserves document flow)
+- Full text content
+- Complete HTML with formatting
+- Page numbers
+- Metadata (level, position)
+
+### 3. `chonker_styles.parquet`
+Text formatting information:
+- Bold, italic, underline flags
+- Font sizes
+- Text colors
+- Preserves all visual styling
+
+### 4. `chonker_semantics.parquet`
+Content classification:
+- Semantic roles (header, financial_text, data_table, etc.)
+- Word and character counts
+- Confidence scores
+- Enables intelligent filtering
+
+### Why Parquet?
+
+- **10-100x faster** queries than row-based formats
+- **70% smaller** files due to columnar compression
+- **Universal support** - works with Python, R, Rust, SQL engines
+- **Cloud-native** - integrates with S3, BigQuery, Snowflake
+- **Perfect for SNYFTER** - Rust-based analysis tool for financial documents
 
 ## Project Structure
 
 ```
 CHONKER/
-├── chonker.py                     # Main application (1,745 lines)
+├── chonker.py                     # Main application (1,842 lines)
 ├── assets/emojis/chonker.png      # UI icon
 ├── pyproject.toml                  # Modern Python config
 ├── requirements.txt                # Dependencies
@@ -89,48 +124,62 @@ just format
 just clean
 ```
 
-## Unified Export (Cmd+E)
+## Using the Parquet Export
 
-CHONKER exports EVERYTHING into a single `.duckdb` file with multiple tables:
-
-**Tables in your export:**
-- `chonker_content` - Full text, HTML, and document structure
-- `chonker_exports` - Export metadata and edit history
-- `chonker_styles` - Style information (bold, italic, colors, fonts)
-- `chonker_semantics` - Semantic roles (headers, financial text, etc.)
-
-**Example queries:**
+### Python Example
 ```python
-import duckdb
-conn = duckdb.connect("your_export.duckdb")
+import pandas as pd
+import pyarrow.parquet as pq
 
-# Find all bold headers about revenue
-bold_revenue = conn.execute("""
-    SELECT c.element_text, s.style_bold, sem.semantic_role
-    FROM chonker_content c
-    JOIN chonker_styles s ON c.content_id = s.element_id
-    JOIN chonker_semantics sem ON c.content_id = sem.element_id
-    WHERE s.style_bold = true 
-    AND sem.semantic_role = 'header'
-    AND c.element_text LIKE '%revenue%'
-""").df()
+# Read the exported data
+content = pd.read_parquet('output/chonker_content.parquet')
+styles = pd.read_parquet('output/chonker_styles.parquet')
+semantics = pd.read_parquet('output/chonker_semantics.parquet')
 
-# Get all edited financial paragraphs
-edited_financial = conn.execute("""
-    SELECT c.element_text, e.edit_count, sem.word_count
-    FROM chonker_content c
-    JOIN chonker_exports e ON c.export_id = e.export_id
-    JOIN chonker_semantics sem ON c.content_id = sem.element_id
-    WHERE e.edit_count > 0 
-    AND sem.semantic_role = 'financial_text'
-""").df()
+# Find all bold financial text
+bold_financial = content.merge(styles, left_on='content_id', right_on='element_id') \
+                       .merge(semantics, on='element_id') \
+                       .query("style_bold == True and semantic_role == 'financial_text'")
+
+# Get all headers from page 5
+page5_headers = content[
+    (content['element_type'].isin(['h1', 'h2', 'h3'])) & 
+    (content['element_metadata'].str.contains('"page": 5'))
+]
 ```
 
-One file. All your data. Full SQL power.
+### Rust/SNYFTER Example
+```rust
+use arrow::record_batch::RecordBatch;
+use parquet::arrow::ArrowReader;
 
-## Recent Updates (2025-07-20)
+// Lightning-fast columnar analytics
+let content = ParquetReader::new("chonker_content.parquet")?;
+let financial_elements = content
+    .filter(|row| row.semantic_role == "financial_text")
+    .select(&["element_text", "page"])
+    .collect();
+```
 
-- **Unified Export**: Single command creates both DuckDB and Arrow datasets
+### DuckDB Query
+```sql
+-- Query Parquet files directly without loading
+SELECT c.element_text, s.style_bold, sem.semantic_role
+FROM 'output/chonker_content.parquet' c
+JOIN 'output/chonker_styles.parquet' s ON c.content_id = s.element_id
+JOIN 'output/chonker_semantics.parquet' sem ON c.element_id = sem.element_id
+WHERE s.style_bold = true AND sem.semantic_role = 'header';
+```
+
+## Recent Updates
+
+### 2025-07-24
+- **Parquet Export**: Replaced DuckDB with columnar Parquet format
+- **URL Support**: Open PDFs directly from web URLs (Cmd+U)
+- **Enhanced Search**: Next/previous navigation with match counting
+- **Code Reduction**: From 2,432 to 1,842 lines while adding features
+
+### 2025-07-20
 - **Migrated to uv**: Replaced pip with the blazing-fast uv package manager
 - **Cleaned codebase**: Removed 40+ unnecessary files, keeping only essentials
 - **Modern Python setup**: Added pyproject.toml for standard Python packaging
