@@ -115,7 +115,7 @@ class DocumentProcessor(QThread):
     chunk_processed = pyqtSignal(int, int)
     ocr_needed = pyqtSignal()
     
-    def __init__(self, pdf_path: str, use_ocr: bool = False):
+    def __init__(self, pdf_path: str, use_ocr: bool = True):
         super().__init__()
         self.pdf_path = pdf_path
         self._stop_event = threading.Event()  # Thread-safe stop flag
@@ -1156,9 +1156,9 @@ class ChonkerApp(QMainWindow):
     
     def process_multiple_files(self, pdf_files):
         """Process multiple PDF files and display all results in the right pane"""
-        # Check if OCR mode from shift key
+        # OCR mode is now default, shift key disables it
         modifiers = QApplication.keyboardModifiers()
-        use_ocr = modifiers == Qt.KeyboardModifier.ShiftModifier
+        use_ocr = not (modifiers == Qt.KeyboardModifier.ShiftModifier)
         
         # Clear the right pane
         self.faithful_output.clear()
@@ -1934,9 +1934,9 @@ class ChonkerApp(QMainWindow):
         
         # Start processing with thread safety
         try:
-            # Create new processor - Toggle OCR with Shift key
-            use_ocr = bool(QApplication.keyboardModifiers() & Qt.KeyboardModifier.ShiftModifier)
-            self.log(f"🔧 OCR Mode: {'ENABLED' if use_ocr else 'DISABLED'} (hold Shift to toggle)")
+            # Create new processor - OCR is default, Shift disables it
+            use_ocr = not bool(QApplication.keyboardModifiers() & Qt.KeyboardModifier.ShiftModifier)
+            self.log(f"🔧 OCR Mode: {'ENABLED' if use_ocr else 'DISABLED'} (hold Shift to disable)")
             self.processor = DocumentProcessor(file_path, use_ocr=use_ocr)
             
             # Connect signals (no need to disconnect - it's a new object)
