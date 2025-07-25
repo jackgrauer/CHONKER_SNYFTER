@@ -1816,18 +1816,18 @@ class ChonkerApp(QMainWindow):
                 file_path = file_paths[0]
                 # Check file size before opening
                 file_size_mb = self._validate_file_size(file_path, "open")
-            if file_size_mb is None:
-                return
+                if file_size_mb is None:
+                    return
+                    
+                self.log(f"Opening PDF: {os.path.basename(file_path)} ({file_size_mb:.1f} MB)")
                 
-            self.log(f"Opening PDF: {os.path.basename(file_path)} ({file_size_mb:.1f} MB)")
-            
-            # Show loading message
-            self.log("Loading PDF...")
-            QApplication.processEvents()  # Update UI immediately
-            
-            # Create embedded PDF viewer in left pane
-            self.create_embedded_pdf_viewer(file_path)
-            self.current_pdf_path = file_path
+                # Show loading message
+                self.log("Loading PDF...")
+                QApplication.processEvents()  # Update UI immediately
+                
+                # Create embedded PDF viewer in left pane
+                self.create_embedded_pdf_viewer(file_path)
+                self.current_pdf_path = file_path
     
     def create_embedded_pdf_viewer(self, file_path: str):
         # Clear left pane
