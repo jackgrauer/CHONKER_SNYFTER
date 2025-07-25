@@ -41,7 +41,7 @@ from PyQt6.QtWidgets import (
     QPushButton, QFileDialog, QMessageBox, QTextEdit, QLabel, 
     QSplitter, QDialog, QMenuBar, QMenu, QToolBar, QStatusBar,
     QGroupBox, QTreeWidget, QTreeWidgetItem, QProgressDialog, QSizePolicy,
-    QInputDialog, QLineEdit
+    QInputDialog, QLineEdit, QListWidget, QListWidgetItem, QDialogButtonBox
 )
 from PyQt6.QtCore import (
     Qt, QThread, pyqtSignal, QTimer, QPointF, QObject, QEvent,
@@ -621,6 +621,94 @@ class DocumentProcessor(QThread):
         self.error.emit(str(error))
         self.finished.emit(error_result)
 
+class ProcessBatchDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("🐹 CHONKER Batch Processing")
+        self.setFixedSize(600, 400)
+        
+        layout = QVBoxLayout()
+        
+        # File list
+        layout.addWidget(QLabel("📁 Selected PDFs for processing:"))
+        self.file_list = QListWidget()
+        layout.addWidget(self.file_list)
+        
+        # Add/Remove buttons
+        button_layout = QHBoxLayout()
+        self.add_btn = QPushButton("➕ Add PDFs")
+        self.add_btn.clicked.connect(self.add_files)
+        self.remove_btn = QPushButton("➖ Remove Selected")
+        self.remove_btn.clicked.connect(self.remove_selected)
+        self.clear_btn = QPushButton("🗑️ Clear All")
+        self.clear_btn.clicked.connect(self.file_list.clear)
+        
+        button_layout.addWidget(self.add_btn)
+        button_layout.addWidget(self.remove_btn)
+        button_layout.addWidget(self.clear_btn)
+        button_layout.addStretch()
+        layout.addLayout(button_layout)
+        
+        # Output format selection
+        format_layout = QHBoxLayout()
+        format_layout.addWidget(QLabel("📄 Output format:"))
+        self.output_format = QLineEdit("parquet")
+        self.output_format.setPlaceholderText("parquet, html, or markdown")
+        format_layout.addWidget(self.output_format)
+        layout.addLayout(format_layout)
+        
+        # OCR mode checkbox
+        self.ocr_checkbox = QPushButton("🔍 OCR Mode: OFF")
+        self.ocr_checkbox.setCheckable(True)
+        self.ocr_checkbox.toggled.connect(self.toggle_ocr_mode)
+        layout.addWidget(self.ocr_checkbox)
+        
+        # Dialog buttons
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | 
+            QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+        
+        self.setLayout(layout)
+        self.selected_files = []
+        
+    def toggle_ocr_mode(self, checked):
+        if checked:
+            self.ocr_checkbox.setText("🔍 OCR Mode: ON")
+        else:
+            self.ocr_checkbox.setText("🔍 OCR Mode: OFF")
+    
+    def add_files(self):
+        files, _ = QFileDialog.getOpenFileNames(
+            self,
+            "Select PDF files",
+            "",
+            "PDF Files (*.pdf)"
+        )
+        
+        for file in files:
+            if file not in self.selected_files:
+                self.selected_files.append(file)
+                self.file_list.addItem(os.path.basename(file))
+    
+    def remove_selected(self):
+        for item in self.file_list.selectedItems():
+            idx = self.file_list.row(item)
+            self.file_list.takeItem(idx)
+            if idx < len(self.selected_files):
+                self.selected_files.pop(idx)
+    
+    def get_settings(self):
+        return {
+            'files': self.selected_files,
+            'output_format': self.output_format.text() or 'parquet',
+            'use_ocr': self.ocr_checkbox.isChecked()
+        }
+
+
 class ChonkerApp(QMainWindow):
     """Main application window"""
     
@@ -1153,11 +1241,140 @@ class ChonkerApp(QMainWindow):
             self.create_embedded_pdf_viewer(pdf_files[0])
             self.current_pdf_path = pdf_files[0]
     
+    def open_batch_dialog(self):
+        dialog = ProcessBatchDialog(self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            settings = dialog.get_settings()
+            if settings['files']:
+                self.process_batch(settings['files'], settings['output_format'], settings['use_ocr'])
+    
+    def process_batch(self, pdf_files, output_format='parquet', use_ocr=False):
+        """Process multiple PDF files in batch"""
+        
+        # Create output directory
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        output_dir = os.path.join(os.path.expanduser("~"), f"chonker_batch_{timestamp}")
+        os.makedirs(output_dir, exist_ok=True)
+        
+        # Show progress dialog
+        progress = QProgressDialog("🐹 CHONKER Batch Processing...", "Cancel", 0, len(pdf_files), self)
+        progress.setWindowTitle("Batch Processing")
+        progress.setWindowModality(Qt.WindowModality.WindowModal)
+        progress.setMinimumWidth(400)
+        
+        results = []
+        
+        for idx, pdf_path in enumerate(pdf_files):
+            if progress.wasCanceled():
+                break
+                
+            progress.setLabelText(f"Processing {os.path.basename(pdf_path)}...")
+            progress.setValue(idx)
+            
+            # Create processor thread
+            processor = DocumentProcessor(pdf_path, use_ocr=use_ocr)
+            
+            # Process synchronously for batch mode
+            try:
+                # Convert document
+                if use_ocr:
+                    result = processor._convert_document_with_ocr()
+                else:
+                    result = processor._convert_document()
+                
+                # Extract content
+                chunks, html_content = processor._extract_content(result)
+                
+                # Save based on format
+                base_name = os.path.basename(pdf_path).replace('.pdf', '')
+                
+                if output_format == 'html':
+                    output_file = os.path.join(output_dir, f"{base_name}.html")
+                    with open(output_file, 'w', encoding='utf-8') as f:
+                        f.write(html_content)
+                
+                elif output_format == 'markdown':
+                    output_file = os.path.join(output_dir, f"{base_name}.md")
+                    markdown_content = result.document.export_to_markdown()
+                    with open(output_file, 'w', encoding='utf-8') as f:
+                        f.write(markdown_content)
+                
+                elif output_format == 'parquet':
+                    if PYARROW_AVAILABLE:
+                        # Create parquet structure
+                        parquet_dir = os.path.join(output_dir, f"{base_name}_parquet")
+                        os.makedirs(parquet_dir, exist_ok=True)
+                        
+                        # Convert chunks to dataframe
+                        chunk_data = []
+                        for chunk in chunks:
+                            chunk_data.append({
+                                'index': chunk.index,
+                                'type': chunk.type,
+                                'content': chunk.content,
+                                'page': chunk.metadata.get('page', 0),
+                                'level': chunk.metadata.get('level', 0)
+                            })
+                        
+                        df = pd.DataFrame(chunk_data)
+                        
+                        # Save as parquet
+                        pq.write_table(
+                            pa.Table.from_pandas(df),
+                            os.path.join(parquet_dir, 'chunks.parquet')
+                        )
+                        
+                        # Save metadata
+                        metadata = {
+                            'source_pdf': pdf_path,
+                            'processing_time': datetime.now().isoformat(),
+                            'num_chunks': len(chunks),
+                            'ocr_mode': use_ocr
+                        }
+                        
+                        with open(os.path.join(parquet_dir, 'metadata.json'), 'w') as f:
+                            json.dump(metadata, f, indent=2)
+                        
+                        output_file = parquet_dir
+                    else:
+                        output_file = os.path.join(output_dir, f"{base_name}.html")
+                        with open(output_file, 'w', encoding='utf-8') as f:
+                            f.write(html_content)
+                
+                results.append((pdf_path, 'success', output_file))
+                
+            except Exception as e:
+                results.append((pdf_path, 'error', str(e)))
+                self.terminal.appendPlainText(f"❌ Error processing {os.path.basename(pdf_path)}: {str(e)}")
+        
+        progress.setValue(len(pdf_files))
+        
+        # Show results summary
+        success_count = sum(1 for _, status, _ in results if status == 'success')
+        error_count = len(results) - success_count
+        
+        summary = f"🐹 Batch Processing Complete!\n\n"
+        summary += f"✅ Success: {success_count} files\n"
+        summary += f"❌ Errors: {error_count} files\n\n"
+        summary += f"📁 Output directory: {output_dir}\n\n"
+        
+        if error_count > 0:
+            summary += "Failed files:\n"
+            for pdf_path, status, error in results:
+                if status == 'error':
+                    summary += f"  - {os.path.basename(pdf_path)}: {error}\n"
+        
+        QMessageBox.information(self, "Batch Processing Complete", summary)
+        
+        # Log to terminal
+        self.terminal.appendPlainText(f"\n{summary}")
+    
     def keyPressEvent(self, event):
         if event.key() == Qt.Key.Key_Question:
             QMessageBox.information(self, "Keyboard Shortcuts",
                 "Cmd+O: Open PDF from File\n"
                 "Cmd+U: Open PDF from URL\n"
+                "Cmd+B: Batch Process PDFs\n"
                 "Cmd+P: Process Document\n"
                 "Cmd+E: Export to Parquet\n"
                 "Cmd+F: Toggle Search\n"
@@ -1441,12 +1658,20 @@ class ChonkerApp(QMainWindow):
         export_btn.setStyleSheet(action_button_style)
         self.export_btn = export_btn  # Store reference
         
+        # Batch processing button
+        batch_btn = QPushButton("📦 Batch")
+        batch_btn.setToolTip("Process multiple PDFs at once (Ctrl+B)")
+        batch_btn.clicked.connect(self.open_batch_dialog)
+        batch_btn.setShortcut(QKeySequence("Ctrl+B"))
+        batch_btn.setStyleSheet(action_button_style)
+        
         # Add action buttons directly to main layout
         layout.addWidget(open_file_btn)
         layout.addWidget(open_url_btn)
         layout.addWidget(self.url_input)
         layout.addWidget(process_btn)
         layout.addWidget(export_btn)
+        layout.addWidget(batch_btn)
         
         # Add stretch to push everything left
         layout.addStretch()
