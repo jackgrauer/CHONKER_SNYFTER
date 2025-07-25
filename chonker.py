@@ -108,8 +108,6 @@ class ProcessingResult:
 
 
 class DocumentProcessor(QThread):
-    # Class-level spell checker to avoid reloading
-    _spell_checker = None
     
     finished = pyqtSignal(ProcessingResult)
     progress = pyqtSignal(str)
@@ -544,10 +542,6 @@ class DocumentProcessor(QThread):
         # Get text content
         text = getattr(item, 'text', str(item))
         
-        # Apply spell checking if OCR mode
-        if isinstance(text, str) and hasattr(self, 'use_ocr') and self.use_ocr:
-            text = self._apply_spell_corrections(text)
-        
         return DocumentChunk(
             index=index,
             type=type(item).__name__.lower().replace('item', ''),
@@ -555,59 +549,6 @@ class DocumentProcessor(QThread):
             metadata={'level': level, 'page': page}
         )
     
-    def _apply_spell_corrections(self, text: str) -> str:
-        """Apply intelligent spell corrections using pyspellchecker and difflib"""
-        try:
-            # Skip spell checking for now - it's too slow
-            return text
-            
-            from spellchecker import SpellChecker
-            import difflib
-            
-            # Use cached spell checker
-            if DocumentProcessor._spell_checker is None:
-                DocumentProcessor._spell_checker = SpellChecker()
-                # Add domain-specific words
-                DocumentProcessor._spell_checker.word_frequency.load_words([
-                    'philadelphia', 'permit', 'operating', 'maintenance',
-                    'transmittal', 'payment', 'invoice', 'registration',
-                    'logistics', 'terminal', 'pbf', 'plid', 'op18'
-                ])
-            
-            spell = DocumentProcessor._spell_checker
-            
-            # Process text word by word
-            words = text.split()
-            corrected_words = []
-            
-            for word in words:
-                # Skip if it's a number, code, or has special chars
-                if any(char.isdigit() for char in word) or word.isupper() or '@' in word:
-                    corrected_words.append(word)
-                    continue
-                
-                # Check if word is misspelled
-                word_lower = word.lower()
-                if word_lower not in spell:
-                    # Get correction
-                    correction = spell.correction(word_lower)
-                    
-                    # Use difflib to ensure we're not making wild changes
-                    if correction and difflib.SequenceMatcher(None, word_lower, correction).ratio() > 0.6:
-                        # Preserve original capitalization
-                        if word[0].isupper():
-                            correction = correction.capitalize()
-                        corrected_words.append(correction)
-                    else:
-                        corrected_words.append(word)
-                else:
-                    corrected_words.append(word)
-            
-            return ' '.join(corrected_words)
-            
-        except ImportError:
-            # If spellchecker not installed, return original
-            return text
     
     
     def _item_to_html(self, item, level: int) -> str:
@@ -1576,7 +1517,6 @@ class ChonkerApp(QMainWindow):
         if self.active_pane == 'right':
             old_zoom = self.text_zoom
             self.text_zoom = max(TEXT_ZOOM_MIN, min(TEXT_ZOOM_MAX, self.text_zoom + (2 if delta > 0 else -2)))
-            print(f"DEBUG: Right pane zoom: {old_zoom} → {self.text_zoom}")
             self._apply_zoom()
         elif self.active_pane == 'left' and hasattr(self, 'embedded_pdf_view') and self.embedded_pdf_view:
             factor = 1.1 if delta > 0 else 0.9
