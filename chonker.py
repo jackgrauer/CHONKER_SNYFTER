@@ -119,16 +119,15 @@ class DocumentProcessor(QThread):
     progress = pyqtSignal(str)
     error = pyqtSignal(str)
     chunk_processed = pyqtSignal(int, int)
-    ocr_needed = pyqtSignal()
     
-    def __init__(self, pdf_path: str, use_ocr: bool = True, force_spatial: bool = False):
+    def __init__(self, pdf_path: str, force_spatial: bool = False):
         super().__init__()
         self.pdf_path = pdf_path
         self._stop_event = threading.Event()  # Thread-safe stop flag
         self.start_time = None
         self.timeout_occurred = False
-        self.use_ocr = use_ocr
         self.force_spatial = force_spatial
+        self.debug_messages = []
     
     def stop(self):
         self._stop_event.set()
@@ -166,18 +165,9 @@ class DocumentProcessor(QThread):
             if self._stop_event.is_set() or self._check_timeout():
                 return
             
-            # Check if OCR is needed (only if not already using OCR)
-            if not self.use_ocr and self._detect_scanned_pdf():
-                self.progress.emit("📄 Detected scanned/image PDF - OCR recommended")
-                self.ocr_needed.emit()
-                return  # Will be handled by main window
-            
             # Convert document
             self.progress.emit("🐹 *chomp chomp* Processing document...")
-            if self.use_ocr:
-                result = self._convert_document_with_ocr()
-            else:
-                result = self._convert_document()
+            result = self._convert_document()
             
             # Check if we should stop or timeout
             if self._stop_event.is_set() or self._check_timeout():
@@ -195,7 +185,7 @@ class DocumentProcessor(QThread):
                 html_content=html_content,
                 markdown_content=result.document.export_to_markdown(),
                 processing_time=processing_time,
-                debug_messages=getattr(self, 'ocr_debug_messages', [])
+                debug_messages=self.debug_messages
             )
             
             
@@ -246,227 +236,13 @@ class DocumentProcessor(QThread):
         # Use lazy loading for files over 50MB
         return file_size_mb > 50
     
-    def _detect_scanned_pdf(self) -> bool:
-        try:
-            # Do a quick conversion without OCR to check text density
-            from docling.document_converter import DocumentConverter
-            from docling.datamodel.pipeline_options import PdfPipelineOptions
-            from docling.datamodel.base_models import InputFormat
-            
-            # Configure for quick text extraction (no OCR)
-            pipeline_options = PdfPipelineOptions()
-            pipeline_options.do_ocr = False
-            pipeline_options.do_table_structure = True  # Keep structure detection
-            
-            converter = DocumentConverter(
-                format_options={
-                    InputFormat.PDF: pipeline_options,
-                }
-            )
-            
-            # Convert just first page for quick check
-            result = converter.convert(self.pdf_path, max_pages=1)
-            
-            # Count extracted text
-            total_text = ""
-            if hasattr(result, 'document'):
-                for item, _ in result.document.iterate_items():
-                    if hasattr(item, 'text'):
-                        total_text += str(item.text) + " "
-            
-            # If very little text, likely scanned
-            text_length = len(total_text.strip())
-            self.progress.emit(f"📄 First page text length: {text_length} chars")
-            
-            return text_length < 100  # Threshold for scanned detection
-            
-        except Exception:
-            return False
-    
-    def _convert_document_with_ocr(self):
-        self.ocr_debug_messages = []
-        self.ocr_debug_messages.append("🚀 ENTERING OCR MODE - Image preprocessing enabled!")
-        self.progress.emit("🚀 ENTERING OCR MODE - Image preprocessing enabled!")
-        try:
-            from docling.document_converter import DocumentConverter
-            from docling.datamodel.pipeline_options import PdfPipelineOptions, EasyOcrOptions, TesseractOcrOptions
-            from docling.datamodel.base_models import InputFormat
-            import fitz  # PyMuPDF
-            import tempfile
-            from PIL import Image, ImageEnhance, ImageFilter, ImageOps
-            import io
-            import numpy as np
-            import cv2
-            from scipy import ndimage
-            
-            # First, create a version of the PDF without text layer
-            self.ocr_debug_messages.append("🔧 Preparing PDF for OCR...")
-            self.progress.emit("🔧 Preparing PDF for OCR...")
-            
-            # Open the PDF
-            pdf_doc = fitz.open(self.pdf_path)
-            
-            # Create a temporary PDF with only images (no text)
-            with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as tmp_pdf:
-                tmp_path = tmp_pdf.name
-                
-            # Create new PDF with rendered pages as images
-            new_doc = fitz.open()
-            
-            self.ocr_debug_messages.append(f"📄 Converting {len(pdf_doc)} pages to images...")
-            self.ocr_debug_messages.append("🎨 Using PIL enhancements only: contrast, sharpness, edge enhance")
-            
-            for page_num in range(len(pdf_doc)):
-                page = pdf_doc[page_num]
-                self.ocr_debug_messages.append(f"📄 Processing page {page_num + 1}/{len(pdf_doc)}")
-                
-                # Render page as image at high resolution
-                start_time = time.time()
-                self.ocr_debug_messages.append(f"  🔍 Rendering page {page_num + 1} at 4x resolution...")
-                mat = fitz.Matrix(4.0, 4.0)  # 4x scaling - good balance of quality and size
-                pix = page.get_pixmap(matrix=mat, alpha=False)
-                self.ocr_debug_messages.append(f"    ⏱️ Rendering took {time.time() - start_time:.2f}s")
-                
-                # Convert to PIL Image for enhancement
-                self.ocr_debug_messages.append(f"  🖼️ Converting to PIL image...")
-                img_data = pix.tobytes("png")
-                img = Image.open(io.BytesIO(img_data))
-                
-                # Convert to RGB if necessary
-                if img.mode != 'RGB':
-                    self.ocr_debug_messages.append(f"  🎨 Converting from {img.mode} to RGB...")
-                    img = img.convert('RGB')
-                
-                # Enhance the image for better OCR
-                enhance_start = time.time()
-                self.ocr_debug_messages.append(f"  🎨 Applying simple PIL enhancements...")
-                
-                # 1. Increase contrast
-                enhancer = ImageEnhance.Contrast(img)
-                img = enhancer.enhance(1.8)  # 80% more contrast
-                
-                # 2. Increase sharpness
-                enhancer = ImageEnhance.Sharpness(img)
-                img = enhancer.enhance(2.5)  # More sharpness
-                
-                # 3. Convert to grayscale
-                img = img.convert('L')
-                
-                # 4. Increase brightness slightly
-                enhancer = ImageEnhance.Brightness(img)
-                img = enhancer.enhance(1.1)  # 10% brighter
-                
-                # 5. Apply edge enhance filter
-                img = img.filter(ImageFilter.EDGE_ENHANCE_MORE)
-                
-                # 6. Final sharpen
-                img = img.filter(ImageFilter.SHARPEN)
-                
-                self.ocr_debug_messages.append(f"    ⏱️ Enhancements took {time.time() - enhance_start:.2f}s")
-                
-                # Convert back to bytes
-                self.ocr_debug_messages.append(f"  💾 Saving enhanced image...")
-                
-                # Save debug image if first page
-                if page_num == 0:
-                    debug_img_path = "/tmp/chonker_preprocessed_page1.png"
-                    img.save(debug_img_path, format='PNG', dpi=(600, 600))
-                    self.ocr_debug_messages.append(f"  🔍 Debug: Saved preprocessed image to {debug_img_path}")
-                
-                img_buffer = io.BytesIO()
-                # Save at 600 DPI for maximum quality
-                img.save(img_buffer, format='PNG', dpi=(600, 600))
-                enhanced_img_data = img_buffer.getvalue()
-                
-                # Create new page with same dimensions as original
-                self.ocr_debug_messages.append(f"  📄 Creating new PDF page...")
-                new_page = new_doc.new_page(width=page.rect.width, height=page.rect.height)
-                
-                # Insert the enhanced image
-                self.ocr_debug_messages.append(f"  📎 Inserting image into PDF...")
-                img_rect = new_page.rect
-                new_page.insert_image(img_rect, stream=enhanced_img_data)
-                self.ocr_debug_messages.append(f"  ✅ Page {page_num + 1} complete")
-            
-            # Save the image-only PDF
-            new_doc.save(tmp_path)
-            new_doc.close()
-            pdf_doc.close()
-            
-            # Debug: Verify the new PDF has no text
-            self.ocr_debug_messages.append("🔍 Verifying image-only PDF...")
-            self.progress.emit("🔍 Verifying image-only PDF...")
-            verify_doc = fitz.open(tmp_path)
-            for page_num in range(len(verify_doc)):
-                page = verify_doc[page_num]
-                text = page.get_text()
-                if text.strip():
-                    msg = f"⚠️ Warning: Page {page_num + 1} still has text: {text[:50]}..."
-                    self.ocr_debug_messages.append(msg)
-                    self.progress.emit(msg)
-                else:
-                    msg = f"✅ Page {page_num + 1} has no text layer"
-                    self.ocr_debug_messages.append(msg)
-                    self.progress.emit(msg)
-            verify_doc.close()
-            
-            # Just use default converter - it worked before!
-            converter = DocumentConverter()
-            self.ocr_debug_messages.append("🔧 Using default DocumentConverter")
-            
-            msg1 = f"🔍 Processing image-only PDF: {tmp_path}"
-            msg2 = f"📊 Temp PDF size: {os.path.getsize(tmp_path) / 1024 / 1024:.2f} MB"
-            self.ocr_debug_messages.append(msg1)
-            self.ocr_debug_messages.append(msg2)
-            self.progress.emit(msg1)
-            self.progress.emit(msg2)
-            
-            try:
-                # Convert the image-only PDF (no text layer to interfere)
-                self.ocr_debug_messages.append("🚀 Starting OCR processing with docling...")
-                result = converter.convert(tmp_path)
-                self.ocr_debug_messages.append("✅ OCR processing completed!")
-                
-                # Save a copy for debugging
-                debug_path = "/tmp/chonker_debug_image_only.pdf"
-                shutil.copy(tmp_path, debug_path)
-                debug_msg = f"🔍 Debug: Saved image-only PDF to {debug_path}"
-                self.ocr_debug_messages.append(debug_msg)
-                self.progress.emit(debug_msg)
-                
-                # Success message
-                success_msg = "✅ OCR processing completed successfully!"
-                self.ocr_debug_messages.append(success_msg)
-                self.progress.emit(success_msg)
-                
-                # Clean up temporary file
-                os.unlink(tmp_path)
-                
-                return result
-            except Exception as e:
-                # Clean up on error
-                if os.path.exists(tmp_path):
-                    os.unlink(tmp_path)
-                raise e
-        except Exception as e:
-            error_msg = f"❌ OCR processing failed: {str(e)}"
-            self.ocr_debug_messages.append(error_msg)
-            self.ocr_debug_messages.append(f"❌ Error type: {type(e).__name__}")
-            self.progress.emit(error_msg)
-            # Fallback to regular processing
-            return self._convert_document()
-    
     def _convert_document(self):
-        self.progress.emit("📄 Using REGULAR extraction (no OCR preprocessing)")
+        self.progress.emit("📄 Processing document...")
         from docling.document_converter import DocumentConverter
         
         max_retries = 3
         retry_delay = 1  # seconds
         
-        # Check if we should use lazy loading
-        if self._should_use_lazy_loading():
-            self.progress.emit(f"🔄 Large PDF detected, using chunk-based processing...")
-            return self._convert_document_lazy()
         
         # Standard processing for smaller files
         # Use default DocumentConverter - it handles format analysis automatically
@@ -482,23 +258,6 @@ class DocumentProcessor(QThread):
                     retry_delay *= 2  # Exponential backoff
                 else:
                     raise e  # Re-raise on final attempt
-    
-    def _convert_document_lazy(self, converter=None):
-        from docling.document_converter import DocumentConverter
-        
-        # For now, use standard conversion with memory monitoring
-        # In production, this would process pages in batches
-        if converter is None:
-            converter = DocumentConverter()
-        
-        # Process with lower memory footprint settings if available
-        try:
-            # Attempt to use chunked processing if docling supports it
-            result = converter.convert(self.pdf_path)
-            return result
-        except Exception as e:
-            self.error.emit(f"Lazy loading failed: {e}")
-            raise
     
     def _extract_content(self, result) -> Tuple[List[DocumentChunk], str]:
         chunks = []
@@ -619,19 +378,29 @@ class DocumentProcessor(QThread):
             
             # Get page dimensions from items FIRST
             scale = 1.2  # Same scale factor as coordinates
-            page_height = 1100  # default Letter size in points * scale
-            page_width = 850 * scale
+            
+            # Find actual page bounds
+            min_y = float('inf')
             max_y = 0
+            max_x = 0
+            
             for item, level, idx, bbox in pages[page_no]:
                 if bbox and hasattr(bbox, 't') and hasattr(bbox, 'r'):
                     # For BOTTOMLEFT origin, find the maximum Y coordinate
                     if hasattr(bbox, 'coord_origin') and str(bbox.coord_origin) == 'CoordOrigin.BOTTOMLEFT':
                         max_y = max(max_y, bbox.t, bbox.b if hasattr(bbox, 'b') else bbox.t)
-                    page_width = max(page_width, (bbox.r + 50) * scale)
+                        min_y = min(min_y, bbox.t, bbox.b if hasattr(bbox, 'b') else bbox.t)
+                    max_x = max(max_x, bbox.r)
             
-            # Set page height based on maximum Y coordinate found
+            # Calculate actual page dimensions
             if max_y > 0:
+                # Add some padding
                 page_height = (max_y + 50) * scale
+                page_width = (max_x + 50) * scale
+            else:
+                # Fallback to standard letter size
+                page_height = 1100  
+                page_width = 850 * scale
             
             # NOW create the page div with correct height
             html_parts.append(f'<div class="spatial-page" data-page="{page_no}" style="min-height: {page_height}px;">')
@@ -654,8 +423,9 @@ class DocumentProcessor(QThread):
                     # Handle BOTTOMLEFT origin (PDF standard)
                     if hasattr(bbox, 'coord_origin') and str(bbox.coord_origin) == 'CoordOrigin.BOTTOMLEFT':
                         # Convert from bottom-left to top-left origin
-                        # Use the actual page height we calculated
-                        top = (page_height - bbox.t) * scale
+                        # bbox.t is distance from bottom to TOP of element
+                        # We need distance from top of page
+                        top = (max_y - bbox.t) * scale
                     else:
                         top = bbox.t * scale
                     
@@ -1278,21 +1048,6 @@ class ChonkerApp(QMainWindow):
             QMessageBox.critical(self, "Export Failed", "Export failed")
             self.log(f"Export failed: {str(e)}")
     
-    def export_to_csv(self):
-        if not hasattr(self, '_last_processing_result') or not self._last_processing_result:
-            QMessageBox.warning(self, "No Document", "Please process a document first")
-            return
-        file_path, _ = QFileDialog.getSaveFileName(self, "Export CSV", "", "CSV files (*.csv)")
-        if file_path:
-            # Extract content to dataframe
-            soup = BeautifulSoup(self._last_processing_result, 'html.parser')
-            data = []
-            for i, elem in enumerate(soup.find_all(['h1', 'h2', 'h3', 'p', 'table'])):
-                data.append({'type': elem.name, 'content': elem.get_text().strip()})
-            df = pd.DataFrame(data)
-            df.to_csv(file_path, index=False)
-            self.log(f"Exported to CSV: {file_path}")
-    
     def _is_url(self, text: str) -> bool:
         """Check if text is a URL"""
         return text.startswith(('http://', 'https://', 'ftp://'))
@@ -1385,9 +1140,7 @@ class ChonkerApp(QMainWindow):
     
     def process_multiple_files(self, pdf_files):
         """Process multiple PDF files and display all results in the right pane"""
-        # OCR mode is now default, shift key disables it
         modifiers = QApplication.keyboardModifiers()
-        use_ocr = not (modifiers == Qt.KeyboardModifier.ShiftModifier)
         
         # Clear the right pane
         if WEBENGINE_AVAILABLE and isinstance(self.faithful_output, QWebEngineView):
@@ -1422,13 +1175,10 @@ class ChonkerApp(QMainWindow):
                 self.log(f"Processing {file_name} ({file_size_mb:.1f} MB)...")
                 
                 # Create processor
-                processor = DocumentProcessor(pdf_path, use_ocr=use_ocr)
+                processor = DocumentProcessor(pdf_path)
                 
                 # Process synchronously for multi-file mode
-                if use_ocr:
-                    result = processor._convert_document_with_ocr()
-                else:
-                    result = processor._convert_document()
+                result = processor._convert_document()
                 
                 # Extract content
                 chunks, html_content = processor._extract_content(result)
@@ -1441,7 +1191,7 @@ class ChonkerApp(QMainWindow):
                         Processed: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | 
                         Chunks: {len(chunks)} | 
                         Size: {file_size_mb:.1f} MB |
-                        OCR: {'Yes' if use_ocr else 'No'}
+                        Mode: Standard
                     </p>
                 </div>
                 '''
@@ -1645,9 +1395,6 @@ class ChonkerApp(QMainWindow):
         export_parquet_action.triggered.connect(self.export_to_parquet)
         file_menu.addAction(export_parquet_action)
         
-        export_csv_action = QAction("Export to CSV", self)
-        export_csv_action.triggered.connect(self.export_to_csv)
-        file_menu.addAction(export_csv_action)
         
         file_menu.addSeparator()
         
@@ -1672,9 +1419,6 @@ class ChonkerApp(QMainWindow):
         
         view_menu.addSeparator()
         
-        chonker_action = QAction("CHONKER Mode", self)
-        chonker_action.triggered.connect(lambda: self.set_mode())
-        view_menu.addAction(chonker_action)
     
     def _create_top_bar(self, parent_layout):
         self.top_bar = QWidget()  # Store as instance variable
@@ -1708,7 +1452,7 @@ class ChonkerApp(QMainWindow):
         self.chonker_btn.setMinimumWidth(180)  # Make button wider
         self.chonker_btn.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
         self.chonker_btn.setStyleSheet("QPushButton {background-color: #1ABC9C; color: white; font-size: 18px; font-weight: bold; border: none; padding: 5px;} QPushButton:hover {background-color: #16A085;}")
-        self.chonker_btn.clicked.connect(lambda: self.set_mode())
+        self.chonker_btn.clicked.connect(lambda: self.log("🐹 CHONKER ready!"))
         
         layout.addWidget(self.chonker_btn)
         
@@ -1764,7 +1508,7 @@ class ChonkerApp(QMainWindow):
         self.url_input.setStyleSheet("QLineEdit{background:#2D2F31;color:#1ABC9C;border:1px solid #1ABC9C;padding:5px;font-size:11px}QLineEdit:focus{border-color:#16A085}")
         
         process_btn = QPushButton("Extract to HTML")
-        process_btn.setToolTip("Process (Ctrl+P)\nHold Shift: Disable OCR\nHold Alt/Option: Force spatial layout for forms")
+        process_btn.setToolTip("Process (Ctrl+P)\nHold Alt/Option: Force spatial layout for forms")
         process_btn.clicked.connect(self.process_current)
         process_btn.setStyleSheet(action_button_style)
         
@@ -1966,41 +1710,6 @@ class ChonkerApp(QMainWindow):
             if hasattr(self.embedded_pdf_view, 'setZoomFactor'):
                 self.embedded_pdf_view.setZoomFactor(self.pdf_zoom)
     
-    def set_mode(self):
-        # Always CHONKER mode now
-        self.chonker_btn.setChecked(True)
-        self.log("CHONKER mode activated - Ready to process PDFs!")
-    
-    def _on_ocr_needed(self, file_path: str):
-        # Stop animation
-        self.processing_timer.stop()
-        
-        reply = QMessageBox.question(
-            self,
-            "Enable OCR?",
-            "This PDF appears to be scanned/image-based with minimal text.\n\n"
-            "Would you like to enable OCR for better extraction?\n\n"
-            "✅ Better text extraction\n"
-            "✅ Improved table recognition\n"
-            "✅ Enhanced structure detection\n"
-            "(This may take longer to process)",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-        )
-        
-        # Process with or without OCR based on user response
-        use_ocr = reply == QMessageBox.StandardButton.Yes
-        self.log("🔍 Reprocessing with OCR enabled..." if use_ocr else "📄 Processing without OCR...")
-        
-        # Create and start processor
-        self.processor = DocumentProcessor(file_path, use_ocr=use_ocr)
-        self.processor.progress.connect(self.log)
-        self.processor.error.connect(lambda e: self.log(f"🐹 Error: {e}"))
-        self.processor.finished.connect(self.on_processing_finished)
-        self.processor.start()
-        
-        # Restart animation
-        self.processing_timer.start(ANIMATION_INTERVAL)
-    
     def log(self, message: str):
         cursor = self.terminal.textCursor()
         cursor.movePosition(QTextCursor.MoveOperation.End)
@@ -2166,24 +1875,18 @@ class ChonkerApp(QMainWindow):
         
         # Start processing with thread safety
         try:
-            # Create new processor - OCR is default, Shift disables it, Alt forces spatial
+            # Create new processor - Alt forces spatial
             modifiers = QApplication.keyboardModifiers()
-            use_ocr = not bool(modifiers & Qt.KeyboardModifier.ShiftModifier)
             force_spatial = bool(modifiers & Qt.KeyboardModifier.AltModifier)
             
-            # TEMPORARY: Disable OCR to test spatial layout with bbox data
-            use_ocr = False
-            
-            self.log(f"🔧 OCR Mode: {'ENABLED' if use_ocr else 'DISABLED'} (temporarily disabled for spatial testing)")
             if force_spatial:
                 self.log("🗺️ Forcing spatial layout mode (Alt key held)")
-            self.processor = DocumentProcessor(file_path, use_ocr=use_ocr, force_spatial=force_spatial)
+            self.processor = DocumentProcessor(file_path, force_spatial=force_spatial)
             
             # Connect signals (no need to disconnect - it's a new object)
             self.processor.progress.connect(self.log)
             self.processor.error.connect(lambda e: self.log(f"🐹 Error: {e}"))
             self.processor.finished.connect(self.on_processing_finished)
-            self.processor.ocr_needed.connect(lambda: self._on_ocr_needed(file_path))
             self.processor.start()
             
             # Start processing animation
@@ -2250,7 +1953,7 @@ class ChonkerApp(QMainWindow):
             f'<h2 style="color: #1ABC9C;">CHONKER\'s Faithful Output</h2>'
             f'<div style="color: #B0B0B0;">Document ID: {result.document_id}</div>'
             f'<div style="color: #B0B0B0;">Processing Time: {result.processing_time:.2f}s</div>'
-            f'<div style="color: #FF6B6B;">OCR Mode: {"ENABLED" if hasattr(self, "processor") and self.processor.use_ocr else "DISABLED"}</div>'
+            f'<div style="color: #FF6B6B;">Processing Mode: Standard</div>'
             f'<hr style="border-color: #3A3C3E;">'
         )
         
@@ -2346,7 +2049,7 @@ def main():
         print("🐹 Uncaught exception:")
         traceback.print_exception(exc_type, exc_value, exc_traceback)
     sys.excepthook = handle_exception
-    print("CHONKER ready with OCR image preprocessing v2!")
+    print("CHONKER ready!")
     app = QApplication(sys.argv)
     app.setApplicationName("CHONKER")
     
