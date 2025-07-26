@@ -5,6 +5,7 @@ Elegant PDF processing with hamster wisdom. Extract, edit, and export PDF conten
 ## Features
 
 - **ML-Powered Extraction**: Process PDFs with Docling's advanced ML models
+- **Spatial Layout Preservation**: Form-aware extraction that maintains 2D positioning
 - **Quality Control**: Edit and refine extracted content before export
 - **Parquet Export**: Export to columnar Parquet format for blazing-fast analysis
 - **Clean UI**: Minimalist PyQt6 interface with hamster charm
@@ -172,6 +173,13 @@ WHERE s.style_bold = true AND sem.semantic_role = 'header';
 ```
 
 ## Recent Updates
+
+### 2025-07-26
+- **Spatial Layout Mode**: New form-aware extraction that preserves 2D positioning
+- **WebEngine Integration**: Right pane now uses QWebEngineView for proper CSS rendering
+- **Coordinate Preservation**: Extracts and uses bounding box data from PDFs
+- **Form Detection**: Automatically detects form-like documents for spatial mode
+- **Visual Positioning**: Elements appear at their actual PDF coordinates instead of linear text
 
 ### 2025-07-24
 - **Parquet Export**: Replaced DuckDB with columnar Parquet format

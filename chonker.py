@@ -53,6 +53,12 @@ from PyQt6.QtGui import (
 )
 from PyQt6.QtPdf import QPdfDocument
 from PyQt6.QtPdfWidgets import QPdfView
+try:
+    from PyQt6.QtWebEngineWidgets import QWebEngineView
+    WEBENGINE_AVAILABLE = True
+except ImportError:
+    WEBENGINE_AVAILABLE = False
+    print("⚠️ QtWebEngine not available - spatial layout will be limited")
 # Third-party imports with graceful fallbacks
 try:
     from bs4 import BeautifulSoup
@@ -115,13 +121,14 @@ class DocumentProcessor(QThread):
     chunk_processed = pyqtSignal(int, int)
     ocr_needed = pyqtSignal()
     
-    def __init__(self, pdf_path: str, use_ocr: bool = True):
+    def __init__(self, pdf_path: str, use_ocr: bool = True, force_spatial: bool = False):
         super().__init__()
         self.pdf_path = pdf_path
         self._stop_event = threading.Event()  # Thread-safe stop flag
         self.start_time = None
         self.timeout_occurred = False
         self.use_ocr = use_ocr
+        self.force_spatial = force_spatial
     
     def stop(self):
         self._stop_event.set()
@@ -495,6 +502,224 @@ class DocumentProcessor(QThread):
     
     def _extract_content(self, result) -> Tuple[List[DocumentChunk], str]:
         chunks = []
+        
+        # Check if we should use spatial layout mode
+        # TEMPORARY: Default to spatial layout for testing
+        use_spatial_layout = True  # self.force_spatial or self._should_use_spatial_layout(result)
+        
+        if use_spatial_layout:
+            html_content = self._extract_with_spatial_layout(result, chunks)
+        else:
+            html_content = self._extract_linear(result, chunks)
+        
+        return chunks, html_content
+    
+    def _should_use_spatial_layout(self, result) -> bool:
+        """Detect if document looks like a form based on content patterns"""
+        items = list(result.document.iterate_items())
+        if len(items) < 10:
+            return False
+            
+        # Count short text items that might be form fields
+        short_texts = 0
+        total_texts = 0
+        
+        for item, _ in items[:50]:  # Check first 50 items
+            if hasattr(item, 'text'):
+                text = str(item.text).strip()
+                if text:
+                    total_texts += 1
+                    if len(text) < 50:  # Short text likely form label/field
+                        short_texts += 1
+        
+        # Log detection info
+        form_ratio = (short_texts / total_texts) if total_texts > 0 else 0
+        self.progress.emit(f"📊 Form detection: {short_texts}/{total_texts} short texts ({form_ratio:.1%})")
+        
+        # Check for form keywords too
+        form_keywords = ['name:', 'date:', 'phone:', 'address:', 'title:', 'permit', 'form', 'id:', 'no.', 'tel:']
+        keyword_found = False
+        for item, _ in items[:20]:
+            if hasattr(item, 'text'):
+                text_lower = str(item.text).lower()
+                if any(kw in text_lower for kw in form_keywords):
+                    keyword_found = True
+                    break
+        
+        # Use spatial layout if high ratio of short texts OR form keywords found
+        use_spatial = (total_texts > 0 and form_ratio > 0.6) or keyword_found
+        self.progress.emit(f"🗺️ Spatial layout: {'ENABLED' if use_spatial else 'DISABLED'} (keywords: {keyword_found})")
+        
+        return use_spatial
+    
+    def _extract_with_spatial_layout(self, result, chunks: List[DocumentChunk]) -> str:
+        """Extract content preserving spatial layout using bounding boxes"""
+        self.progress.emit("🗺️ SPATIAL LAYOUT MODE ACTIVE")
+        print("🗺️ SPATIAL LAYOUT MODE ACTIVE - Console check")
+        
+        html_parts = [
+            '<div id="document-content" contenteditable="true">',
+            '<h2 style="color: #1ABC9C;">SPATIAL LAYOUT MODE</h2>'
+        ]
+        
+        # Group items by page
+        pages = {}
+        items = list(result.document.iterate_items())
+        
+        # Debug: Check if ANY items have bbox
+        items_with_bbox = 0
+        items_without_bbox = 0
+        
+        for idx, (item, level) in enumerate(items):
+            if self._stop_event.is_set() or self._check_timeout():
+                break
+                
+            # Get page number and bbox
+            page_no = 0
+            bbox = None
+            if hasattr(item, 'prov') and item.prov:
+                if len(item.prov) > 0:
+                    prov = item.prov[0]
+                    page_no = getattr(prov, 'page_no', 0)
+                    bbox = getattr(prov, 'bbox', None)
+                    
+            if bbox:
+                items_with_bbox += 1
+            else:
+                items_without_bbox += 1
+            
+            if page_no not in pages:
+                pages[page_no] = []
+            pages[page_no].append((item, level, idx, bbox))
+            
+            # Create chunk
+            chunk = self._create_chunk(item, level, idx, page_no)
+            chunks.append(chunk)
+            
+            # Progress
+            self.chunk_processed.emit(idx + 1, len(items))
+        
+        # Debug report
+        self.progress.emit(f"📦 Items with bbox: {items_with_bbox}, without: {items_without_bbox}")
+        
+        # Add debug info to HTML output
+        html_parts.append(f'<div style="background: #1ABC9C; color: #000; padding: 10px; margin: 10px 0;">')
+        html_parts.append(f'<strong>DEBUG: Spatial Layout Stats</strong><br>')
+        html_parts.append(f'Total items: {len(items)}<br>')
+        html_parts.append(f'Items WITH bbox data: {items_with_bbox}<br>')
+        html_parts.append(f'Items WITHOUT bbox: {items_without_bbox}<br>')
+        if not WEBENGINE_AVAILABLE:
+            html_parts.append(f'<br><strong>⚠️ Note:</strong> Install PyQt6-WebEngine for proper spatial rendering.<br>')
+        html_parts.append(f'</div>')
+        
+        # Render each page with spatial layout
+        for page_no in sorted(pages.keys()):
+            if page_no > 0:
+                html_parts.append(f'<h3 style="text-align: center; color: #1ABC9C;">Page {page_no}</h3>')
+            
+            # Get page dimensions from items FIRST
+            scale = 1.2  # Same scale factor as coordinates
+            page_height = 1100  # default Letter size in points * scale
+            page_width = 850 * scale
+            max_y = 0
+            for item, level, idx, bbox in pages[page_no]:
+                if bbox and hasattr(bbox, 't') and hasattr(bbox, 'r'):
+                    # For BOTTOMLEFT origin, find the maximum Y coordinate
+                    if hasattr(bbox, 'coord_origin') and str(bbox.coord_origin) == 'CoordOrigin.BOTTOMLEFT':
+                        max_y = max(max_y, bbox.t, bbox.b if hasattr(bbox, 'b') else bbox.t)
+                    page_width = max(page_width, (bbox.r + 50) * scale)
+            
+            # Set page height based on maximum Y coordinate found
+            if max_y > 0:
+                page_height = (max_y + 50) * scale
+            
+            # NOW create the page div with correct height
+            html_parts.append(f'<div class="spatial-page" data-page="{page_no}" style="min-height: {page_height}px;">')
+            
+            # Render items with absolute positioning
+            for item, level, idx, bbox in pages[page_no]:
+                if bbox and hasattr(bbox, 'l') and hasattr(bbox, 't'):
+                    # Convert coordinates handling different origins
+                    # Scale factor: PDF points (72 DPI) to screen pixels
+                    scale = 1.2  # Adjust for better visual spacing
+                    
+                    left = bbox.l * scale
+                    width = abs(bbox.r - bbox.l) * scale if hasattr(bbox, 'r') else 200
+                    height = abs(bbox.b - bbox.t) * scale if hasattr(bbox, 'b') else 20
+                    
+                    # Add minimum dimensions to prevent tiny boxes
+                    width = max(width, 50)
+                    height = max(height, 20)
+                    
+                    # Handle BOTTOMLEFT origin (PDF standard)
+                    if hasattr(bbox, 'coord_origin') and str(bbox.coord_origin) == 'CoordOrigin.BOTTOMLEFT':
+                        # Convert from bottom-left to top-left origin
+                        # Use the actual page height we calculated
+                        top = (page_height - bbox.t) * scale
+                    else:
+                        top = bbox.t * scale
+                    
+                    # Debug first few items
+                    if idx < 3:
+                        print(f"Item {idx}: bbox l={bbox.l:.1f}, t={bbox.t:.1f}, r={bbox.r:.1f}, b={bbox.b:.1f}")
+                        print(f"  Converted: left={left:.1f}, top={top:.1f}, width={width:.1f}, height={height:.1f}")
+                        print(f"  Text: {getattr(item, 'text', 'NO TEXT')[:50]}")
+                    
+                    # Detect if this looks like a form field
+                    is_form_field = self._is_form_field(item, width, height)
+                    
+                    # Debug: show coordinates in the HTML
+                    debug_info = f' title="pos:({left:.0f},{top:.0f}) size:({width:.0f}x{height:.0f})"'
+                    
+                    html_parts.append(
+                        f'<div class="spatial-item{" form-field" if is_form_field else ""}" '
+                        f'style="left: {left}px; top: {top}px; width: {width}px; min-height: {height}px;"'
+                        f'{debug_info}>'
+                    )
+                    html_parts.append(self._item_to_html_spatial(item, level))
+                    html_parts.append('</div>')
+                else:
+                    # Fallback for items without bbox - use flow layout
+                    text = getattr(item, 'text', '')
+                    if text:
+                        html_parts.append(f'<div class="spatial-item" style="position: static; margin: 5px; display: inline-block; background: #3A3C3E; padding: 5px 10px; border: 1px solid #666;">')
+                        html_parts.append(self._item_to_html_spatial(item, level))
+                        html_parts.append('</div>')
+            
+            html_parts.append('</div>')
+        
+        html_parts.append('</div>')
+        
+        return '\n'.join(html_parts)
+    
+    def _is_form_field(self, item, width: float, height: float) -> bool:
+        """Detect if item is likely a form field based on dimensions and content"""
+        if not hasattr(item, 'text'):
+            return False
+            
+        text = str(item.text).strip()
+        # Form fields are typically small boxes with short text
+        return (
+            width < 300 and height < 40 and len(text) < 50
+            and not any(text.lower().endswith(x) for x in ['.', ':', '?', '!'])
+        )
+    
+    def _item_to_html_spatial(self, item, level: int) -> str:
+        """Convert item to HTML without wrapper elements for spatial layout"""
+        item_type = type(item).__name__
+        if hasattr(item, 'text'):
+            text = self._enhance_text_formatting(escape(str(item.text)))
+            if item_type == 'SectionHeaderItem':
+                h = min(level + 1, 3)
+                return f'<h{h} style="margin: 0;">{text}</h{h}>'
+            else:
+                return f'<span>{text}</span>'
+        elif item_type == 'TableItem':
+            return self._table_to_html(item)
+        return ''
+    
+    def _extract_linear(self, result, chunks: List[DocumentChunk]) -> str:
+        """Original linear extraction method"""
         html_parts = ['<div id="document-content" contenteditable="true">']
         
         # Get all items
@@ -535,7 +760,7 @@ class DocumentProcessor(QThread):
         
         html_parts.append('</div>')
         
-        return chunks, '\n'.join(html_parts)
+        return '\n'.join(html_parts)
     
     
     def _create_chunk(self, item, level: int, index: int, page: int = 0) -> DocumentChunk:
@@ -739,8 +964,12 @@ class ChonkerApp(QMainWindow):
         self.splitter.addWidget(self.left_pane)
         
         # Right side - faithful output (CRUCIAL!)
-        self.faithful_output = QTextEdit()
-        self.faithful_output.setReadOnly(False)
+        if WEBENGINE_AVAILABLE:
+            self.faithful_output = QWebEngineView()
+            self.faithful_output.setContextMenuPolicy(Qt.ContextMenuPolicy.NoContextMenu)
+        else:
+            self.faithful_output = QTextEdit()
+            self.faithful_output.setReadOnly(False)
         self._update_pane_styles()  # Apply initial active pane styling
         self.splitter.addWidget(self.faithful_output)
         
@@ -1161,7 +1390,10 @@ class ChonkerApp(QMainWindow):
         use_ocr = not (modifiers == Qt.KeyboardModifier.ShiftModifier)
         
         # Clear the right pane
-        self.faithful_output.clear()
+        if WEBENGINE_AVAILABLE and isinstance(self.faithful_output, QWebEngineView):
+            self.faithful_output.setHtml('')
+        else:
+            self.faithful_output.clear()
         
         # Show progress dialog
         progress = QProgressDialog("Processing multiple PDFs...", "Cancel", 0, len(pdf_files), self)
@@ -1532,7 +1764,7 @@ class ChonkerApp(QMainWindow):
         self.url_input.setStyleSheet("QLineEdit{background:#2D2F31;color:#1ABC9C;border:1px solid #1ABC9C;padding:5px;font-size:11px}QLineEdit:focus{border-color:#16A085}")
         
         process_btn = QPushButton("Extract to HTML")
-        process_btn.setToolTip("Process (Ctrl+P)")
+        process_btn.setToolTip("Process (Ctrl+P)\nHold Shift: Disable OCR\nHold Alt/Option: Force spatial layout for forms")
         process_btn.clicked.connect(self.process_current)
         process_btn.setStyleSheet(action_button_style)
         
@@ -1934,10 +2166,18 @@ class ChonkerApp(QMainWindow):
         
         # Start processing with thread safety
         try:
-            # Create new processor - OCR is default, Shift disables it
-            use_ocr = not bool(QApplication.keyboardModifiers() & Qt.KeyboardModifier.ShiftModifier)
-            self.log(f"🔧 OCR Mode: {'ENABLED' if use_ocr else 'DISABLED'} (hold Shift to disable)")
-            self.processor = DocumentProcessor(file_path, use_ocr=use_ocr)
+            # Create new processor - OCR is default, Shift disables it, Alt forces spatial
+            modifiers = QApplication.keyboardModifiers()
+            use_ocr = not bool(modifiers & Qt.KeyboardModifier.ShiftModifier)
+            force_spatial = bool(modifiers & Qt.KeyboardModifier.AltModifier)
+            
+            # TEMPORARY: Disable OCR to test spatial layout with bbox data
+            use_ocr = False
+            
+            self.log(f"🔧 OCR Mode: {'ENABLED' if use_ocr else 'DISABLED'} (temporarily disabled for spatial testing)")
+            if force_spatial:
+                self.log("🗺️ Forcing spatial layout mode (Alt key held)")
+            self.processor = DocumentProcessor(file_path, use_ocr=use_ocr, force_spatial=force_spatial)
             
             # Connect signals (no need to disconnect - it's a new object)
             self.processor.progress.connect(self.log)
@@ -2001,6 +2241,11 @@ class ChonkerApp(QMainWindow):
             f'li {{ color: #FFFFFF; font-size: {zoom_size}px !important; }}'
             f'div {{ font-size: {zoom_size}px !important; }}'
             f'span {{ font-size: {zoom_size}px !important; }}'
+            # Include spatial layout styles
+            f'.spatial-page {{ position: relative; width: 100%; min-height: 1000px; margin-bottom: 20px; border: 2px solid #1ABC9C; background: #525659; overflow: visible; }}'
+            f'.spatial-item {{ position: absolute !important; border: 1px solid #666; padding: 2px; color: #FFF; background: rgba(58, 60, 62, 0.8); }}'
+            f'.spatial-item:hover {{ border-color: #1ABC9C; background: rgba(26, 188, 156, 0.2); z-index: 100; }}'
+            f'.form-field {{ background: #3A3C3E !important; border: 1px solid #1ABC9C !important; color: #FFF; }}'
             f'</style></head><body>'
             f'<h2 style="color: #1ABC9C;">CHONKER\'s Faithful Output</h2>'
             f'<div style="color: #B0B0B0;">Document ID: {result.document_id}</div>'
@@ -2023,7 +2268,10 @@ class ChonkerApp(QMainWindow):
             f'{result.html_content}'
             f'</body></html>'
         )
-        self.faithful_output.setHtml(''.join(html_parts))
+        if WEBENGINE_AVAILABLE and isinstance(self.faithful_output, QWebEngineView):
+            self.faithful_output.setHtml(''.join(html_parts))
+        else:
+            self.faithful_output.setHtml(''.join(html_parts))
         # Store the result for re-rendering on zoom changes
         self._last_processing_result = result
     
