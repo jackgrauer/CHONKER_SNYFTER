@@ -1,13 +1,8 @@
 #!/bin/bash
+# New CHONKER launcher using modular structure
 
-# Simple launcher for CHONKER
-
-# Check if virtual environment exists
-if [ ! -d ".venv" ]; then
-    echo "Virtual environment not found. Running setup..."
-    ./migrate_to_uv.sh
-fi
-
-# Activate virtual environment and run
+# Activate virtual environment
 source .venv/bin/activate
-python chonker.py "$@"
+
+# Run new modular CHONKER
+python main.py "$@"

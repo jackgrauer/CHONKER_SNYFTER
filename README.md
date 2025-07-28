@@ -92,11 +92,25 @@ Content classification:
 
 ```
 CHONKER/
-├── chonker.py                     # Main application (1,842 lines)
-├── assets/emojis/chonker.png      # UI icon
-├── pyproject.toml                  # Modern Python config
-├── requirements.txt                # Dependencies
-├── justfile                        # Build automation
+├── main.py                        # Entry point
+├── chonker/                       # Main package
+│   ├── models/                    # Data models
+│   │   ├── bbox.py               # Coordinate system
+│   │   ├── document.py           # Document with edit tracking
+│   │   └── layout_item.py        # Spatial items
+│   ├── extraction/                # PDF processing
+│   │   ├── pdf_extractor.py      # Docling wrapper
+│   │   └── spatial_layout.py     # Layout engine (fixes overlaps!)
+│   ├── export/                    # Export functionality
+│   │   ├── html_generator.py     # HTML generation
+│   │   └── parquet_exporter.py   # Parquet export
+│   └── ui/                        # User interface
+│       ├── main_window.py         # Main window
+│       ├── editor_widget.py       # Content editor
+│       └── pdf_viewer.py          # PDF display
+├── assets/emojis/chonker.png      # Sacred hamster emoji
+├── pyproject.toml                 # Modern Python config
+├── requirements.txt               # Dependencies
 └── run_chonker.sh                 # Launch script
 ```
 
@@ -184,6 +198,20 @@ CHONKER now works with **Snyfter**, a high-performance PDF preprocessing tool wr
 See the [Snyfter README](snyfter/README.md) for detailed usage.
 
 ## Recent Updates
+
+### 2025-07-28 - MAJOR REFACTOR 🐹
+- **FIXED TEXT OVERLAP ISSUE!** Complete architectural overhaul
+  - New `BoundingBox` class with unified coordinate system (top-left origin)
+  - `SpatialLayoutEngine` detects and resolves overlaps before rendering
+  - Clean separation: PDF → Document → Layout → HTML
+  - Modular architecture replaces 2400-line monolith
+- **Spatial Layout Engine**:
+  - Items on same line shift horizontally to avoid overlap
+  - Different lines shift vertically
+  - Row grouping for form-like structures
+  - Dynamic font sizing based on available space
+- **Sacred hamster preserved**: All UI elements and wisdom intact
+- **Result**: NO MORE TEXT OVERLAPPING! Form fields align properly!
 
 ### 2025-07-27
 - **UI Improvements**: Major spatial layout enhancements for better readability
