@@ -172,14 +172,42 @@ JOIN 'output/chonker_semantics.parquet' sem ON c.element_id = sem.element_id
 WHERE s.style_bold = true AND sem.semantic_role = 'header';
 ```
 
+## Snyfter Integration
+
+CHONKER now works with **Snyfter**, a high-performance PDF preprocessing tool written in Rust. Snyfter prepares scanned or image-heavy PDFs for better text extraction.
+
+### Workflow
+1. **Analyze PDFs** with Snyfter to check if preprocessing is needed
+2. **Enhance PDFs** that have low text density  
+3. **Process with CHONKER** for spatial layout extraction
+
+See the [Snyfter README](snyfter/README.md) for detailed usage.
+
 ## Recent Updates
 
+### 2025-07-27
+- **UI Improvements**: Major spatial layout enhancements for better readability
+  - Fixed white pane bug: Right pane now starts with matching dark background (#525659)
+  - Unified color scheme: All backgrounds now use consistent chrome color
+  - Removed boxes around text for cleaner appearance
+  - Reduced font size to 50% of base (6px at default zoom) to minimize overlap
+  - Made all headings same size as regular text (distinguished by teal color only)
+  - Added padding (3px/5px) and vertical spacing (5px) between text elements
+  - Fixed font warning by replacing "-apple-system" with Arial
+- **PDF Processing**: Enhanced split and merge functionality
+  - Added PDF splitting capability for multi-page documents
+  - Improved image preservation during enhancement
+  - Better Python integration using pypdf for reliability
+  
 ### 2025-07-26
 - **Spatial Layout Mode**: New form-aware extraction that preserves 2D positioning
 - **WebEngine Integration**: Right pane now uses QWebEngineView for proper CSS rendering
 - **Coordinate Preservation**: Extracts and uses bounding box data from PDFs
 - **Form Detection**: Automatically detects form-like documents for spatial mode
 - **Visual Positioning**: Elements appear at their actual PDF coordinates instead of linear text
+- **OCR Preprocessing Removed**: Removed 262 lines of OCR code - now handled by Snyfter
+- **Snyfter Integration**: New Rust-based PDF preprocessing tool for enhanced extraction
+- **Cleaner Dependencies**: Removed DuckDB, psutil, pymupdf - reduced to essentials
 
 ### 2025-07-24
 - **Parquet Export**: Replaced DuckDB with columnar Parquet format

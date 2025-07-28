@@ -416,9 +416,9 @@ class DocumentProcessor(QThread):
                     width = abs(bbox.r - bbox.l) * scale if hasattr(bbox, 'r') else 200
                     height = abs(bbox.b - bbox.t) * scale if hasattr(bbox, 'b') else 20
                     
-                    # Add minimum dimensions to prevent tiny boxes
+                    # Add minimum dimensions and extra padding
                     width = max(width, 50)
-                    height = max(height, 20)
+                    height = max(height, 20) + 5  # Add 5px vertical padding
                     
                     # Handle BOTTOMLEFT origin (PDF standard)
                     if hasattr(bbox, 'coord_origin') and str(bbox.coord_origin) == 'CoordOrigin.BOTTOMLEFT':
@@ -452,7 +452,7 @@ class DocumentProcessor(QThread):
                     # Fallback for items without bbox - use flow layout
                     text = getattr(item, 'text', '')
                     if text:
-                        html_parts.append(f'<div class="spatial-item" style="position: static; margin: 5px; display: inline-block; background: #3A3C3E; padding: 5px 10px; border: 1px solid #666;">')
+                        html_parts.append(f'<div class="spatial-item" style="position: static; margin: 5px; display: inline-block;">')
                         html_parts.append(self._item_to_html_spatial(item, level))
                         html_parts.append('</div>')
             
@@ -480,8 +480,7 @@ class DocumentProcessor(QThread):
         if hasattr(item, 'text'):
             text = self._enhance_text_formatting(escape(str(item.text)))
             if item_type == 'SectionHeaderItem':
-                h = min(level + 1, 3)
-                return f'<h{h} style="margin: 0;">{text}</h{h}>'
+                return f'<span style="color: #1ABC9C; margin: 0;">{text}</span>'
             else:
                 return f'<span>{text}</span>'
         elif item_type == 'TableItem':
@@ -728,6 +727,7 @@ class ChonkerApp(QMainWindow):
         
         # Left side - welcome/PDF view placeholder
         self.left_pane = QWidget()
+        self.left_pane.setStyleSheet("QWidget { background-color: #525659; }")
         self.left_layout = QVBoxLayout(self.left_pane)
         self.left_layout.setContentsMargins(0, 0, 0, 0)
         self.left_layout.setSpacing(0)
@@ -737,9 +737,28 @@ class ChonkerApp(QMainWindow):
         if WEBENGINE_AVAILABLE:
             self.faithful_output = QWebEngineView()
             self.faithful_output.setContextMenuPolicy(Qt.ContextMenuPolicy.NoContextMenu)
+            # Set initial HTML with dark background
+            initial_html = '''<!DOCTYPE html>
+            <html>
+            <head>
+                <style>
+                    body { 
+                        background-color: #525659; 
+                        color: #FFFFFF; 
+                        font-family: Arial, Helvetica, sans-serif;
+                        margin: 20px;
+                        font-size: 14px;
+                    }
+                </style>
+            </head>
+            <body>
+            </body>
+            </html>'''
+            self.faithful_output.setHtml(initial_html)
         else:
             self.faithful_output = QTextEdit()
             self.faithful_output.setReadOnly(False)
+            self.faithful_output.setStyleSheet("QTextEdit {background-color: #525659; color: #FFFFFF;}")
         self._update_pane_styles()  # Apply initial active pane styling
         self.splitter.addWidget(self.faithful_output)
         
@@ -1931,24 +1950,24 @@ class ChonkerApp(QMainWindow):
         html_parts = []
         html_parts.append(
             f'<!DOCTYPE html><html><head><style>'
-            f'body{{font-family:-apple-system,sans-serif;margin:20px;color:#FFF;background:#525659;font-size:{zoom_size}px!important}}'
+            f'body{{font-family:Arial,Helvetica,sans-serif;margin:20px;color:#FFF;background:#525659;font-size:{zoom_size}px!important}}'
             f'table{{border-collapse:collapse;margin:15px 0;border:1px solid #3A3C3E;background:#3A3C3E;font-size:{zoom_size}px!important}}'
             f'th,td{{border:1px solid #525659;padding:8px;color:#FFF;background:#424548;font-size:{zoom_size}px!important}}'
             f'th{{background:#3A3C3E;font-weight:bold}}td[contenteditable="true"]:hover{{background:#525659}}.table-controls{{margin:10px 0}}'
             f'button {{ background: #1ABC9C; color: white; border: none; padding: 5px 10px; margin: 5px; border-radius: 3px; cursor: pointer; }}'
             f'button:hover {{ background: #16A085; }}'
-            f'h1 {{ color: #1ABC9C; font-size: {int(zoom_size * 1.5)}px !important; }}'
-            f'h2 {{ color: #1ABC9C; font-size: {int(zoom_size * 1.3)}px !important; }}'
-            f'h3 {{ color: #1ABC9C; font-size: {int(zoom_size * 1.2)}px !important; }}'
+            f'h1 {{ color: #1ABC9C; font-size: {zoom_size}px !important; }}'
+            f'h2 {{ color: #1ABC9C; font-size: {zoom_size}px !important; }}'
+            f'h3 {{ color: #1ABC9C; font-size: {zoom_size}px !important; }}'
             f'p {{ color: #FFFFFF; font-size: {zoom_size}px !important; }}'
             f'li {{ color: #FFFFFF; font-size: {zoom_size}px !important; }}'
             f'div {{ font-size: {zoom_size}px !important; }}'
             f'span {{ font-size: {zoom_size}px !important; }}'
             # Include spatial layout styles
             f'.spatial-page {{ position: relative; width: 100%; min-height: 1000px; margin-bottom: 20px; border: 2px solid #1ABC9C; background: #525659; overflow: visible; }}'
-            f'.spatial-item {{ position: absolute !important; border: 1px solid #666; padding: 2px; color: #FFF; background: rgba(58, 60, 62, 0.8); }}'
-            f'.spatial-item:hover {{ border-color: #1ABC9C; background: rgba(26, 188, 156, 0.2); z-index: 100; }}'
-            f'.form-field {{ background: #3A3C3E !important; border: 1px solid #1ABC9C !important; color: #FFF; }}'
+            f'.spatial-item {{ position: absolute !important; border: none; padding: 3px 5px; color: #FFF; background: transparent; font-size: {zoom_size * 0.5}px !important; line-height: 1.1; overflow: hidden; }}'
+            f'.spatial-item:hover {{ color: #1ABC9C; z-index: 100; }}'
+            f'.form-field {{ background: transparent !important; border: none !important; color: #FFF; }}'
             f'</style></head><body>'
             f'<h2 style="color: #1ABC9C;">CHONKER\'s Faithful Output</h2>'
             f'<div style="color: #B0B0B0;">Document ID: {result.document_id}</div>'
@@ -1960,7 +1979,7 @@ class ChonkerApp(QMainWindow):
         # Add debug messages if any
         if result.debug_messages:
             html_parts.append(
-                f'<div style="background: #2D2F31; padding: 10px; margin: 10px 0; border: 1px solid #444;">'
+                f'<div style="background: #525659; padding: 10px; margin: 10px 0; border: 1px solid #666;">'
                 f'<h3 style="color: #FFB347;">Debug Messages:</h3>'
             )
             for msg in result.debug_messages:
@@ -1992,7 +2011,7 @@ class ChonkerApp(QMainWindow):
         # Build HTML with styles
         html = (
             f'<!DOCTYPE html><html><head><style>'
-            f'body {{ font-family: -apple-system, sans-serif; margin: 20px; color: #000000; background: #FFFFFF; }}'
+            f'body {{ font-family: Arial, Helvetica, sans-serif; margin: 20px; color: #FFFFFF; background: #525659; }}'
             f'table {{ border-collapse: collapse; margin: 15px 0; border: 1px solid #888888; }}'
             f'th, td {{ border: 1px solid #888888; padding: 8px; color: #000000; }}'
             f'.table-controls {{ margin: 10px 0; }}'
