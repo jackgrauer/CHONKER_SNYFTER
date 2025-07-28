@@ -2,9 +2,12 @@
 
 from typing import List, Dict, Optional
 import html
+import logging
 
 from ..extraction.spatial_layout import SpatialLayoutEngine
 from ..models.layout_item import LayoutItem
+
+logger = logging.getLogger(__name__)
 
 
 class HTMLGenerator:
@@ -68,15 +71,51 @@ class HTMLGenerator:
     
     .spatial-item {
         position: absolute !important;
-        padding: 2px 4px;
-        overflow: hidden;
+        padding: 4px 6px;
+        margin: 2px;
+        overflow: visible;
         cursor: text;
         transition: all 0.2s;
+        box-sizing: border-box;
+    }
+    
+    /* Table styles for vector graphics */
+    .spatial-item table {
+        border-collapse: collapse;
+        width: 100%;
+        height: 100%;
+    }
+    
+    .spatial-item table td {
+        border: 1px solid #666;
+        padding: 2px 4px;
+        vertical-align: top;
+        color: #E0E0E0;
     }
     
     .spatial-item:hover {
         background: rgba(26, 188, 156, 0.1);
         z-index: 100 !important;
+    }
+    
+    /* Special styling for tables */
+    .spatial-item.table-item {
+        background: rgba(26, 188, 156, 0.02);
+        border: 1px solid rgba(26, 188, 156, 0.3);
+    }
+    
+    .spatial-item.table-item:hover {
+        background: rgba(26, 188, 156, 0.05);
+    }
+    
+    /* Missing table placeholder */
+    .spatial-item.missing-table-item {
+        background: rgba(230, 126, 34, 0.1);
+        border: 2px dashed rgba(230, 126, 34, 0.5);
+        color: #E67E22;
+        font-style: italic;
+        padding: 20px;
+        text-align: center;
     }
     
     .spatial-item:focus {
@@ -176,18 +215,24 @@ class HTMLGenerator:
             </div>
         ''')
         
-        # Render form row hints
-        rows = self.layout.get_rows(page_num)
-        for row in rows:
-            if any(item.is_form_label or item.is_form_value for item in row):
-                # Add subtle line to show form row
-                avg_y = sum(item.bbox.center_y for item in row) / len(row) * self.scale
-                html_parts.append(
-                    f'<div class="form-row-hint" style="top: {avg_y}px;"></div>'
-                )
+        # Render form row hints (disabled for now)
+        # rows = self.layout.get_rows(page_num)
+        # for row in rows:
+        #     if any(item.is_form_label or item.is_form_value for item in row):
+        #         # Add subtle line to show form row
+        #         avg_y = sum(item.bbox.center_y for item in row) / len(row) * self.scale
+        #         html_parts.append(
+        #             f'<div class="form-row-hint" style="top: {avg_y}px;"></div>'
+        #         )
         
         # Render all items
+        table_count = sum(1 for item in items if item.item_type == 'table')
+        if table_count > 0:
+            logger.info(f"🐹 Rendering page with {table_count} tables out of {len(items)} total items")
+        
         for item in items:
+            if item.item_type == 'table':
+                logger.debug(f"🐹 Rendering table at {item.bbox}")
             html_parts.append(self._generate_item(item))
             
         html_parts.append('</div>')
@@ -204,6 +249,10 @@ class HTMLGenerator:
             classes.append('form-label')
         if item.is_form_value:
             classes.append('form-value')
+        if item.item_type == 'table':
+            classes.append('table-item')
+        if item.item_type == 'missing_table':
+            classes.append('missing-table-item')
             
         # Generate attributes
         attrs = [
@@ -226,8 +275,16 @@ class HTMLGenerator:
         
         # Handle different item types
         if item.item_type == 'table':
-            # Tables need special handling
-            content = self._format_table_content(content)
+            # Check if we have vector graphics
+            if item.metadata.get('has_vector_graphics'):
+                # Content already contains HTML table structure
+                content = item.content
+            else:
+                # For image tables, show them in a special way
+                content = self._format_image_table(item)
+        elif item.item_type == 'missing_table':
+            # Don't escape content for missing tables - it has formatting
+            content = item.content.replace('\n', '<br>')
             
         return f'<div {" ".join(attrs)}>{content}</div>'
     
@@ -239,3 +296,23 @@ class HTMLGenerator:
             # Wrap in pre tag to preserve formatting
             return f'<pre style="margin: 0; font-family: inherit;">{content}</pre>'
         return content
+    
+    def _format_image_table(self, item: LayoutItem) -> str:
+        """Format tables that are images"""
+        content = item.content
+        
+        # Don't double-escape if content is already escaped
+        if '&lt;' not in content and '&gt;' not in content and '<' in content:
+            # Already has HTML, don't escape
+            pass
+        elif 'table_cells=' in content:
+            # It's the object repr that wasn't parsed - shouldn't happen now
+            content = "[Table parsing failed - see PDF for details]"
+        else:
+            content = html.escape(content)
+        
+        # Always show tables in a consistent way
+        return f'''<div style="width: 100%; height: 100%; overflow: auto; background: #2a2a2a; border-radius: 4px; padding: 8px;">
+            <div style="color: #1ABC9C; font-size: 11px; margin-bottom: 6px; font-weight: bold;">📊 Table</div>
+            <pre style="margin: 0; font-family: 'Courier New', monospace; font-size: 11px; color: #E0E0E0; white-space: pre-wrap; word-break: break-word;">{content}</pre>
+        </div>'''

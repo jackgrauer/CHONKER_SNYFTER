@@ -32,32 +32,37 @@ class BoundingBox:
             page_height: Height of the PDF page in points
         """
         # In PDF coords, 'top' is distance from bottom, so we flip it
+        # Also ensure top < bottom in the new coordinate system
+        new_top = page_height - t
+        new_bottom = page_height - b
+        
         return cls(
             left=l,
-            top=page_height - t,  # Convert to distance from top
+            top=min(new_top, new_bottom),  # Ensure top is actually top
             right=r,
-            bottom=page_height - b
+            bottom=max(new_top, new_bottom)  # Ensure bottom is actually bottom
         )
     
     @classmethod
     def from_docling_bbox(cls, docling_bbox, page_height: float = 792) -> 'BoundingBox':
         """Create from Docling bbox object"""
-        if hasattr(docling_bbox, 'coord_origin') and str(docling_bbox.coord_origin) == 'CoordOrigin.BOTTOMLEFT':
-            # Docling uses bottom-left origin
-            return cls.from_pdf_coords(
-                docling_bbox.l,
-                docling_bbox.t,
-                docling_bbox.r,
-                docling_bbox.b,
-                page_height
-            )
-        else:
-            # Already in top-left
+        if hasattr(docling_bbox, 'coord_origin') and 'BOTTOMLEFT' in str(docling_bbox.coord_origin):
+            # Docling uses bottom-left origin - need to flip Y coordinates
+            # In BOTTOMLEFT: t is top edge distance from bottom, b is bottom edge distance from bottom
+            # In TOPLEFT: top should be smaller than bottom
             return cls(
                 left=docling_bbox.l,
-                top=docling_bbox.t,
+                top=page_height - docling_bbox.t,  # top edge flipped
                 right=docling_bbox.r,
-                bottom=docling_bbox.b
+                bottom=page_height - docling_bbox.b  # bottom edge flipped
+            )
+        else:
+            # Already in top-left - just ensure proper ordering
+            return cls(
+                left=docling_bbox.l,
+                top=min(docling_bbox.t, docling_bbox.b),
+                right=docling_bbox.r,
+                bottom=max(docling_bbox.t, docling_bbox.b)
             )
     
     @property

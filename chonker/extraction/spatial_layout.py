@@ -16,7 +16,7 @@ class SpatialLayoutEngine:
     Manages spatial layout of items, preventing overlaps and organizing form-like structures.
     """
     
-    def __init__(self, grid_size: int = 5, min_spacing: int = 10):
+    def __init__(self, grid_size: int = 5, min_spacing: int = 20):
         """
         Initialize the layout engine.
         
@@ -48,6 +48,8 @@ class SpatialLayoutEngine:
         for existing in page_items:
             if self._items_overlap(item, existing):
                 logger.debug(f"Overlap detected: '{item.content[:30]}' with '{existing.content[:30]}'")
+                logger.debug(f"  New item bbox: {item.bbox}")
+                logger.debug(f"  Existing bbox: {existing.bbox}")
                 item = self._resolve_overlap(item, existing, page_items)
         
         # Detect row grouping
@@ -81,9 +83,23 @@ class SpatialLayoutEngine:
                         page_items: List[LayoutItem]) -> LayoutItem:
         """
         Resolve overlap between items intelligently.
+        HEY DUMBY: Tables can appear between text chunks. Don't let them get squished!
         """
+        # Tables get priority - they should push other content out of the way
+        if new_item.item_type == 'table':
+            logger.info(f"🐹 Table detected between chunks - making space!")
+            # Force more spacing for tables
+            self.min_spacing = max(self.min_spacing, 30)
+        
         v_overlap = new_item.bbox.vertical_overlap(existing_item.bbox)
         h_overlap = new_item.bbox.horizontal_overlap(existing_item.bbox)
+        
+        # Calculate actual height needed for existing item based on its content
+        existing_font_size = existing_item.calculate_font_size()
+        existing_min_height = existing_item.calculate_min_height(
+            existing_font_size, 
+            existing_item.bbox.width
+        )
         
         # If items are mostly on the same line (high vertical overlap)
         if v_overlap > 0.7:
@@ -94,16 +110,29 @@ class SpatialLayoutEngine:
             # Check if we pushed it into another item
             for other in page_items:
                 if other != existing_item and self._items_overlap(new_item, other):
-                    # Try shifting down instead
-                    new_item.bbox.top = existing_item.bbox.bottom + self.grid_size
+                    # Try shifting down instead, accounting for actual content height
+                    new_item.bbox.top = existing_item.bbox.top + max(
+                        existing_item.bbox.height,
+                        existing_min_height
+                    ) + self.min_spacing
                     new_item.bbox.bottom = new_item.bbox.top + new_item.bbox.height
-                    # Reset horizontal position
-                    new_item.bbox.left = new_item.bbox.left - (existing_item.bbox.right + self.min_spacing) + new_item.bbox.left
+                    # Reset horizontal position to original
+                    new_item.bbox.left = new_item.bbox.left - (existing_item.bbox.right + self.min_spacing)
                     new_item.bbox.right = new_item.bbox.left + new_item.bbox.width
                     break
         else:
-            # Shift vertically
-            new_item.bbox.top = existing_item.bbox.bottom + self.grid_size
+            # Shift vertically with proper spacing based on content
+            # EXTRA SPACE FOR TABLES BETWEEN CHUNKS
+            if new_item.item_type == 'table' or existing_item.item_type == 'table':
+                spacing = max(self.min_spacing * 2, self.grid_size * 4)
+                logger.debug(f"🐹 Extra spacing for table: {spacing}px")
+            else:
+                spacing = max(self.min_spacing, self.grid_size * 2)
+                
+            new_item.bbox.top = existing_item.bbox.top + max(
+                existing_item.bbox.height,
+                existing_min_height
+            ) + spacing
             new_item.bbox.bottom = new_item.bbox.top + new_item.bbox.height
         
         return new_item
