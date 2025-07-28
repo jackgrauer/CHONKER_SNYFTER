@@ -4,8 +4,9 @@ import logging
 from typing import Optional, Tuple, List, Dict
 from pathlib import Path
 
-from docling.document_converter import DocumentConverter
+from docling.document_converter import DocumentConverter, FormatOption
 from docling_core.types.doc import ImageRefMode, PictureItem, TableItem
+from docling.datamodel.base_models import InputFormat
 
 from ..models.document import Document, Page
 from ..models.layout_item import LayoutItem  
@@ -31,8 +32,28 @@ class PDFExtractor:
         
     def _init_converter(self):
         """Initialize Docling converter with optimal settings"""
-        # Just use basic converter - Docling API has changed
-        self.converter = DocumentConverter()
+        try:
+            # Try to use table detection
+            from docling.datamodel.pipeline_options import TableFormerMode
+            from docling.document_converter import FormatOption
+            
+            # Create format options with table detection for PDF format
+            format_options = {
+                InputFormat.PDF: FormatOption(
+                    table_former_mode=TableFormerMode.ACCURATE
+                )
+            }
+            
+            self.converter = DocumentConverter(
+                format_options=format_options
+            )
+            logger.info("🐹 Initialized with ACCURATE table detection")
+            
+        except Exception as e:
+            # Fallback to basic converter
+            logger.warning(f"Could not initialize with table options: {e}")
+            self.converter = DocumentConverter()
+            logger.info("🐹 Using basic converter")
             
     def extract(self, pdf_path: str) -> Tuple[Document, SpatialLayoutEngine]:
         """
