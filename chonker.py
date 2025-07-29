@@ -452,6 +452,10 @@ class DocumentProcessor(QThread):
                             f'max-width: none; position: relative; margin: 0 auto 40px auto;{extra_style}">'
             )
             
+            # Reset collision detection and line tracking for each page
+            self._placed_items = []
+            self._line_positions = []
+            
             # Sort items by vertical position for gap detection
             sorted_items = sorted(
                 [(item, level, idx, bbox) for item, level, idx, bbox in pages[page_no] if bbox],
@@ -539,10 +543,83 @@ class DocumentProcessor(QThread):
                         # Default: use calculated height with minimal padding
                         height = max(height, 20)
                     
+                    # QUANTIZE/SNAP: Align items that are almost on the same line
+                    # Group items by their approximate Y position (within 5 pixels)
+                    LINE_THRESHOLD = 5  # pixels - items within this range are considered on same line
+                    
+                    # Find if there's an existing line nearby
+                    snapped_top = top
+                    if not hasattr(self, '_line_positions'):
+                        self._line_positions = []
+                    
+                    # Check if this item is close to an existing line
+                    for line_y in self._line_positions:
+                        if abs(top - line_y) <= LINE_THRESHOLD:
+                            snapped_top = line_y  # Snap to existing line
+                            break
+                    else:
+                        # No nearby line found, create a new line position
+                        self._line_positions.append(snapped_top)
+                    
+                    # Use snapped position
+                    top = snapped_top
+                    
+                    # COLLISION DETECTION: Check if this item overlaps with previously placed items
+                    if not hasattr(self, '_placed_items'):
+                        self._placed_items = []
+                    
+                    # Check for collisions
+                    original_left = left
+                    original_top = top
+                    collision_resolved = False
+                    
+                    for placed in self._placed_items:
+                        placed_left, placed_top, placed_right, placed_bottom = placed
+                        
+                        # Check if boxes overlap
+                        if (left < placed_right and left + width > placed_left and 
+                            top < placed_bottom and top + height > placed_top):
+                            
+                            # Collision detected! Try to resolve
+                            # Option 1: Move to the right of the existing item
+                            if placed_right + width < max_x * combined_scale:
+                                left = placed_right + 5  # 5px gap
+                                collision_resolved = True
+                            # Option 2: Move below the existing item
+                            elif placed_bottom + height < max_y * combined_scale:
+                                top = placed_bottom + 2  # 2px gap
+                                left = original_left  # Reset horizontal position
+                                collision_resolved = True
+                            else:
+                                # Can't resolve nicely, offset slightly
+                                left = original_left + 20
+                                top = original_top + 10
+                                collision_resolved = True
+                            break
+                    
+                    # Add this item to placed items
+                    self._placed_items.append((left, top, left + width, top + height))
+                    
+                    # SMART WRAPPING: For regular-sized pages, wrap text that would go off-page
+                    # Only apply to non-oversized pages
+                    is_oversized = (page_width > 850 or page_height > 1100)
+                    page_right_edge = max_x * combined_scale
+                    
+                    # Check if text would go off the right edge of a regular page
+                    if not is_oversized and left + width > page_right_edge - 20:  # 20px margin
+                        # Adjust width to fit within page
+                        width = page_right_edge - left - 20
+                        # Force text wrapping for this item
+                        force_wrap = True
+                    else:
+                        force_wrap = False
+                    
                     # Debug first few items
                     if idx < 3:
                         print(f"Item {idx}: bbox l={bbox.l:.1f}, t={bbox.t:.1f}, r={bbox.r:.1f}, b={bbox.b:.1f}")
                         print(f"  Converted: left={left:.1f}, top={top:.1f}, width={width:.1f}, height={height:.1f}")
+                        if collision_resolved:
+                            print(f"  COLLISION RESOLVED: moved from ({original_left:.1f},{original_top:.1f})")
                         print(f"  Text: {getattr(item, 'text', 'NO TEXT')[:50]}")
                     
                     # Debug: show coordinates in the HTML
@@ -560,7 +637,10 @@ class DocumentProcessor(QThread):
                     
                     # Determine if we should wrap text
                     white_space_style = ""
-                    if width < 100 or is_form_field:
+                    if force_wrap:
+                        # Forced wrapping for text that would go off-page
+                        white_space_style = "white-space: normal; word-wrap: break-word;"
+                    elif width < 100 or is_form_field:
                         # Very narrow items or form fields: never wrap
                         white_space_style = "white-space: nowrap;"
                     elif item_type in ['Paragraph', 'ParagraphItem'] and width > 300:
@@ -1767,9 +1847,11 @@ class ChonkerApp(QMainWindow):
                 self.log("Loading PDF...")
                 QApplication.processEvents()  # Update UI immediately
                 
+                # Set current PDF path BEFORE creating viewer to avoid "no PDF loaded" error
+                self.current_pdf_path = file_path
+                
                 # Create embedded PDF viewer in left pane
                 self.create_embedded_pdf_viewer(file_path)
-                self.current_pdf_path = file_path
     
     def create_embedded_pdf_viewer(self, file_path: str):
         # Clear left pane
@@ -1820,7 +1902,7 @@ class ChonkerApp(QMainWindow):
         
         # Switch to left pane
         self.active_pane = 'left'
-        self._update_pane_styles()
+        # self._update_pane_styles()  # Method doesn't exist
         self.embedded_pdf_view.setFocus()
         
         # Set PDF view in selection manager
