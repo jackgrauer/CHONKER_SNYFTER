@@ -1,492 +1,514 @@
 #!/usr/bin/env rust-script
 //! ```cargo
 //! [dependencies]
-//! minifb = "0.25"
-//! pdfium-render = "0.8"
+//! fltk = { version = "1.4", features = ["fltk-bundled"] }
+//! mupdf = "0.4"
 //! rfd = "0.15"
 //! image = "0.25"
 //! ```
 
-use minifb::{Key, Window, WindowOptions, Scale, MouseMode, MouseButton};
-use pdfium_render::prelude::*;
+use fltk::{
+    app::{self, App, Scheme},
+    button::Button,
+    enums::{Color, ColorDepth, Event, Font, FrameType, Key},
+    frame::Frame,
+    group::{Flex, Pack, PackType, Scroll},
+    prelude::*,
+    text::{TextBuffer, TextDisplay},
+    window::Window,
+    image as fltk_image,
+};
+use mupdf::{Document, Matrix, Pixmap};
+use std::cell::RefCell;
 use std::path::PathBuf;
-use std::time::Instant;
+use std::rc::Rc;
 
-const WINDOW_WIDTH: usize = 1200;
-const WINDOW_HEIGHT: usize = 800;
-const TOP_BAR_HEIGHT: usize = 60;
-const BUTTON_HEIGHT: usize = 40;
-const BUTTON_WIDTH: usize = 100;
-const PADDING: usize = 10;
+const WINDOW_WIDTH: i32 = 1200;
+const WINDOW_HEIGHT: i32 = 800;
+const TOP_BAR_HEIGHT: i32 = 60;
+const LOG_HEIGHT: i32 = 100;
 
-// Colors
-const COLOR_TEAL: u32 = 0xFF1ABC9C;
-const COLOR_TEAL_DARK: u32 = 0xFF16A085;
-const COLOR_WHITE: u32 = 0xFFFFFFFF;
-const COLOR_BLACK: u32 = 0xFF000000;
-const COLOR_GRAY_LIGHT: u32 = 0xFFE5E5E5;
-const COLOR_GRAY_MED: u32 = 0xFFCCCCCC;
-const COLOR_GRAY_DARK: u32 = 0xFF999999;
+// Color scheme
+const COLOR_TEAL: Color = Color::from_rgb(0x1A, 0xBC, 0x9C);
+const COLOR_DARK_BG: Color = Color::from_rgb(0x52, 0x56, 0x59);
+const COLOR_DARKER_BG: Color = Color::from_rgb(0x2D, 0x2F, 0x31);
+const COLOR_BUTTON_BG: Color = Color::from_rgb(0x3A, 0x3C, 0x3E);
 
-struct Button {
-    x: usize,
-    y: usize,
-    width: usize,
-    height: usize,
-    text: String,
-    enabled: bool,
-}
-
-impl Button {
-    fn new(x: usize, y: usize, text: &str) -> Self {
-        Self {
-            x,
-            y,
-            width: BUTTON_WIDTH,
-            height: BUTTON_HEIGHT,
-            text: text.to_string(),
-            enabled: true,
-        }
-    }
-
-    fn contains(&self, x: usize, y: usize) -> bool {
-        x >= self.x && x < self.x + self.width && 
-        y >= self.y && y < self.y + self.height
-    }
-
-    fn draw(&self, buffer: &mut [u32], width: usize) {
-        let color = if self.enabled { COLOR_TEAL } else { COLOR_GRAY_MED };
-        let text_color = if self.enabled { COLOR_WHITE } else { COLOR_GRAY_DARK };
-        
-        // Draw button background
-        for y in self.y..self.y.min(self.y + self.height) {
-            for x in self.x..self.x.min(self.x + self.width) {
-                if y < buffer.len() / width && x < width {
-                    buffer[y * width + x] = color;
-                }
-            }
-        }
-        
-        // Draw simple text (centered)
-        let text_x = self.x + (self.width - self.text.len() * 8) / 2;
-        let text_y = self.y + (self.height - 16) / 2;
-        draw_text(buffer, width, text_x, text_y, &self.text, text_color);
-    }
-}
-
-struct Chonker5 {
+struct Chonker5App {
+    app: App,
     window: Window,
-    buffer: Vec<u32>,
-    width: usize,
-    height: usize,
+    pdf_frame: Frame,
+    status_label: Frame,
+    zoom_label: Frame,
+    page_label: Frame,
+    log_display: TextDisplay,
+    log_buffer: TextBuffer,
+    prev_btn: Button,
+    next_btn: Button,
+    extracted_text_display: TextDisplay,
+    extracted_text_buffer: TextBuffer,
     
     // PDF state
-    pdfium: Option<Pdfium>,
-    pdf_document: Option<PdfDocument<'static>>,
-    current_pdf: Option<PathBuf>,
+    pdf_document: Option<Document>,
     current_page: usize,
     total_pages: usize,
     zoom_level: f32,
-    
-    // Rendered page
-    pdf_pixels: Option<Vec<u32>>,
-    pdf_width: usize,
-    pdf_height: usize,
-    
-    // UI state
-    buttons: Vec<Button>,
-    status_message: String,
-    needs_redraw: bool,
-    
-    // Viewport
-    viewport_x: i32,
-    viewport_y: i32,
-    dragging: bool,
-    drag_start_x: f32,
-    drag_start_y: f32,
-    drag_start_viewport_x: i32,
-    drag_start_viewport_y: i32,
+    pdf_image: Option<fltk_image::RgbImage>,
 }
 
-impl Chonker5 {
-    fn new() -> Self {
-        let mut window = Window::new(
-            "🐹 CHONKER 5 - PDF Viewer",
-            WINDOW_WIDTH,
-            WINDOW_HEIGHT,
-            WindowOptions {
-                resize: true,
-                scale: Scale::X1,
-                ..WindowOptions::default()
-            },
-        ).unwrap();
-
-        window.limit_update_rate(Some(std::time::Duration::from_micros(16600))); // ~60fps
+impl Chonker5App {
+    fn new() -> Rc<RefCell<Self>> {
+        let app = App::default().with_scheme(Scheme::Gtk);
         
-        let buffer = vec![COLOR_GRAY_LIGHT; WINDOW_WIDTH * WINDOW_HEIGHT];
+        // Create main window
+        let mut window = Window::new(100, 100, WINDOW_WIDTH, WINDOW_HEIGHT, "🐹 CHONKER 5 - PDF Viewer");
+        window.set_color(COLOR_DARK_BG);
+        window.make_resizable(true);
         
-        // Initialize pdfium
-        let pdfium = if let Ok(bindings) = Pdfium::bind_to_system_library() {
-            Some(Pdfium::new(bindings))
-        } else if let Ok(lib_path) = std::env::var("PDFIUM_DYNAMIC_LIB_PATH") {
-            Pdfium::bind_to_library(Pdfium::pdfium_platform_library_name_at_path(&lib_path))
-                .map(|bindings| Pdfium::new(bindings))
-                .ok()
-        } else {
-            eprintln!("Warning: PDFium not found. PDF rendering will not work.");
-            eprintln!("Install with: brew install pdfium");
-            None
-        };
+        // Create main vertical layout
+        let mut main_flex = Flex::default()
+            .with_size(WINDOW_WIDTH, WINDOW_HEIGHT)
+            .column();
         
-        // Create buttons
-        let mut buttons = Vec::new();
-        buttons.push(Button::new(PADDING, PADDING, "Open"));
-        buttons.push(Button::new(PADDING + BUTTON_WIDTH + 10, PADDING, "Prev"));
-        buttons.push(Button::new(PADDING + (BUTTON_WIDTH + 10) * 2, PADDING, "Next"));
-        buttons.push(Button::new(PADDING + (BUTTON_WIDTH + 10) * 3, PADDING, "Zoom In"));
-        buttons.push(Button::new(PADDING + (BUTTON_WIDTH + 10) * 4, PADDING, "Zoom Out"));
+        // Top bar
+        let mut top_bar = Pack::default()
+            .with_size(WINDOW_WIDTH, TOP_BAR_HEIGHT);
+        top_bar.set_type(PackType::Horizontal);
+        top_bar.set_color(COLOR_TEAL);
+        top_bar.set_spacing(10);
+        top_bar.set_frame(FrameType::FlatBox);
         
-        // Initially disable navigation buttons
-        buttons[1].enabled = false;
-        buttons[2].enabled = false;
+        Frame::default().with_size(10, 0); // Padding
         
-        Self {
-            window,
-            buffer,
-            width: WINDOW_WIDTH,
-            height: WINDOW_HEIGHT,
-            pdfium,
+        let mut open_btn = Button::default()
+            .with_size(100, 40)
+            .with_label("Open");
+        open_btn.set_color(COLOR_BUTTON_BG);
+        open_btn.set_label_color(Color::White);
+        open_btn.set_frame(FrameType::UpBox);
+        
+        let mut prev_btn = Button::default()
+            .with_size(80, 40)
+            .with_label("Prev");
+        prev_btn.set_color(COLOR_BUTTON_BG);
+        prev_btn.set_label_color(Color::White);
+        prev_btn.set_frame(FrameType::UpBox);
+        prev_btn.deactivate();
+        
+        let mut next_btn = Button::default()
+            .with_size(80, 40)
+            .with_label("Next");
+        next_btn.set_color(COLOR_BUTTON_BG);
+        next_btn.set_label_color(Color::White);
+        next_btn.set_frame(FrameType::UpBox);
+        next_btn.deactivate();
+        
+        let mut zoom_in_btn = Button::default()
+            .with_size(100, 40)
+            .with_label("Zoom In");
+        zoom_in_btn.set_color(COLOR_BUTTON_BG);
+        zoom_in_btn.set_label_color(Color::White);
+        zoom_in_btn.set_frame(FrameType::UpBox);
+        
+        let mut zoom_out_btn = Button::default()
+            .with_size(100, 40)
+            .with_label("Zoom Out");
+        zoom_out_btn.set_color(COLOR_BUTTON_BG);
+        zoom_out_btn.set_label_color(Color::White);
+        zoom_out_btn.set_frame(FrameType::UpBox);
+        
+        let mut fit_width_btn = Button::default()
+            .with_size(100, 40)
+            .with_label("Fit Width");
+        fit_width_btn.set_color(COLOR_BUTTON_BG);
+        fit_width_btn.set_label_color(Color::White);
+        fit_width_btn.set_frame(FrameType::UpBox);
+        
+        Frame::default().with_size(20, 0); // Spacer
+        
+        let mut status_label = Frame::default()
+            .with_size(300, 40)
+            .with_label("Ready! Click 'Open' to load a PDF");
+        status_label.set_label_color(Color::White);
+        
+        let mut zoom_label = Frame::default()
+            .with_size(100, 40)
+            .with_label("Zoom: 100%");
+        zoom_label.set_label_color(Color::White);
+        
+        let mut page_label = Frame::default()
+            .with_size(100, 40)
+            .with_label("Page: 0/0");
+        page_label.set_label_color(Color::White);
+        
+        top_bar.end();
+        main_flex.fixed(&mut top_bar, TOP_BAR_HEIGHT);
+        
+        // Create horizontal split for PDF and text panels
+        let content_flex = Flex::default()
+            .with_size(WINDOW_WIDTH, WINDOW_HEIGHT - TOP_BAR_HEIGHT - LOG_HEIGHT)
+            .row();
+        
+        // Left pane: PDF viewing area with scroll
+        let mut pdf_scroll = Scroll::default()
+            .with_size(WINDOW_WIDTH / 2, WINDOW_HEIGHT - TOP_BAR_HEIGHT - LOG_HEIGHT);
+        pdf_scroll.set_color(COLOR_DARK_BG);
+        
+        let mut pdf_frame = Frame::default()
+            .with_size(WINDOW_WIDTH / 2 - 20, 1000);
+        pdf_frame.set_frame(FrameType::FlatBox);
+        pdf_frame.set_color(Color::White);
+        pdf_frame.set_label("Click 'Open' to load a PDF");
+        pdf_frame.set_label_color(Color::Black);
+        
+        pdf_scroll.end();
+        
+        // Right pane: Extracted text display
+        let mut text_scroll = Scroll::default()
+            .with_size(WINDOW_WIDTH / 2, WINDOW_HEIGHT - TOP_BAR_HEIGHT - LOG_HEIGHT);
+        text_scroll.set_color(COLOR_DARKER_BG);
+        
+        let mut extracted_text_display = TextDisplay::default()
+            .with_size(WINDOW_WIDTH / 2 - 20, WINDOW_HEIGHT - TOP_BAR_HEIGHT - LOG_HEIGHT - 20);
+        extracted_text_display.set_color(COLOR_DARKER_BG);
+        extracted_text_display.set_text_color(Color::White);
+        extracted_text_display.set_text_font(Font::Helvetica);
+        extracted_text_display.set_text_size(14);
+        extracted_text_display.set_frame(FrameType::FlatBox);
+        extracted_text_display.wrap_mode(fltk::text::WrapMode::AtBounds, 0);
+        
+        let mut extracted_text_buffer = TextBuffer::default();
+        extracted_text_buffer.set_text("Extracted text will appear here...");
+        extracted_text_display.set_buffer(extracted_text_buffer.clone());
+        
+        text_scroll.end();
+        
+        content_flex.end();
+        
+        // Log area
+        let mut log_display = TextDisplay::default()
+            .with_size(WINDOW_WIDTH, LOG_HEIGHT);
+        log_display.set_color(COLOR_DARKER_BG);
+        log_display.set_text_color(COLOR_TEAL);
+        log_display.set_text_font(Font::Courier);
+        log_display.set_text_size(11);
+        log_display.set_frame(FrameType::DownBox);
+        
+        let mut log_buffer = TextBuffer::default();
+        log_buffer.append("🐹 CHONKER 5 Ready!\n");
+        log_display.set_buffer(log_buffer.clone());
+        
+        main_flex.fixed(&mut log_display, LOG_HEIGHT);
+        main_flex.end();
+        
+        window.resizable(&window);
+        window.end();
+        window.show();
+        
+        log_buffer.append("🐹 CHONKER 5 Ready!\n");
+        log_buffer.append("📌 Using MuPDF for PDF rendering\n");
+        log_buffer.append("📌 Keyboard shortcuts: Cmd+O (Open), ←/→ (Navigate), +/- (Zoom), F (Fit width)\n");
+        
+        let app_state = Rc::new(RefCell::new(Self {
+            app,
+            window: window.clone(),
+            pdf_frame,
+            status_label,
+            zoom_label,
+            page_label,
+            log_display,
+            log_buffer,
+            prev_btn: prev_btn.clone(),
+            next_btn: next_btn.clone(),
+            extracted_text_display,
+            extracted_text_buffer,
             pdf_document: None,
-            current_pdf: None,
             current_page: 0,
             total_pages: 0,
             zoom_level: 1.0,
-            pdf_pixels: None,
-            pdf_width: 0,
-            pdf_height: 0,
-            buttons,
-            status_message: if pdfium.is_some() {
-                "Ready! Click 'Open' to load a PDF".to_string()
-            } else {
-                "⚠️ PDFium not found - PDF rendering disabled".to_string()
-            },
-            needs_redraw: true,
-            viewport_x: 0,
-            viewport_y: 0,
-            dragging: false,
-            drag_start_x: 0.0,
-            drag_start_y: 0.0,
-            drag_start_viewport_x: 0,
-            drag_start_viewport_y: 0,
+            pdf_image: None,
+        }));
+        
+        // Set up event handlers
+        
+        // Open button
+        {
+            let state = app_state.clone();
+            open_btn.set_callback(move |_| {
+                state.borrow_mut().open_file();
+            });
         }
-    }
-
-    fn run(&mut self) {
-        while self.window.is_open() && !self.window.is_key_down(Key::Escape) {
-            // Handle window resize
-            let (new_width, new_height) = self.window.get_size();
-            if new_width != self.width || new_height != self.height {
-                self.width = new_width;
-                self.height = new_height;
-                self.buffer.resize(new_width * new_height, COLOR_GRAY_LIGHT);
-                self.needs_redraw = true;
-            }
-            
-            // Handle input
-            self.handle_input();
-            
-            // Render
-            if self.needs_redraw {
-                self.render();
-                self.needs_redraw = false;
-            }
-            
-            // Update window
-            self.window
-                .update_with_buffer(&self.buffer, self.width, self.height)
-                .unwrap();
+        
+        // Navigation buttons
+        {
+            let state = app_state.clone();
+            prev_btn.set_callback(move |_| {
+                state.borrow_mut().prev_page();
+            });
         }
-    }
-
-    fn handle_input(&mut self) {
-        // Handle mouse clicks on buttons
-        if let Some((mouse_x, mouse_y)) = self.window.get_mouse_pos(MouseMode::Discard) {
-            let mouse_x = mouse_x as usize;
-            let mouse_y = mouse_y as usize;
-            
-            // Handle dragging
-            if self.window.get_mouse_down(MouseButton::Left) {
-                if !self.dragging && mouse_y > TOP_BAR_HEIGHT && self.pdf_pixels.is_some() {
-                    self.dragging = true;
-                    self.drag_start_x = mouse_x as f32;
-                    self.drag_start_y = mouse_y as f32;
-                    self.drag_start_viewport_x = self.viewport_x;
-                    self.drag_start_viewport_y = self.viewport_y;
-                } else if self.dragging {
-                    let dx = mouse_x as f32 - self.drag_start_x;
-                    let dy = mouse_y as f32 - self.drag_start_y;
-                    self.viewport_x = self.drag_start_viewport_x + dx as i32;
-                    self.viewport_y = self.drag_start_viewport_y + dy as i32;
-                    self.needs_redraw = true;
-                }
-            } else {
-                if self.dragging {
-                    self.dragging = false;
-                }
-                
-                // Check button clicks
-                if self.window.get_mouse_down(MouseButton::Left) {
-                    for (i, button) in self.buttons.iter().enumerate() {
-                        if button.enabled && button.contains(mouse_x, mouse_y) {
-                            match i {
-                                0 => self.open_file(),
-                                1 => self.prev_page(),
-                                2 => self.next_page(),
-                                3 => self.zoom_in(),
-                                4 => self.zoom_out(),
-                                _ => {}
-                            }
-                        }
-                    }
-                }
-            }
+        
+        {
+            let state = app_state.clone();
+            next_btn.set_callback(move |_| {
+                state.borrow_mut().next_page();
+            });
+        }
+        
+        // Zoom buttons
+        {
+            let state = app_state.clone();
+            zoom_in_btn.set_callback(move |_| {
+                state.borrow_mut().zoom_in();
+            });
+        }
+        
+        {
+            let state = app_state.clone();
+            zoom_out_btn.set_callback(move |_| {
+                state.borrow_mut().zoom_out();
+            });
+        }
+        
+        {
+            let state = app_state.clone();
+            fit_width_btn.set_callback(move |_| {
+                state.borrow_mut().fit_to_width();
+            });
         }
         
         // Keyboard shortcuts
-        if self.window.is_key_pressed(Key::O, minifb::KeyRepeat::No) {
-            self.open_file();
-        }
-        if self.window.is_key_pressed(Key::Left, minifb::KeyRepeat::No) {
-            self.prev_page();
-        }
-        if self.window.is_key_pressed(Key::Right, minifb::KeyRepeat::No) {
-            self.next_page();
-        }
-        if self.window.is_key_pressed(Key::Equal, minifb::KeyRepeat::No) {
-            self.zoom_in();
-        }
-        if self.window.is_key_pressed(Key::Minus, minifb::KeyRepeat::No) {
-            self.zoom_out();
-        }
-    }
-
-    fn render(&mut self) {
-        // Clear buffer
-        self.buffer.fill(COLOR_GRAY_LIGHT);
-        
-        // Draw top bar
-        for y in 0..TOP_BAR_HEIGHT {
-            for x in 0..self.width {
-                self.buffer[y * self.width + x] = COLOR_TEAL;
-            }
-        }
-        
-        // Draw buttons
-        for button in &self.buttons {
-            button.draw(&mut self.buffer, self.width);
-        }
-        
-        // Draw status
-        draw_text(&mut self.buffer, self.width, self.width - 400, 20, &self.status_message, COLOR_WHITE);
-        
-        // Draw page info
-        if self.total_pages > 0 {
-            let page_info = format!("Page {} / {}", self.current_page + 1, self.total_pages);
-            draw_text(&mut self.buffer, self.width, self.width - 150, 20, &page_info, COLOR_WHITE);
-        }
-        
-        // Draw PDF content
-        if let Some(pdf_pixels) = &self.pdf_pixels {
-            self.draw_pdf_page(pdf_pixels);
-        } else if self.current_pdf.is_some() {
-            draw_text(&mut self.buffer, self.width, self.width / 2 - 100, self.height / 2, "Loading PDF...", COLOR_BLACK);
-        } else {
-            draw_text(&mut self.buffer, self.width, self.width / 2 - 150, self.height / 2, "Click 'Open' to load a PDF", COLOR_BLACK);
-        }
-    }
-
-    fn draw_pdf_page(&mut self, pdf_pixels: &[u32]) {
-        let viewport_top = TOP_BAR_HEIGHT;
-        let viewport_height = self.height - TOP_BAR_HEIGHT;
-        
-        // Calculate scaled dimensions
-        let scaled_width = (self.pdf_width as f32 * self.zoom_level) as usize;
-        let scaled_height = (self.pdf_height as f32 * self.zoom_level) as usize;
-        
-        // Draw the PDF page with scaling
-        for y in 0..viewport_height {
-            for x in 0..self.width {
-                let screen_y = y + viewport_top;
-                
-                // Calculate source coordinates with viewport offset
-                let src_x = ((x as i32 - self.viewport_x) as f32 / self.zoom_level) as i32;
-                let src_y = ((y as i32 - self.viewport_y) as f32 / self.zoom_level) as i32;
-                
-                if src_x >= 0 && src_x < self.pdf_width as i32 && 
-                   src_y >= 0 && src_y < self.pdf_height as i32 {
-                    let src_idx = src_y as usize * self.pdf_width + src_x as usize;
-                    if src_idx < pdf_pixels.len() {
-                        self.buffer[screen_y * self.width + x] = pdf_pixels[src_idx];
+        {
+            let state = app_state.clone();
+            window.handle(move |_, ev| match ev {
+                Event::KeyDown => {
+                    let key = app::event_key();
+                    if app::is_event_command() && key == Key::from_char('o') {
+                        state.borrow_mut().open_file();
+                        true
+                    } else if key == Key::Left {
+                        state.borrow_mut().prev_page();
+                        true
+                    } else if key == Key::Right {
+                        state.borrow_mut().next_page();
+                        true
+                    } else if key == Key::from_char('+') || key == Key::from_char('=') {
+                        state.borrow_mut().zoom_in();
+                        true
+                    } else if key == Key::from_char('-') {
+                        state.borrow_mut().zoom_out();
+                        true
+                    } else if key == Key::from_char('f') {
+                        state.borrow_mut().fit_to_width();
+                        true
+                    } else {
+                        false
                     }
                 }
-            }
+                _ => false,
+            });
         }
+        
+        app_state
     }
-
+    
+    fn log(&mut self, message: &str) {
+        self.log_buffer.append(&format!("{}\n", message));
+        // Scroll to bottom
+        let len = self.log_buffer.length();
+        self.log_display.scroll(len, 0);
+    }
+    
     fn open_file(&mut self) {
+        self.log("📂 Opening file dialog...");
+        
         if let Some(path) = rfd::FileDialog::new()
             .add_filter("PDF", &["pdf"])
             .pick_file()
         {
             self.load_pdf(path);
+        } else {
+            self.log("❌ No file selected");
         }
     }
-
+    
     fn load_pdf(&mut self, path: PathBuf) {
-        self.status_message = format!("Loading {}...", path.file_name().unwrap_or_default().to_string_lossy());
-        self.needs_redraw = true;
+        let filename = path.file_name().unwrap_or_default().to_string_lossy();
+        self.log(&format!("📄 Loading: {}", filename));
         
-        // Clear previous document
-        self.pdf_document = None;
-        self.pdf_pixels = None;
-        
-        if let Some(pdfium) = &self.pdfium {
-            match pdfium.load_pdf_from_file(&path, None) {
-                Ok(document) => {
-                    self.total_pages = document.pages().len() as usize;
-                    self.current_page = 0;
-                    self.current_pdf = Some(path);
-                    
-                    // Store document
-                    let static_doc: PdfDocument<'static> = unsafe { 
-                        std::mem::transmute(document) 
-                    };
-                    self.pdf_document = Some(static_doc);
-                    
-                    self.status_message = format!("Loaded! {} pages", self.total_pages);
-                    
-                    // Enable navigation buttons
-                    self.buttons[1].enabled = self.current_page > 0;
-                    self.buttons[2].enabled = self.current_page < self.total_pages - 1;
-                    
-                    // Reset viewport
-                    self.viewport_x = 0;
-                    self.viewport_y = 0;
-                    
-                    self.needs_redraw = true;
+        match Document::open(&path.to_string_lossy()) {
+            Ok(document) => {
+                let total_pages = document.page_count() as usize;
+                
+                self.pdf_document = Some(document);
+                self.total_pages = total_pages;
+                self.current_page = 0;
+                
+                self.log(&format!("✅ PDF loaded successfully: {} pages", self.total_pages));
+                self.update_status(&format!("Loaded! {} pages", self.total_pages));
+                
+                // Enable navigation buttons
+                if self.total_pages > 1 {
+                    self.next_btn.activate();
                 }
-                Err(e) => {
-                    self.status_message = format!("Failed to load PDF: {}", e);
-                    self.needs_redraw = true;
-                    return;
-                }
+                
+                // Update UI
+                self.update_page_label();
+                self.render_current_page();
             }
-            
-            // Render the first page
-            self.render_current_page();
+            Err(e) => {
+                let error_msg = format!("Failed to load PDF: {}", e);
+                self.log(&format!("❌ {}", error_msg));
+                self.update_status(&error_msg);
+            }
         }
     }
-
+    
     fn render_current_page(&mut self) {
         if let Some(document) = &self.pdf_document {
-            if let Ok(page) = document.pages().get(self.current_page as u16) {
+            if let Ok(page) = document.load_page(self.current_page as i32) {
                 // Calculate render size
-                let render_scale = 2.0; // Render at 2x for better quality
+                let scale = self.zoom_level * 2.0;
+                let matrix = Matrix::new_scale(scale, scale);
                 
-                let config = PdfRenderConfig::new()
-                    .set_target_width((800.0 * render_scale) as i32)
-                    .render_form_data(true)
-                    .render_annotations(true);
+                // Get page bounds
+                let bounds = page.bounds().unwrap();
+                let width = ((bounds.x1 - bounds.x0) * scale) as i32;
+                let height = ((bounds.y1 - bounds.y0) * scale) as i32;
                 
-                // Render to bitmap
-                if let Ok(bitmap) = page.render_with_config(&config) {
-                    let image_buffer = bitmap.as_image();
+                // Create pixmap
+                let pixmap = Pixmap::new(width, height, mupdf::ColorSpace::device_rgb(), 0).unwrap();
+                
+                // Clear to white
+                pixmap.clear(0xFF);
+                
+                // Render page
+                page.run_contents(&pixmap, &matrix, &mupdf::default_cookie()).unwrap();
+                
+                // Convert to FLTK image
+                let data = pixmap.pixels().unwrap();
+                let mut rgb_data = Vec::with_capacity((width * height * 3) as usize);
+                
+                // MuPDF uses RGB format
+                for pixel in data.chunks(3) {
+                    rgb_data.push(pixel[0]); // R
+                    rgb_data.push(pixel[1]); // G
+                    rgb_data.push(pixel[2]); // B
+                }
+                
+                if let Ok(img) = fltk_image::RgbImage::new(&rgb_data, width, height, ColorDepth::Rgb8) {
+                    self.pdf_image = Some(img.clone());
                     
-                    self.pdf_width = image_buffer.width() as usize;
-                    self.pdf_height = image_buffer.height() as usize;
-                    
-                    // Convert from BGRA to RGB u32
-                    let mut pixels = Vec::with_capacity(self.pdf_width * self.pdf_height);
-                    
-                    for chunk in image_buffer.as_bytes().chunks(4) {
-                        let b = chunk[0] as u32;
-                        let g = chunk[1] as u32;
-                        let r = chunk[2] as u32;
-                        let a = chunk[3] as u32;
-                        
-                        // Blend with white background
-                        let alpha = a as f32 / 255.0;
-                        let r = (r as f32 * alpha + 255.0 * (1.0 - alpha)) as u32;
-                        let g = (g as f32 * alpha + 255.0 * (1.0 - alpha)) as u32;
-                        let b = (b as f32 * alpha + 255.0 * (1.0 - alpha)) as u32;
-                        
-                        pixels.push(0xFF000000 | (r << 16) | (g << 8) | b);
+                    // Update the frame size and redraw
+                    self.pdf_frame.set_size(width, height);
+                    self.pdf_frame.set_image(Some(img));
+                    self.pdf_frame.set_label("");
+                    self.pdf_frame.redraw();
+                }
+                
+                // Extract text from current page
+                self.extract_current_page_text();
+            }
+        }
+    }
+    
+    fn extract_current_page_text(&mut self) {
+        if let Some(document) = &self.pdf_document {
+            if let Ok(page) = document.load_page(self.current_page as i32) {
+                if let Ok(text) = page.to_text() {
+                    if text.is_empty() {
+                        self.extracted_text_buffer.set_text("No text found on this page.");
+                    } else {
+                        self.extracted_text_buffer.set_text(&text);
                     }
-                    
-                    self.pdf_pixels = Some(pixels);
-                    self.needs_redraw = true;
+                } else {
+                    self.extracted_text_buffer.set_text("Error extracting text from page.");
                 }
             }
         }
     }
-
-    fn next_page(&mut self) {
-        if self.current_page < self.total_pages - 1 {
-            self.current_page += 1;
-            self.render_current_page();
-            self.buttons[1].enabled = true;
-            self.buttons[2].enabled = self.current_page < self.total_pages - 1;
-            self.status_message = format!("Page {} of {}", self.current_page + 1, self.total_pages);
-            self.needs_redraw = true;
-        }
-    }
-
+    
     fn prev_page(&mut self) {
         if self.current_page > 0 {
             self.current_page -= 1;
             self.render_current_page();
-            self.buttons[1].enabled = self.current_page > 0;
-            self.buttons[2].enabled = true;
-            self.status_message = format!("Page {} of {}", self.current_page + 1, self.total_pages);
-            self.needs_redraw = true;
+            self.update_page_label();
+            self.update_nav_buttons();
+            self.log(&format!("◀ Page {}", self.current_page + 1));
         }
     }
-
+    
+    fn next_page(&mut self) {
+        if self.current_page < self.total_pages - 1 {
+            self.current_page += 1;
+            self.render_current_page();
+            self.update_page_label();
+            self.update_nav_buttons();
+            self.log(&format!("▶ Page {}", self.current_page + 1));
+        }
+    }
+    
     fn zoom_in(&mut self) {
         self.zoom_level = (self.zoom_level * 1.2).min(4.0);
-        self.status_message = format!("Zoom: {}%", (self.zoom_level * 100.0) as i32);
-        self.needs_redraw = true;
+        self.update_zoom_label();
+        self.render_current_page();
+        self.log(&format!("🔍+ Zoom: {}%", (self.zoom_level * 100.0) as i32));
     }
-
+    
     fn zoom_out(&mut self) {
         self.zoom_level = (self.zoom_level / 1.2).max(0.25);
-        self.status_message = format!("Zoom: {}%", (self.zoom_level * 100.0) as i32);
-        self.needs_redraw = true;
+        self.update_zoom_label();
+        self.render_current_page();
+        self.log(&format!("🔍- Zoom: {}%", (self.zoom_level * 100.0) as i32));
     }
-}
-
-// Simple text drawing function
-fn draw_text(buffer: &mut [u32], width: usize, x: usize, y: usize, text: &str, color: u32) {
-    // This is a placeholder - in a real implementation you'd use a proper font renderer
-    // For now, just draw a simple representation
-    for (i, _ch) in text.chars().enumerate() {
-        let char_x = x + i * 8;
-        if char_x < width && y < buffer.len() / width {
-            // Draw a simple box for each character
-            for dy in 0..16 {
-                for dx in 0..6 {
-                    let px = char_x + dx;
-                    let py = y + dy;
-                    if px < width && py < buffer.len() / width {
-                        buffer[py * width + px] = color;
-                    }
-                }
-            }
+    
+    fn fit_to_width(&mut self) {
+        // Calculate zoom to fit width (now using half window width due to split pane)
+        let viewport_width = self.window.width() / 2 - 40;
+        let base_width = 800.0;
+        
+        self.zoom_level = (viewport_width as f32 / base_width / 2.0).clamp(0.25, 4.0);
+        self.update_zoom_label();
+        self.render_current_page();
+        self.log(&format!("📐 Fit to width - Zoom: {}%", (self.zoom_level * 100.0) as i32));
+    }
+    
+    fn update_status(&mut self, text: &str) {
+        self.status_label.set_label(text);
+    }
+    
+    fn update_zoom_label(&mut self) {
+        self.zoom_label.set_label(&format!("Zoom: {}%", (self.zoom_level * 100.0) as i32));
+    }
+    
+    fn update_page_label(&mut self) {
+        if self.total_pages > 0 {
+            self.page_label.set_label(&format!("Page: {}/{}", self.current_page + 1, self.total_pages));
+        } else {
+            self.page_label.set_label("Page: 0/0");
         }
+    }
+    
+    fn update_nav_buttons(&mut self) {
+        if self.current_page > 0 {
+            self.prev_btn.activate();
+        } else {
+            self.prev_btn.deactivate();
+        }
+        
+        if self.current_page < self.total_pages - 1 {
+            self.next_btn.activate();
+        } else {
+            self.next_btn.deactivate();
+        }
+    }
+    
+    fn run(app_state: Rc<RefCell<Self>>) {
+        let app = app_state.borrow().app.clone();
+        app.run().unwrap();
     }
 }
 
 fn main() {
-    let mut app = Chonker5::new();
-    app.run();
+    let app_state = Chonker5App::new();
+    Chonker5App::run(app_state);
 }
