@@ -68,7 +68,7 @@ security:
     source .venv/bin/activate && python -m pytest tests/test_security.py -v
 
 # Git status
-status:
+git-status:
     git status
 
 # Git commit with message

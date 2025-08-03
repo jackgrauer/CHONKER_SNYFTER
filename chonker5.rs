@@ -152,7 +152,7 @@ impl Chonker5App {
         let mut extract_btn = Button::default()
             .with_pos(x_pos, y_pos)
             .with_size(120, 40)
-            .with_label("Extract Text");
+            .with_label("Extractous - plain text");
         extract_btn.set_color(Color::from_rgb(0x00, 0x8C, 0xBA)); // Blue color for distinction
         extract_btn.set_label_color(Color::White);
         extract_btn.set_frame(FrameType::UpBox);
@@ -163,7 +163,7 @@ impl Chonker5App {
         let mut structured_btn = Button::default()
             .with_pos(x_pos, y_pos)
             .with_size(140, 40)
-            .with_label("Structured Data");
+            .with_label("Ferrules - HTML");
         structured_btn.set_color(Color::from_rgb(0x00, 0x8C, 0x3A)); // Green color for distinction
         structured_btn.set_label_color(Color::White);
         structured_btn.set_frame(FrameType::UpBox);
