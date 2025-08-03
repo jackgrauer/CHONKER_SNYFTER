@@ -98,7 +98,7 @@ struct DetectedTable {
 
 // StructuredTextWidget and Pretty View functionality removed
 
-// Advanced table detection from ferrules blocks
+// Advanced table detection from ferrules blocks - ULTRA AGGRESSIVE MODE
 fn detect_tables(blocks: &[FerrulesBlock], page_id: i32) -> Vec<DetectedTable> {
     let mut tables = Vec::new();
     
@@ -109,7 +109,7 @@ fn detect_tables(blocks: &[FerrulesBlock], page_id: i32) -> Vec<DetectedTable> {
         .filter(|(_, b)| b.pages_id.contains(&page_id))
         .collect();
     
-    println!("🔍 Table detection for page {}: {} blocks", page_id + 1, page_blocks.len());
+    println!("🔍 ULTRA table detection for page {}: {} blocks", page_id + 1, page_blocks.len());
     
     // Sort by Y then X for consistent processing
     page_blocks.sort_by(|a, b| {
@@ -351,10 +351,46 @@ fn detect_tables(blocks: &[FerrulesBlock], page_id: i32) -> Vec<DetectedTable> {
         }
     }
     
-    // Phase 4: More aggressive table detection for missed tables
-    // Lower thresholds and look for more patterns
-    if tables.is_empty() && rows.len() >= 2 {
-        println!("  🔎 Trying aggressive table detection...");
+    // Phase 4: ULTRA AGGRESSIVE table detection
+    // Multiple strategies to catch ALL possible tables
+    if tables.is_empty() && rows.len() >= 1 {
+        println!("  🔥 ULTRA AGGRESSIVE MODE ACTIVATED...");
+        
+        // Strategy 0: Look for horizontal alignment patterns (NEW!)
+        // If multiple blocks share similar X coordinates, they might be table columns
+        let mut x_positions: Vec<f64> = Vec::new();
+        for row in &rows {
+            for (_, block) in row {
+                x_positions.push(block.bbox.x0);
+                x_positions.push(block.bbox.x1);
+            }
+        }
+        x_positions.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        
+        // Find clusters of X positions (potential column boundaries)
+        let mut x_clusters: Vec<Vec<f64>> = Vec::new();
+        let x_tolerance = 10.0;
+        
+        for &x in &x_positions {
+            let mut found_cluster = false;
+            for cluster in &mut x_clusters {
+                if cluster.iter().any(|&cx| (cx - x).abs() < x_tolerance) {
+                    cluster.push(x);
+                    found_cluster = true;
+                    break;
+                }
+            }
+            if !found_cluster {
+                x_clusters.push(vec![x]);
+            }
+        }
+        
+        // If we have 3+ consistent X positions, we might have columns
+        let significant_x_positions = x_clusters.iter()
+            .filter(|cluster| cluster.len() >= 2)
+            .count();
+        
+        println!("  📐 Found {} potential column boundaries", significant_x_positions);
         
         // Strategy 1: Look for any 2+ consecutive rows with consistent structure
         let mut i = 0;
@@ -393,15 +429,138 @@ fn detect_tables(blocks: &[FerrulesBlock], page_id: i32) -> Vec<DetectedTable> {
                             FerrulesKind::Structured { text, .. } => text,
                             _ => "",
                         };
+                        // Much more aggressive numeric detection
                         text.trim().parse::<f64>().is_ok() || 
                         text.contains('$') || 
+                        text.contains('€') || 
+                        text.contains('£') || 
                         text.contains('%') ||
-                        text.contains('.')
+                        text.contains('.') ||
+                        text.chars().any(|c| c.is_numeric()) ||
+                        text.contains(',') && text.chars().filter(|&c| c.is_numeric()).count() > 0 ||
+                        // Date patterns
+                        text.contains('/') && text.chars().filter(|&c| c.is_numeric()).count() >= 4 ||
+                        text.contains('-') && text.chars().filter(|&c| c.is_numeric()).count() >= 4 ||
+                        // Currency patterns
+                        (text.starts_with('$') || text.starts_with('€') || text.starts_with('£')) ||
+                        text.ends_with("USD") || text.ends_with("EUR") || text.ends_with("GBP")
                     })
                 });
             
-            // If we have at least 2 rows and some multi-cell rows OR numeric content
-            if table_rows_indices.len() >= 2 && (multi_cell_rows >= 1 || has_numeric_content) {
+            // Check for table headers and separators
+            let has_table_indicators = table_rows_indices.iter()
+                .any(|&idx| {
+                    rows[idx].iter().any(|(_, block)| {
+                        let text = match &block.kind {
+                            FerrulesKind::Text { text } => text,
+                            FerrulesKind::Structured { text, .. } => text,
+                            _ => "",
+                        };
+                        // Common table headers and content
+                        let lower = text.to_lowercase();
+                        // Common table headers
+                        lower.contains("total") ||
+                        lower.contains("amount") ||
+                        lower.contains("date") ||
+                        lower.contains("description") ||
+                        lower.contains("quantity") ||
+                        lower.contains("price") ||
+                        lower.contains("item") ||
+                        lower.contains("name") ||
+                        lower.contains("value") ||
+                        lower.contains("count") ||
+                        // Invoice/financial table indicators
+                        lower.contains("invoice") ||
+                        lower.contains("subtotal") ||
+                        lower.contains("tax") ||
+                        lower.contains("balance") ||
+                        lower.contains("payment") ||
+                        lower.contains("due") ||
+                        lower.contains("rate") ||
+                        lower.contains("hours") ||
+                        lower.contains("unit") ||
+                        lower.contains("cost") ||
+                        lower.contains("fee") ||
+                        lower.contains("charge") ||
+                        // Table structure indicators
+                        text.contains("|") ||
+                        text.contains("\t") ||
+                        text.chars().filter(|&c| c == '-').count() > 3 ||
+                        text.chars().filter(|&c| c == '_').count() > 3 ||
+                        text.chars().filter(|&c| c == '=').count() > 3 ||
+                        // Column headers are often short
+                        (text.trim().len() < 20 && text.trim().len() > 0 && !text.chars().all(|c| c.is_whitespace()))
+                    })
+                });
+            
+            // ULTRA AGGRESSIVE: Detect if ANY of these conditions are met
+            // NEW: Even MORE aggressive detection
+            let grid_pattern_detected = table_rows_indices.len() >= 1 && 
+                table_rows_indices.iter().all(|&idx| {
+                    let row_len = rows[idx].len();
+                    row_len >= 2 && row_len == rows[table_rows_indices[0]].len()
+                });
+            
+            let has_separator_lines = table_rows_indices.iter()
+                .any(|&idx| {
+                    rows[idx].iter().any(|(_, block)| {
+                        let text = match &block.kind {
+                            FerrulesKind::Text { text } => text,
+                            FerrulesKind::Structured { text, .. } => text,
+                            _ => "",
+                        };
+                        // Lines made of dashes, underscores, equals, or pipes
+                        text.chars().filter(|&c| c == '-' || c == '_' || c == '=' || c == '|').count() > 5
+                    })
+                });
+            
+            // Check for consistent spacing between rows (table-like)
+            let has_consistent_row_spacing = if table_rows_indices.len() >= 3 {
+                let mut spacings = Vec::new();
+                for i in 1..table_rows_indices.len() {
+                    let curr_idx = table_rows_indices[i];
+                    let prev_idx = table_rows_indices[i-1];
+                    if !rows[curr_idx].is_empty() && !rows[prev_idx].is_empty() {
+                        let spacing = rows[curr_idx][0].1.bbox.y0 - rows[prev_idx][0].1.bbox.y1;
+                        spacings.push(spacing);
+                    }
+                }
+                if spacings.len() >= 2 {
+                    let avg_spacing = spacings.iter().sum::<f64>() / spacings.len() as f64;
+                    spacings.iter().all(|&s| (s - avg_spacing).abs() < 10.0)
+                } else {
+                    false
+                }
+            } else {
+                false
+            };
+            
+            let is_likely_table = (
+                // Traditional table detection
+                (table_rows_indices.len() >= 2 && multi_cell_rows >= 1) ||
+                // Numeric content suggests table
+                (table_rows_indices.len() >= 2 && has_numeric_content) ||
+                // Table headers/indicators found
+                (table_rows_indices.len() >= 2 && has_table_indicators) ||
+                // Column alignment detected
+                (table_rows_indices.len() >= 3 && significant_x_positions >= 3) ||
+                // Single row with multiple cells (header row?)
+                (table_rows_indices.len() == 1 && rows[table_rows_indices[0]].len() >= 3) ||
+                // NEW: Grid pattern - all rows have same number of cells
+                grid_pattern_detected ||
+                // NEW: Has separator lines (common in tables)
+                has_separator_lines ||
+                // NEW: Consistent row spacing
+                has_consistent_row_spacing ||
+                // NEW: Any 2+ rows with 2+ cells each is a table!
+                (table_rows_indices.len() >= 2 && table_rows_indices.iter().all(|&idx| rows[idx].len() >= 2))
+            );
+            
+            if is_likely_table {
+                println!("    🎯 DETECTED TABLE! Rows: {}, Multi-cell: {}, Numeric: {}, Indicators: {}, Columns: {}", 
+                    table_rows_indices.len(), multi_cell_rows, has_numeric_content, has_table_indicators, significant_x_positions);
+                println!("       Grid: {}, Separators: {}, Consistent spacing: {}", 
+                    grid_pattern_detected, has_separator_lines, has_consistent_row_spacing);
                     // Found a potential table
                     let mut detected_table = DetectedTable {
                         rows: Vec::new(),
