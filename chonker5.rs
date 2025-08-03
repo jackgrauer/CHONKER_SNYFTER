@@ -111,6 +111,21 @@ fn detect_tables(blocks: &[FerrulesBlock], page_id: i32) -> Vec<DetectedTable> {
     
     println!("🔍 ULTRA table detection for page {}: {} blocks", page_id + 1, page_blocks.len());
     
+    // Debug: Show what text we're actually seeing
+    if page_blocks.len() < 20 {  // Only for small pages to avoid spam
+        println!("  📝 Block contents:");
+        for (idx, (_, block)) in page_blocks.iter().enumerate() {
+            let text = match &block.kind {
+                FerrulesKind::Text { text } => text,
+                FerrulesKind::Structured { text, .. } => text,
+                _ => "",
+            };
+            if !text.trim().is_empty() {
+                println!("    Block {}: [{}]", idx, text.trim().replace('\n', " "));
+            }
+        }
+    }
+    
     // Sort by Y then X for consistent processing
     page_blocks.sort_by(|a, b| {
         let y_cmp = a.1.bbox.y0.partial_cmp(&b.1.bbox.y0).unwrap();
@@ -122,10 +137,45 @@ fn detect_tables(blocks: &[FerrulesBlock], page_id: i32) -> Vec<DetectedTable> {
     });
     
     // Phase 1: Cluster blocks into rows based on Y-coordinate alignment
+    // But first, filter out blocks that are clearly not table content
     let mut rows: Vec<Vec<(usize, &FerrulesBlock)>> = Vec::new();
     let _row_tolerance = 3.0; // Tighter tolerance for better accuracy
     
-    for (idx, block) in &page_blocks {
+    // Pre-filter: Skip blocks that are table descriptions, not table content
+    let filtered_blocks: Vec<(usize, &FerrulesBlock)> = page_blocks.iter()
+        .filter(|(_, block)| {
+            let text = match &block.kind {
+                FerrulesKind::Text { text } => text.as_str(),
+                FerrulesKind::Structured { text, .. } => text.as_str(),
+                _ => "",
+            };
+            let lower = text.to_lowercase();
+            
+            // Skip if it's a table description
+            !(lower.contains("table") && (lower.contains("shows") || lower.contains("summary") || lower.contains("presents"))) &&
+            // Skip if it's a note or source
+            !lower.starts_with("note") &&
+            !lower.starts_with("source") &&
+            // Skip very long text blocks (likely paragraphs)
+            text.len() < 150 &&
+            // Skip single words that are likely headers
+            !(text.trim().split_whitespace().count() == 1 && text.len() > 20)
+        })
+        .map(|(idx, block)| (*idx, *block))
+        .collect();
+    
+    // Use filtered blocks if we have enough, otherwise use all
+    let blocks_to_process = if filtered_blocks.len() >= 3 {
+        println!("  🎯 Using {} filtered blocks (removed {} non-table blocks)", 
+            filtered_blocks.len(), page_blocks.len() - filtered_blocks.len());
+        &filtered_blocks
+    } else {
+        println!("  ⚠️ Only {} filtered blocks, using all {} blocks", 
+            filtered_blocks.len(), page_blocks.len());
+        &page_blocks
+    };
+    
+    for (idx, block) in blocks_to_process {
         let _y_center = (block.bbox.y0 + block.bbox.y1) / 2.0;
         let block_height = block.bbox.y1 - block.bbox.y0;
         
@@ -557,8 +607,27 @@ fn detect_tables(blocks: &[FerrulesBlock], page_id: i32) -> Vec<DetectedTable> {
             );
             
             if is_likely_table {
-                println!("    🎯 DETECTED TABLE! Rows: {}, Multi-cell: {}, Numeric: {}, Indicators: {}, Columns: {}", 
-                    table_rows_indices.len(), multi_cell_rows, has_numeric_content, has_table_indicators, significant_x_positions);
+                // Check if this might be a table description rather than actual table data
+                let is_table_description = table_rows_indices.iter().any(|&idx| {
+                    rows[idx].iter().any(|(_, block)| {
+                        let text = match &block.kind {
+                            FerrulesKind::Text { text } => text,
+                            FerrulesKind::Structured { text, .. } => text,
+                            _ => "",
+                        };
+                        let lower = text.to_lowercase();
+                        lower.contains("table") && (lower.contains("shows") || lower.contains("information") || 
+                            lower.contains("presents") || lower.contains("city of") || lower.contains("summary"))
+                    })
+                });
+                
+                if is_table_description {
+                    println!("    📋 DETECTED TABLE REFERENCE! This appears to be a table caption/title.");
+                    println!("       The actual table data may be missing from the ferrules output.");
+                } else {
+                    println!("    🎯 DETECTED TABLE! Rows: {}, Multi-cell: {}, Numeric: {}, Indicators: {}, Columns: {}", 
+                        table_rows_indices.len(), multi_cell_rows, has_numeric_content, has_table_indicators, significant_x_positions);
+                }
                 println!("       Grid: {}, Separators: {}, Consistent spacing: {}", 
                     grid_pattern_detected, has_separator_lines, has_consistent_row_spacing);
                     // Found a potential table
