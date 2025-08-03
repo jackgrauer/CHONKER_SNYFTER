@@ -689,13 +689,362 @@ fn detect_tables(blocks: &[FerrulesBlock], page_id: i32) -> Vec<DetectedTable> {
         }
     }
     
+    // Also check for gaps where tables might be missing
+    let missing_regions = detect_missing_table_regions(blocks, page_id, 792.0); // Standard PDF page height
+    if !missing_regions.is_empty() {
+        println!("  ⚠️ Found {} potential missing table region(s)", missing_regions.len());
+        for (i, (y_start, y_end)) in missing_regions.iter().enumerate() {
+            println!("    Missing region {}: Y={:.0}-{:.0}", i + 1, y_start, y_end);
+        }
+    }
+    
     println!("  ✅ Detected {} tables on page {}", tables.len(), page_id + 1);
     for (i, table) in tables.iter().enumerate() {
         println!("    Table {}: {} rows, bbox: X{:.0}-{:.0} Y{:.0}-{:.0}", 
             i, table.rows.len(), table.bbox.x0, table.bbox.x1, table.bbox.y0, table.bbox.y1);
     }
     
-    tables
+    // After initial detection, try to reconstruct actual table data
+    // by finding all text blocks within the table boundaries
+    let mut reconstructed_tables = Vec::new();
+    
+    for table in tables {
+        let reconstructed = reconstruct_table_from_blocks(&table, blocks, page_id);
+        if let Some(recon_table) = reconstructed {
+            reconstructed_tables.push(recon_table);
+        } else {
+            reconstructed_tables.push(table);
+        }
+    }
+    
+    reconstructed_tables
+}
+
+// Extract and OCR a region from a PDF page
+fn extract_and_ocr_region(
+    pdf_path: &Path,
+    page_num: i32,
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64
+) -> Option<String> {
+    println!("  🔍 Extracting region for OCR: page {} region ({:.0},{:.0}) {}x{}", 
+        page_num + 1, x, y, width, height);
+    
+    // Create temp file for the extracted image
+    let temp_dir = std::env::temp_dir();
+    let temp_img = temp_dir.join(format!("table_region_p{}_y{}.png", page_num, y as i32));
+    
+    // Use pdftoppm to extract the page, then crop it
+    let pdftoppm_output = Command::new("pdftoppm")
+        .args(&[
+            "-png",
+            "-r", "300",
+            "-f", &(page_num + 1).to_string(),
+            "-l", &(page_num + 1).to_string(),
+            pdf_path.to_str()?,
+            "-singlefile"
+        ])
+        .output()
+        .ok()?;
+    
+    if !pdftoppm_output.status.success() {
+        println!("    ❌ Failed to extract PDF page");
+        return None;
+    }
+    
+    // Save the page image
+    let page_img = temp_dir.join(format!("page_{}.png", page_num));
+    std::fs::write(&page_img, pdftoppm_output.stdout).ok()?;
+    
+    // Use sips (macOS) to crop the region
+    // Note: PDF coordinates are bottom-left, image coordinates are top-left
+    // Also need to scale coordinates based on resolution (300 DPI vs 72 DPI)
+    let scale = 300.0 / 72.0;
+    let img_x = (x * scale) as i32;
+    let img_y = (y * scale) as i32;
+    let img_width = (width * scale) as i32;
+    let img_height = (height * scale) as i32;
+    
+    // First get the image dimensions
+    let sips_info = Command::new("sips")
+        .args(&["-g", "pixelHeight", "-g", "pixelWidth", page_img.to_str()?])
+        .output()
+        .ok()?;
+    
+    let info_str = String::from_utf8_lossy(&sips_info.stdout);
+    let mut pixel_height = 0;
+    for line in info_str.lines() {
+        if line.contains("pixelHeight:") {
+            if let Some(h) = line.split(':').nth(1) {
+                pixel_height = h.trim().parse::<i32>().unwrap_or(0);
+            }
+        }
+    }
+    
+    // Convert Y coordinate (flip from bottom-left to top-left)
+    let img_y_flipped = pixel_height - img_y - img_height;
+    
+    // Crop the region using sips
+    let crop_output = Command::new("sips")
+        .args(&[
+            "-c", &img_height.to_string(), &img_width.to_string(),
+            "--cropOffset", &img_y_flipped.to_string(), &img_x.to_string(),
+            page_img.to_str()?,
+            "--out", temp_img.to_str()?
+        ])
+        .output()
+        .ok()?;
+    
+    if !crop_output.status.success() {
+        println!("    ❌ Failed to crop region");
+        return None;
+    }
+    
+    // Now OCR the cropped region
+    // First check if ocrmac is available
+    let ocr_check = Command::new("which")
+        .arg("ocrmac")
+        .output()
+        .ok()?;
+    
+    let ocr_text = if ocr_check.status.success() {
+        // Use ocrmac (install with: pip install ocrmac)
+        println!("    🔤 Running OCR with ocrmac...");
+        let ocr_output = Command::new("ocrmac")
+            .arg(temp_img.to_str()?)
+            .output()
+            .ok()?;
+        
+        if ocr_output.status.success() {
+            String::from_utf8_lossy(&ocr_output.stdout).to_string()
+        } else {
+            // Fall back to using shortcuts or other methods
+            println!("    ⚠️ ocrmac failed, trying alternative OCR method...");
+            
+            // Try using the 'shortcuts' command to run an OCR shortcut
+            // This requires a shortcut named "OCR Image" to be created
+            let shortcuts_output = Command::new("shortcuts")
+                .args(&["run", "OCR Image", "-i", temp_img.to_str()?])
+                .output()
+                .ok();
+            
+            if let Some(output) = shortcuts_output {
+                if output.status.success() {
+                    String::from_utf8_lossy(&output.stdout).to_string()
+                } else {
+                    "(OCR failed - install ocrmac with: pip install ocrmac)".to_string()
+                }
+            } else {
+                "(OCR not available - install ocrmac with: pip install ocrmac)".to_string()
+            }
+        }
+    } else {
+        println!("    ⚠️ ocrmac not found - install with: pip install ocrmac");
+        "(OCR not available - install ocrmac with: pip install ocrmac)".to_string()
+    };
+    
+    println!("    📸 Region extracted to: {:?}", temp_img);
+    if !ocr_text.trim().is_empty() {
+        println!("    ✅ OCR successful: {} characters extracted", ocr_text.len());
+    }
+    
+    // Keep the image for debugging if OCR failed
+    if ocr_text.contains("OCR") && ocr_text.contains("not available") {
+        println!("    💾 Keeping extracted image for manual inspection");
+    } else {
+        let _ = std::fs::remove_file(&temp_img);
+    }
+    
+    // Clean up page image
+    let _ = std::fs::remove_file(&page_img);
+    
+    Some(ocr_text)
+}
+
+// Detect gaps in the document where tables might be missing
+fn detect_missing_table_regions(
+    blocks: &[FerrulesBlock], 
+    page_id: i32,
+    page_height: f64
+) -> Vec<(f64, f64)> {
+    // Get all blocks for this page, sorted by Y coordinate
+    let mut page_blocks: Vec<&FerrulesBlock> = blocks
+        .iter()
+        .filter(|b| b.pages_id.contains(&page_id))
+        .collect();
+    
+    if page_blocks.is_empty() {
+        return Vec::new();
+    }
+    
+    page_blocks.sort_by(|a, b| a.bbox.y0.partial_cmp(&b.bbox.y0).unwrap());
+    
+    let mut gaps = Vec::new();
+    let gap_threshold = 50.0; // Minimum gap size to consider as potential table region
+    
+    // Check for gaps between consecutive blocks
+    for i in 0..page_blocks.len() - 1 {
+        let current_bottom = page_blocks[i].bbox.y1;
+        let next_top = page_blocks[i + 1].bbox.y0;
+        let gap_size = next_top - current_bottom;
+        
+        if gap_size > gap_threshold {
+            // Check if there's a table reference before the gap
+            let text = match &page_blocks[i].kind {
+                FerrulesKind::Text { text } => text,
+                FerrulesKind::Structured { text, .. } => text,
+                _ => "",
+            };
+            
+            let lower = text.to_lowercase();
+            if lower.contains("table") && (lower.contains("shows") || lower.contains("presents") || 
+                lower.contains("following") || lower.contains("below")) {
+                println!("  🕳️ Found potential missing table gap: Y={:.0}-{:.0} (gap: {:.0}px)", 
+                    current_bottom, next_top, gap_size);
+                gaps.push((current_bottom, next_top));
+            }
+        }
+    }
+    
+    gaps
+}
+
+// Reconstruct table by finding ALL text blocks within the table region
+fn reconstruct_table_from_blocks(
+    detected_table: &DetectedTable, 
+    all_blocks: &[FerrulesBlock], 
+    page_id: i32
+) -> Option<DetectedTable> {
+    println!("  🔨 Attempting to reconstruct table from all blocks within region...");
+    
+    // Expand the table boundaries slightly to catch edge blocks
+    let expanded_bbox = FerrulesBox {
+        x0: detected_table.bbox.x0 - 10.0,
+        y0: detected_table.bbox.y0 - 10.0,
+        x1: detected_table.bbox.x1 + 10.0,
+        y1: detected_table.bbox.y1 + 10.0,
+    };
+    
+    // Find ALL blocks within the expanded table region
+    let mut table_blocks: Vec<(usize, &FerrulesBlock)> = Vec::new();
+    for (idx, block) in all_blocks.iter().enumerate() {
+        if !block.pages_id.contains(&page_id) {
+            continue;
+        }
+        
+        // Check if block is within the table boundaries
+        let block_center_x = (block.bbox.x0 + block.bbox.x1) / 2.0;
+        let block_center_y = (block.bbox.y0 + block.bbox.y1) / 2.0;
+        
+        if block_center_x >= expanded_bbox.x0 && 
+           block_center_x <= expanded_bbox.x1 && 
+           block_center_y >= expanded_bbox.y0 && 
+           block_center_y <= expanded_bbox.y1 {
+            table_blocks.push((idx, block));
+        }
+    }
+    
+    if table_blocks.is_empty() {
+        println!("    ❌ No blocks found within table region");
+        return None;
+    }
+    
+    println!("    📦 Found {} blocks within table region", table_blocks.len());
+    
+    // Sort blocks by Y coordinate first (rows), then X coordinate (columns)
+    table_blocks.sort_by(|a, b| {
+        let y_cmp = a.1.bbox.y0.partial_cmp(&b.1.bbox.y0).unwrap();
+        if y_cmp == std::cmp::Ordering::Equal {
+            a.1.bbox.x0.partial_cmp(&b.1.bbox.x0).unwrap()
+        } else {
+            y_cmp
+        }
+    });
+    
+    // Group blocks into rows based on Y-coordinate alignment
+    let mut rows: Vec<Vec<(usize, &FerrulesBlock)>> = Vec::new();
+    let row_tolerance = 5.0;
+    
+    for (idx, block) in table_blocks {
+        let block_y_center = (block.bbox.y0 + block.bbox.y1) / 2.0;
+        let mut added_to_row = false;
+        
+        // Try to add to existing row
+        for row in &mut rows {
+            if let Some((_, first_block)) = row.first() {
+                let row_y_center = (first_block.bbox.y0 + first_block.bbox.y1) / 2.0;
+                if (block_y_center - row_y_center).abs() < row_tolerance {
+                    row.push((idx, block));
+                    added_to_row = true;
+                    break;
+                }
+            }
+        }
+        
+        // Create new row if needed
+        if !added_to_row {
+            rows.push(vec![(idx, block)]);
+        }
+    }
+    
+    // Sort each row by X coordinate
+    for row in &mut rows {
+        row.sort_by(|a, b| a.1.bbox.x0.partial_cmp(&b.1.bbox.x0).unwrap());
+    }
+    
+    println!("    📊 Organized into {} rows", rows.len());
+    
+    // Build the reconstructed table
+    let mut reconstructed = DetectedTable {
+        rows: Vec::new(),
+        bbox: detected_table.bbox.clone(),
+    };
+    
+    for (row_idx, row) in rows.iter().enumerate() {
+        let y_center = if let Some((_, first_block)) = row.first() {
+            (first_block.bbox.y0 + first_block.bbox.y1) / 2.0
+        } else {
+            continue;
+        };
+        
+        let mut table_row = TableRow {
+            cells: Vec::new(),
+            y_center,
+        };
+        
+        println!("      Row {}: {} cells", row_idx, row.len());
+        for (idx, block) in row {
+            let text = match &block.kind {
+                FerrulesKind::Structured { text, .. } => text.clone(),
+                FerrulesKind::Text { text } => text.clone(),
+                _ => String::new(),
+            };
+            
+            // Debug: Show what's in each cell
+            if !text.trim().is_empty() {
+                println!("        Cell: [{}]", text.trim().replace('\n', " "));
+            }
+            
+            table_row.cells.push(TableCell {
+                block_idx: *idx,
+                text,
+                bbox: block.bbox.clone(),
+            });
+        }
+        
+        reconstructed.rows.push(table_row);
+    }
+    
+    if reconstructed.rows.len() > detected_table.rows.len() {
+        println!("    ✅ Reconstruction successful! Found {} rows (vs {} originally)", 
+            reconstructed.rows.len(), detected_table.rows.len());
+        Some(reconstructed)
+    } else {
+        println!("    ⚠️ Reconstruction didn't find additional rows");
+        None
+    }
 }
 
 struct Chonker5App {
@@ -1457,32 +1806,75 @@ impl Chonker5App {
                                             analysis.push_str(&format!("📄 Page {} ({:.0}x{:.0} px)\n", 
                                                 page.id + 1, page.width, page.height));
                                             
+                                            // Check for missing table regions
+                                            let missing_regions = detect_missing_table_regions(&doc.blocks, page.id, page.height);
+                                            if !missing_regions.is_empty() {
+                                                analysis.push_str(&format!("   ⚠️ Found {} potential missing table region(s):\n", missing_regions.len()));
+                                                
+                                                for (i, (y_start, y_end)) in missing_regions.iter().enumerate() {
+                                                    analysis.push_str(&format!("   Missing Region {}: Y={:.0}-{:.0}\n", i + 1, y_start, y_end));
+                                                    
+                                                    // Try to extract and OCR the missing region
+                                                    if let Some(ocr_text) = extract_and_ocr_region(
+                                                        &pdf_path,
+                                                        page.id,
+                                                        50.0,  // X position (full width)
+                                                        *y_start,
+                                                        page.width - 100.0,  // Width
+                                                        y_end - y_start      // Height
+                                                    ) {
+                                                        analysis.push_str(&format!("   OCR Result: {}\n", ocr_text));
+                                                    }
+                                                }
+                                                analysis.push_str("\n");
+                                            }
+                                            
                                             if tables.is_empty() {
                                                 analysis.push_str("   No structured sections detected\n");
                                             } else {
                                                 analysis.push_str(&format!("   Found {} structured section(s):\n", tables.len()));
                                                 
                                                 for (i, table) in tables.iter().enumerate() {
-                                                    analysis.push_str(&format!("\n   📄 Section {} - {} content blocks\n", i + 1, table.rows.len()));
+                                                    analysis.push_str(&format!("\n   📊 TABLE {} - {} rows\n", i + 1, table.rows.len()));
                                                     analysis.push_str(&format!("      Location: ({:.0}, {:.0}) to ({:.0}, {:.0})\n",
                                                         table.bbox.x0, table.bbox.y0, table.bbox.x1, table.bbox.y1));
                                                     
-                                                    // Extract section content
-                                                    for (row_idx, row) in table.rows.iter().enumerate() {
-                                                        analysis.push_str(&format!("      Block {}: ", row_idx + 1));
+                                                    // Determine if this is likely an actual table with multiple columns
+                                                    let max_cells = table.rows.iter().map(|r| r.cells.len()).max().unwrap_or(0);
+                                                    let is_multi_column = max_cells > 1;
+                                                    
+                                                    if is_multi_column {
+                                                        analysis.push_str("      Structure: TABULAR DATA\n");
+                                                        analysis.push_str(&format!("      Max columns: {}\n", max_cells));
+                                                        analysis.push_str("      Content:\n");
                                                         
-                                                        let cell_texts: Vec<String> = row.cells.iter()
-                                                            .filter_map(|cell| {
-                                                                doc.blocks.get(cell.block_idx)
-                                                                    .and_then(|block| match &block.kind {
-                                                                        FerrulesKind::Text { text } => Some(text.trim().to_string()),
-                                                                        FerrulesKind::Structured { text, .. } => Some(text.trim().to_string()),
-                                                                        _ => None,
-                                                                    })
-                                                            })
-                                                            .collect();
-                                                        
-                                                        analysis.push_str(&format!("[{}]\n", cell_texts.join(" | ")));
+                                                        // Display as table
+                                                        for (row_idx, row) in table.rows.iter().enumerate() {
+                                                            analysis.push_str(&format!("      Row {}: ", row_idx + 1));
+                                                            
+                                                            let cell_texts: Vec<String> = row.cells.iter()
+                                                                .map(|cell| {
+                                                                    if !cell.text.trim().is_empty() {
+                                                                        format!("[{}]", cell.text.trim().replace('\n', " "))
+                                                                    } else {
+                                                                        "[_____]".to_string()
+                                                                    }
+                                                                })
+                                                                .collect();
+                                                            
+                                                            analysis.push_str(&cell_texts.join(" "));
+                                                            analysis.push_str("\n");
+                                                        }
+                                                    } else {
+                                                        // Single column - probably document structure, not a table
+                                                        analysis.push_str("      Structure: DOCUMENT SECTIONS\n");
+                                                        for (row_idx, row) in table.rows.iter().enumerate() {
+                                                            if let Some(cell) = row.cells.first() {
+                                                                if !cell.text.trim().is_empty() {
+                                                                    analysis.push_str(&format!("      • {}\n", cell.text.trim().replace('\n', " ")));
+                                                                }
+                                                            }
+                                                        }
                                                     }
                                                 }
                                             }
