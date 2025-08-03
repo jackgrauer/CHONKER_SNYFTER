@@ -4,6 +4,7 @@
 //! fltk = { version = "1.4", features = ["fltk-bundled"] }
 //! rfd = "0.15"
 //! image = "0.25"
+//! extractous = "0.3"
 //! ```
 
 use fltk::{
@@ -22,6 +23,7 @@ use std::path::PathBuf;
 use std::rc::Rc;
 use std::process::Command;
 use std::fs;
+use extractous::Extractor;
 
 const WINDOW_WIDTH: i32 = 1200;
 const WINDOW_HEIGHT: i32 = 800;
@@ -206,7 +208,7 @@ impl Chonker5App {
         window.show();
         
         log_buffer.append("🐹 CHONKER 5 Ready!\n");
-        log_buffer.append("📌 Using MuPDF for PDF rendering\n");
+        log_buffer.append("📌 Using MuPDF for PDF rendering + Extractous for text extraction\n");
         log_buffer.append("📌 Keyboard shortcuts: Cmd+O (Open), ←/→ (Navigate), +/- (Zoom), F (Fit width)\n");
         
         let app_state = Rc::new(RefCell::new(Self {
@@ -440,28 +442,21 @@ impl Chonker5App {
     
     fn extract_current_page_text(&mut self) {
         if let Some(pdf_path) = &self.pdf_path {
-            // Use mutool convert to extract text
-            let output = Command::new("mutool")
-                .arg("convert")
-                .arg("-F")
-                .arg("text")
-                .arg("-o")
-                .arg("-")
-                .arg(&pdf_path)
-                .arg((self.current_page + 1).to_string())
-                .output();
+            // Use extractous directly to extract text
+            let extractor = Extractor::new();
             
-            match output {
-                Ok(result) => {
-                    let text = String::from_utf8_lossy(&result.stdout);
+            match extractor.extract_file_to_string(&pdf_path) {
+                Ok(text) => {
                     if text.trim().is_empty() {
-                        self.extracted_text_buffer.set_text("No text found on this page.");
+                        self.extracted_text_buffer.set_text("No text found in PDF.");
                     } else {
                         self.extracted_text_buffer.set_text(&text);
+                        self.log("✅ Text extracted with extractous");
                     }
                 }
                 Err(e) => {
                     self.extracted_text_buffer.set_text(&format!("Error extracting text: {}", e));
+                    self.log(&format!("❌ Extractous error: {}", e));
                 }
             }
         }
