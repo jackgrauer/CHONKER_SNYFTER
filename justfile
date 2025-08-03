@@ -9,6 +9,14 @@ default:
 run:
     source .venv/bin/activate && python chonker.py
 
+# Run the Rust FLTK version (chonker5.rs)
+rust:
+    rust-script chonker5.rs
+
+# Run the Rust version in background
+rust-bg:
+    rust-script chonker5.rs &
+
 # Launch CHONKER in background (no timeout issues!)
 launch:
     ./launch_chonker.sh
