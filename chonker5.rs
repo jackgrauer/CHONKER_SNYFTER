@@ -2,7 +2,6 @@
 //! ```cargo
 //! [dependencies]
 //! fltk = { version = "1.4", features = ["fltk-bundled"] }
-//! mupdf = "0.4"
 //! rfd = "0.15"
 //! image = "0.25"
 //! ```
@@ -10,7 +9,7 @@
 use fltk::{
     app::{self, App, Scheme},
     button::Button,
-    enums::{Color, ColorDepth, Event, Font, FrameType, Key},
+    enums::{Color, Event, Font, FrameType, Key},
     frame::Frame,
     group::{Flex, Pack, PackType, Scroll},
     prelude::*,
@@ -18,10 +17,11 @@ use fltk::{
     window::Window,
     image as fltk_image,
 };
-use mupdf::{Document, Matrix, Pixmap};
 use std::cell::RefCell;
 use std::path::PathBuf;
 use std::rc::Rc;
+use std::process::Command;
+use std::fs;
 
 const WINDOW_WIDTH: i32 = 1200;
 const WINDOW_HEIGHT: i32 = 800;
@@ -49,7 +49,7 @@ struct Chonker5App {
     extracted_text_buffer: TextBuffer,
     
     // PDF state
-    pdf_document: Option<Document>,
+    pdf_path: Option<PathBuf>,
     current_page: usize,
     total_pages: usize,
     zoom_level: f32,
@@ -222,7 +222,7 @@ impl Chonker5App {
             next_btn: next_btn.clone(),
             extracted_text_display,
             extracted_text_buffer,
-            pdf_document: None,
+            pdf_path: None,
             current_page: 0,
             total_pages: 0,
             zoom_level: 1.0,
@@ -335,28 +335,51 @@ impl Chonker5App {
         let filename = path.file_name().unwrap_or_default().to_string_lossy();
         self.log(&format!("📄 Loading: {}", filename));
         
-        match Document::open(&path.to_string_lossy()) {
-            Ok(document) => {
-                let total_pages = document.page_count() as usize;
+        // Use mupdf info command to get page count
+        match Command::new("mutool")
+            .arg("info")
+            .arg(&path)
+            .output()
+        {
+            Ok(output) => {
+                let info = String::from_utf8_lossy(&output.stdout);
                 
-                self.pdf_document = Some(document);
-                self.total_pages = total_pages;
-                self.current_page = 0;
-                
-                self.log(&format!("✅ PDF loaded successfully: {} pages", self.total_pages));
-                self.update_status(&format!("Loaded! {} pages", self.total_pages));
-                
-                // Enable navigation buttons
-                if self.total_pages > 1 {
-                    self.next_btn.activate();
+                // Parse page count from output
+                let mut total_pages = 0;
+                for line in info.lines() {
+                    if line.contains("Pages:") {
+                        if let Some(count_str) = line.split("Pages:").nth(1) {
+                            if let Ok(count) = count_str.trim().parse::<usize>() {
+                                total_pages = count;
+                                break;
+                            }
+                        }
+                    }
                 }
                 
-                // Update UI
-                self.update_page_label();
-                self.render_current_page();
+                if total_pages > 0 {
+                    self.pdf_path = Some(path);
+                    self.total_pages = total_pages;
+                    self.current_page = 0;
+                    
+                    self.log(&format!("✅ PDF loaded successfully: {} pages", self.total_pages));
+                    self.update_status(&format!("Loaded! {} pages", self.total_pages));
+                    
+                    // Enable navigation buttons
+                    if self.total_pages > 1 {
+                        self.next_btn.activate();
+                    }
+                    
+                    // Update UI
+                    self.update_page_label();
+                    self.render_current_page();
+                } else {
+                    self.log("❌ Failed to parse PDF info");
+                    self.update_status("Failed to parse PDF info");
+                }
             }
             Err(e) => {
-                let error_msg = format!("Failed to load PDF: {}", e);
+                let error_msg = format!("Failed to run mutool: {}", e);
                 self.log(&format!("❌ {}", error_msg));
                 self.update_status(&error_msg);
             }
@@ -364,64 +387,81 @@ impl Chonker5App {
     }
     
     fn render_current_page(&mut self) {
-        if let Some(document) = &self.pdf_document {
-            if let Ok(page) = document.load_page(self.current_page as i32) {
-                // Calculate render size
-                let scale = self.zoom_level * 2.0;
-                let matrix = Matrix::new_scale(scale, scale);
-                
-                // Get page bounds
-                let bounds = page.bounds().unwrap();
-                let width = ((bounds.x1 - bounds.x0) * scale) as i32;
-                let height = ((bounds.y1 - bounds.y0) * scale) as i32;
-                
-                // Create pixmap
-                let pixmap = Pixmap::new(width, height, mupdf::ColorSpace::device_rgb(), 0).unwrap();
-                
-                // Clear to white
-                pixmap.clear(0xFF);
-                
-                // Render page
-                page.run_contents(&pixmap, &matrix, &mupdf::default_cookie()).unwrap();
-                
-                // Convert to FLTK image
-                let data = pixmap.pixels().unwrap();
-                let mut rgb_data = Vec::with_capacity((width * height * 3) as usize);
-                
-                // MuPDF uses RGB format
-                for pixel in data.chunks(3) {
-                    rgb_data.push(pixel[0]); // R
-                    rgb_data.push(pixel[1]); // G
-                    rgb_data.push(pixel[2]); // B
-                }
-                
-                if let Ok(img) = fltk_image::RgbImage::new(&rgb_data, width, height, ColorDepth::Rgb8) {
-                    self.pdf_image = Some(img.clone());
+        if let Some(pdf_path) = &self.pdf_path {
+            // Create temp file for rendered page
+            let temp_dir = std::env::temp_dir();
+            let png_path = temp_dir.join(format!("chonker5_page_{}.png", self.current_page));
+            
+            // Calculate DPI based on zoom level
+            let dpi = (150.0 * self.zoom_level) as i32;
+            
+            // Use mutool draw to render page to PNG
+            let output = Command::new("mutool")
+                .arg("draw")
+                .arg("-o")
+                .arg(&png_path)
+                .arg("-r")
+                .arg(dpi.to_string())
+                .arg("-F")
+                .arg("png")
+                .arg(&pdf_path)
+                .arg((self.current_page + 1).to_string())
+                .output();
+            
+            match output {
+                Ok(_) => {
+                    // Load the rendered PNG
+                    if let Ok(img) = fltk_image::PngImage::load(&png_path) {
+                        // Convert to RgbImage
+                        let width = img.width();
+                        let height = img.height();
+                        
+                        // Update the frame size and redraw
+                        self.pdf_frame.set_size(width, height);
+                        self.pdf_frame.set_image(Some(img));
+                        self.pdf_frame.set_label("");
+                        self.pdf_frame.redraw();
+                        
+                        // Note: We don't need to store the image in pdf_image anymore
+                    }
                     
-                    // Update the frame size and redraw
-                    self.pdf_frame.set_size(width, height);
-                    self.pdf_frame.set_image(Some(img));
-                    self.pdf_frame.set_label("");
-                    self.pdf_frame.redraw();
+                    // Clean up temp file
+                    let _ = fs::remove_file(&png_path);
                 }
-                
-                // Extract text from current page
-                self.extract_current_page_text();
+                Err(e) => {
+                    self.log(&format!("❌ Failed to render page: {}", e));
+                }
             }
+            
+            // Extract text from current page
+            self.extract_current_page_text();
         }
     }
     
     fn extract_current_page_text(&mut self) {
-        if let Some(document) = &self.pdf_document {
-            if let Ok(page) = document.load_page(self.current_page as i32) {
-                if let Ok(text) = page.to_text() {
-                    if text.is_empty() {
+        if let Some(pdf_path) = &self.pdf_path {
+            // Use mutool convert to extract text
+            let output = Command::new("mutool")
+                .arg("convert")
+                .arg("-F")
+                .arg("text")
+                .arg("-o")
+                .arg("-")
+                .arg(&pdf_path)
+                .arg((self.current_page + 1).to_string())
+                .output();
+            
+            match output {
+                Ok(result) => {
+                    let text = String::from_utf8_lossy(&result.stdout);
+                    if text.trim().is_empty() {
                         self.extracted_text_buffer.set_text("No text found on this page.");
                     } else {
                         self.extracted_text_buffer.set_text(&text);
                     }
-                } else {
-                    self.extracted_text_buffer.set_text("Error extracting text from page.");
+                }
+                Err(e) => {
+                    self.extracted_text_buffer.set_text(&format!("Error extracting text: {}", e));
                 }
             }
         }
