@@ -1,0 +1,30 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python:*)",
+      "Bash(mv:*)",
+      "Bash(chmod:*)",
+      "Bash(pip install:*)",
+      "Bash(find:*)",
+      "Bash(echo $VIRTUAL_ENV)",
+      "Bash(ls:*)",
+      "Bash(source:*)",
+      "Bash(./chonker_qt_faithful.py)",
+      "Bash(./test_docling_structure.py \"/Users/jack/CHONKER_SNYFTER/chonker_test.pdf\")",
+      "Bash(./test_docling_items.py \"/Users/jack/CHONKER_SNYFTER/chonker_test.pdf\")",
+      "Bash(git clone:*)",
+      "Bash(./chonker_mixed_content_demo.py)",
+      "Bash(./chonker_qt_mixed.py)",
+      "Bash(grep:*)",
+      "Bash(rm:*)",
+      "Bash(git add:*)",
+      "Bash(git rm:*)",
+      "Bash(git reset:*)",
+      "Bash(git push:*)",
+      "Bash(echo:*)",
+      "Bash(git commit:*)",
+      "Bash(just:*)"
+    ],
+    "deny": []
+  }
+}

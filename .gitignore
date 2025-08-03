@@ -1,7 +1,26 @@
 # Rust
 target/
+snyfter/target/
 Cargo.lock
 *.rs.bk
+**/*.rs.bk
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+.venv/
+env/
+ENV/
+
+# Testing
+.coverage
+htmlcov/
+.pytest_cache/
+*.cover
 
 # macOS
 .DS_Store
@@ -11,3 +30,37 @@ Cargo.lock
 .vscode/
 *.swp
 *.swo
+
+# Application
+snyfter_archive.db
+*.db-journal
+*.db-wal
+*.db-shm
+.env
+config.json
+
+# Logs and cache
+*.log
+~/.chonker_cache/
+~/.chonker_logs/
+
+# Build
+dist/
+build/
+*.egg-info/
+
+# Turbo
+.turbo/
+*.duckdb
+*.duckdb.wal
+
+# PDFium and ferrules artifacts
+include/
+lib/
+licenses/
+ferrules/
+*.tgz
+PDFiumConfig.cmake
+VERSION
+args.gn
+LICENSE
