@@ -12,12 +12,16 @@
 use fltk::{
     app::{self, App, Scheme},
     button::Button,
+    draw,
     enums::{Color, Event, Font, FrameType, Key},
     frame::Frame,
     group::{Flex, Group, Scroll},
+    input::MultilineInput,
     prelude::*,
     text::{TextBuffer, TextDisplay},
     window::Window,
+    widget::Widget,
+    widget_extends,
     image as fltk_image,
 };
 use std::cell::RefCell;
@@ -25,6 +29,7 @@ use std::path::PathBuf;
 use std::rc::Rc;
 use std::process::Command;
 use std::fs;
+use extractous::Extractor;
 use serde::{Deserialize, Serialize};
 use serde_json;
 
@@ -96,7 +101,374 @@ struct DetectedTable {
     bbox: FerrulesBox, // Overall table boundaries
 }
 
-// StructuredTextWidget and Pretty View functionality removed
+/* PRETTY VIEW REMOVED - Too broken
+// Simple placeholder widget - Pretty view was removed because it was broken
+#[derive(Debug, Clone)]
+struct StructuredTextWidget {
+    inner: Widget,
+}
+*/
+
+impl StructuredTextWidget {
+    pub fn new(x: i32, y: i32, w: i32, h: i32) -> Self {
+        let mut inner = Widget::default().with_pos(x, y).with_size(w, h);
+        inner.set_frame(FrameType::FlatBox);
+        inner.set_color(Color::White);
+        
+        let document = Rc::new(RefCell::new(None));
+        let selected_block = Rc::new(RefCell::new(None));
+        let scroll_offset = Rc::new(RefCell::new((0.0, 0.0)));
+        let zoom = Rc::new(RefCell::new(1.0));
+        let dragging = Rc::new(RefCell::new(None));
+        
+        let doc_clone = document.clone();
+        let selected_clone = selected_block.clone();
+        let scroll_clone = scroll_offset.clone();
+        let zoom_clone = zoom.clone();
+        
+        inner.draw({
+            let doc_clone = doc_clone.clone();
+            let selected_clone = selected_clone.clone();
+            let scroll_clone = scroll_clone.clone();
+            let zoom_clone = zoom_clone.clone();
+            move |widget| {
+                draw::push_clip(widget.x(), widget.y(), widget.width(), widget.height());
+                draw::draw_box(widget.frame(), widget.x(), widget.y(), widget.width(), widget.height(), widget.color());
+                
+                // Draw status indicator
+                draw::set_draw_color(Color::from_rgb(100, 100, 100));
+                draw::set_font(Font::Helvetica, 10);
+                draw::draw_text("Custom Renderer Active", widget.x() + 5, widget.y() + 15);
+                
+                if let Some(ref doc) = *doc_clone.borrow() {
+                    Self::draw_document(widget, doc, &selected_clone, &scroll_clone, &zoom_clone);
+                } else {
+                    draw::set_draw_color(Color::Black);
+                    draw::set_font(Font::Helvetica, 14);
+                    draw::draw_text("No structured data loaded", widget.x() + 10, widget.y() + 30);
+                }
+                
+                draw::pop_clip();
+            }
+        });
+        
+        let doc_clone = document.clone();
+        let selected_clone = selected_block.clone();
+        let scroll_clone = scroll_offset.clone();
+        let zoom_clone = zoom.clone();
+        let dragging_clone = dragging.clone();
+        
+        // Comment out interaction for now - focus on rendering
+        inner.handle({
+            move |widget, event| {
+                match event {
+                    Event::MouseWheel => {
+                        let dy = app::event_dy();
+                        let mut offset = scroll_clone.borrow_mut();
+                        offset.1 += match dy {
+                            app::MouseWheel::None => 0.0,
+                            app::MouseWheel::Down => 20.0,
+                            app::MouseWheel::Up => -20.0,
+                            app::MouseWheel::Left => 0.0,
+                            app::MouseWheel::Right => 0.0,
+                        };
+                        widget.redraw();
+                        return true;
+                    }
+                    Event::KeyDown => {
+                        let key = app::event_key();
+                        if key == Key::from_char('+') || key == Key::from_char('=') {
+                            let mut zoom = zoom_clone.borrow_mut();
+                            *zoom = (*zoom * 1.1).min(3.0);
+                            widget.redraw();
+                            return true;
+                        } else if key == Key::from_char('-') {
+                            let mut zoom = zoom_clone.borrow_mut();
+                            *zoom = (*zoom / 1.1).max(0.5);
+                            widget.redraw();
+                            return true;
+                        }
+                    }
+                    _ => {}
+                }
+                false
+            }
+        });
+        
+        Self {
+            inner,
+            document,
+            selected_block,
+            scroll_offset,
+            zoom,
+            dragging,
+        }
+    }
+    
+    pub fn set_document(&mut self, doc: FerrulesDocument) {
+        *self.document.borrow_mut() = Some(doc);
+        *self.selected_block.borrow_mut() = None;
+        *self.scroll_offset.borrow_mut() = (0.0, 0.0);
+        self.inner.redraw();
+    }
+    
+    fn draw_document(
+        widget: &Widget,
+        doc: &FerrulesDocument,
+        selected: &Rc<RefCell<Option<usize>>>,
+        scroll: &Rc<RefCell<(f64, f64)>>,
+        zoom: &Rc<RefCell<f32>>,
+    ) {
+        let (_scroll_x, scroll_y) = *scroll.borrow();
+        let zoom_factor = *zoom.borrow();
+        let selected_idx = *selected.borrow();
+        
+        // Calculate total document height for all pages
+        let mut _total_height = 0.0;
+        let page_gap = 20.0;
+        
+        for page in &doc.pages {
+            _total_height += page.height + page_gap;
+        }
+        
+        // Draw each page
+        let mut current_y = widget.y() as f64 + scroll_y + 30.0;
+        
+        // Update status to show we're in facsimile mode
+        draw::set_draw_color(Color::from_rgb(0, 150, 0));
+        draw::set_font(Font::Helvetica, 10);
+        draw::draw_text("🔧 Custom Renderer - True Facsimile Mode", widget.x() + 5, widget.y() + 15);
+        
+        for (page_idx, page) in doc.pages.iter().enumerate() {
+            // Skip if page is above viewport
+            if current_y + page.height * (zoom_factor as f64) < widget.y() as f64 {
+                current_y += page.height * zoom_factor as f64 + page_gap;
+                continue;
+            }
+            
+            // Stop if page is below viewport
+            if current_y > (widget.y() + widget.height()) as f64 {
+                break;
+            }
+            
+            // Draw page background (white like actual PDF)
+            let page_x = widget.x() as f64 + (widget.width() as f64 - page.width * zoom_factor as f64) / 2.0;
+            draw::set_draw_color(Color::White);
+            draw::draw_rectf(page_x as i32, current_y as i32, 
+                           (page.width * zoom_factor as f64) as i32,
+                           (page.height * zoom_factor as f64) as i32);
+            
+            // Draw page border
+            draw::set_draw_color(Color::from_rgb(200, 200, 200));
+            draw::draw_rect(page_x as i32, current_y as i32,
+                          (page.width * zoom_factor as f64) as i32,
+                          (page.height * zoom_factor as f64) as i32);
+            
+            // Detect and visualize tables for this page (cached for performance)
+            // TODO: Cache this to avoid repeated detection
+            let page_tables: Vec<DetectedTable> = Vec::new(); // detect_tables(&doc.blocks, page.id);
+            
+            // Draw table regions first (as background)
+            for (table_idx, table) in page_tables.iter().enumerate() {
+                let table_x = (page_x + table.bbox.x0 * zoom_factor as f64) as i32;
+                let table_y = (current_y + table.bbox.y0 * zoom_factor as f64) as i32;
+                let table_width = ((table.bbox.x1 - table.bbox.x0) * zoom_factor as f64) as i32;
+                let table_height = ((table.bbox.y1 - table.bbox.y0) * zoom_factor as f64) as i32;
+                
+                // Draw table background
+                draw::set_draw_color(Color::from_rgb(240, 240, 255)); // Light blue
+                draw::draw_rectf(table_x, table_y, table_width, table_height);
+                
+                // Draw table border
+                draw::set_draw_color(Color::from_rgb(100, 100, 200));
+                draw::set_line_style(draw::LineStyle::Solid, 2);
+                draw::draw_rect(table_x, table_y, table_width, table_height);
+                
+                // Draw table label
+                draw::set_font(Font::HelveticaBold, 12);
+                draw::set_draw_color(Color::from_rgb(50, 50, 150));
+                draw::draw_text(&format!("📊 Table {}", table_idx + 1), table_x + 5, table_y - 5);
+            }
+            
+            // Draw blocks for this page at their EXACT PDF positions
+            for (block_idx, block) in doc.blocks.iter().enumerate() {
+                if !block.pages_id.contains(&page.id) {
+                    continue;
+                }
+                
+                // Use exact coordinates from PDF
+                let x = page_x + block.bbox.x0 * zoom_factor as f64;
+                let y = current_y + block.bbox.y0 * zoom_factor as f64;
+                let w = (block.bbox.x1 - block.bbox.x0) * zoom_factor as f64;
+                let h = (block.bbox.y1 - block.bbox.y0) * zoom_factor as f64;
+                
+                // Only highlight selected blocks, don't draw backgrounds
+                if Some(block_idx) == selected_idx {
+                    draw::set_draw_color(Color::from_rgb(255, 255, 200));
+                    draw::draw_rectf(x as i32, y as i32, w as i32, h as i32);
+                }
+                
+                // Very faint bounding box for debugging
+                draw::set_draw_color(Color::from_rgb(230, 230, 230));
+                draw::set_line_style(draw::LineStyle::Dash, 1);
+                draw::draw_rect(x as i32, y as i32, w as i32, h as i32);
+                draw::set_line_style(draw::LineStyle::Solid, 1);
+                
+                // Get text content
+                let text_content = match &block.kind {
+                    FerrulesKind::Structured { text, block_type } => Some((text, block_type.as_str())),
+                    FerrulesKind::Text { text } => Some((text, "Text")),
+                    _ => None,
+                };
+                
+                if let Some((text, block_type)) = text_content {
+                    // Set color and font based on block type
+                    let (font, font_size, color) = match block_type {
+                        "Title" => {
+                            (Font::HelveticaBold, ((h * 0.7) as i32).clamp(16, 24), Color::from_rgb(0, 51, 102))
+                        },
+                        "Header" => {
+                            (Font::HelveticaBold, ((h * 0.7) as i32).clamp(14, 18), Color::from_rgb(51, 51, 51))
+                        },
+                        "Footer" => {
+                            (Font::HelveticaItalic, ((h * 0.5) as i32).clamp(8, 10), Color::from_rgb(128, 128, 128))
+                        },
+                        "TextBlock" => {
+                            // Check for emphasis patterns in text
+                            if text.contains("Table") || text.contains("TABLE") {
+                                (Font::HelveticaBold, ((h * 0.6) as i32).clamp(11, 13), Color::from_rgb(0, 0, 150))
+                            } else {
+                                (Font::Helvetica, ((h * 0.6) as i32).clamp(10, 12), Color::Black)
+                            }
+                        },
+                        _ => {
+                            (Font::Helvetica, ((h * 0.6) as i32).clamp(9, 12), Color::Black)
+                        },
+                    };
+                    
+                    draw::set_draw_color(color);
+                    draw::set_font(font, font_size);
+                    
+                    // Calculate approximate characters per line
+                    let char_width = font_size as f64 * 0.6;
+                    let chars_per_line = (w / char_width).max(1.0) as usize;
+                    
+                    // Word wrap the text, preserving line breaks
+                    let mut wrapped_lines = Vec::new();
+                    
+                    // First split by newlines to preserve paragraph breaks
+                    for paragraph in text.split('\n') {
+                        if paragraph.trim().is_empty() {
+                            wrapped_lines.push(String::new()); // Preserve empty lines
+                            continue;
+                        }
+                        
+                        let words: Vec<&str> = paragraph.split_whitespace().collect();
+                        let mut current_line = String::new();
+                        
+                        for word in words {
+                            if current_line.is_empty() {
+                                current_line = word.to_string();
+                            } else if current_line.len() + word.len() + 1 <= chars_per_line {
+                                current_line.push(' ');
+                                current_line.push_str(word);
+                            } else {
+                                wrapped_lines.push(current_line.clone());
+                                current_line = word.to_string();
+                            }
+                        }
+                        if !current_line.is_empty() {
+                            wrapped_lines.push(current_line);
+                        }
+                    }
+                    
+                    // Draw each line
+                    let line_height = font_size as f64 * 1.2;
+                    for (i, line) in wrapped_lines.iter().enumerate() {
+                        let text_y = y + font_size as f64 + (i as f64 * line_height);
+                        if text_y < y + h {
+                            draw::draw_text(line, x as i32 + 2, text_y as i32);
+                        }
+                    }
+                } else {
+                    // No text content - show what we got instead
+                    draw::set_draw_color(Color::Red);
+                    draw::set_font(Font::Helvetica, 10);
+                    draw::draw_text("NO TEXT DATA", x as i32 + 5, y as i32 + 15);
+                }
+            }
+            
+            // Draw page number at bottom
+            draw::set_draw_color(Color::from_rgb(100, 100, 100));
+            draw::set_font(Font::HelveticaBold, 11);
+            draw::draw_text(
+                &format!("— Page {} —", page_idx + 1),
+                (page_x + page.width * zoom_factor as f64 / 2.0 - 30.0) as i32,
+                (current_y + page.height * zoom_factor as f64 + 15.0) as i32
+            );
+            
+            // Draw page separator line
+            if page_idx < doc.pages.len() - 1 {
+                draw::set_draw_color(Color::from_rgb(200, 200, 200));
+                draw::set_line_style(draw::LineStyle::Solid, 2);
+                let separator_y = (current_y + page.height * zoom_factor as f64 + page_gap / 2.0) as i32;
+                draw::draw_line(
+                    (page_x - 20.0) as i32,
+                    separator_y,
+                    (page_x + page.width * zoom_factor as f64 + 20.0) as i32,
+                    separator_y
+                );
+            }
+            
+            current_y += page.height * zoom_factor as f64 + page_gap;
+        }
+    }
+    
+    fn handle_click(
+        widget: &Widget,
+        mouse_x: i32,
+        mouse_y: i32,
+        doc: &Rc<RefCell<Option<FerrulesDocument>>>,
+        selected: &Rc<RefCell<Option<usize>>>,
+        scroll: &Rc<RefCell<(f64, f64)>>,
+    ) {
+        if let Some(ref doc) = *doc.borrow() {
+            let (_scroll_x, scroll_y) = *scroll.borrow();
+            
+            // Find which block was clicked
+            let mut current_y = widget.y() as f64 - scroll_y + 10.0;
+            let page_gap = 20.0;
+            
+            for (_page_idx, page) in doc.pages.iter().enumerate() {
+                let page_x = widget.x() as f64 + (widget.width() as f64 - page.width) / 2.0;
+                
+                for (block_idx, block) in doc.blocks.iter().enumerate() {
+                    if !block.pages_id.contains(&page.id) {
+                        continue;
+                    }
+                    
+                    let x = page_x + block.bbox.x0;
+                    let y = current_y + block.bbox.y0;
+                    let w = block.bbox.x1 - block.bbox.x0;
+                    let h = block.bbox.y1 - block.bbox.y0;
+                    
+                    if mouse_x >= x as i32 && mouse_x <= (x + w) as i32 &&
+                       mouse_y >= y as i32 && mouse_y <= (y + h) as i32 {
+                        *selected.borrow_mut() = Some(block_idx);
+                        return;
+                    }
+                }
+                
+                current_y += page.height + page_gap;
+            }
+            
+            // No block clicked, deselect
+            *selected.borrow_mut() = None;
+        }
+    }
+}
+
+widget_extends!(StructuredTextWidget, Widget, inner);
 
 // Advanced table detection from ferrules blocks
 fn detect_tables(blocks: &[FerrulesBlock], page_id: i32) -> Vec<DetectedTable> {
@@ -123,10 +495,10 @@ fn detect_tables(blocks: &[FerrulesBlock], page_id: i32) -> Vec<DetectedTable> {
     
     // Phase 1: Cluster blocks into rows based on Y-coordinate alignment
     let mut rows: Vec<Vec<(usize, &FerrulesBlock)>> = Vec::new();
-    let _row_tolerance = 3.0; // Tighter tolerance for better accuracy
+    let row_tolerance = 3.0; // Tighter tolerance for better accuracy
     
     for (idx, block) in &page_blocks {
-        let _y_center = (block.bbox.y0 + block.bbox.y1) / 2.0;
+        let y_center = (block.bbox.y0 + block.bbox.y1) / 2.0;
         let block_height = block.bbox.y1 - block.bbox.y0;
         
         // Find the best matching row
@@ -351,57 +723,21 @@ fn detect_tables(blocks: &[FerrulesBlock], page_id: i32) -> Vec<DetectedTable> {
         }
     }
     
-    // Phase 4: More aggressive table detection for missed tables
-    // Lower thresholds and look for more patterns
-    if tables.is_empty() && rows.len() >= 2 {
-        println!("  🔎 Trying aggressive table detection...");
+    // Phase 4: Try alternative detection for missed tables
+    // Look for regions with high density of small text blocks in grid-like arrangement
+    if tables.is_empty() && rows.len() > 5 {
+        // Simple heuristic: find sequences of rows with 2+ blocks
+        let mut consecutive_multi_cell_rows = 0;
+        let mut table_start = 0;
         
-        // Strategy 1: Look for any 2+ consecutive rows with consistent structure
-        let mut i = 0;
-        while i < rows.len() {
-            // Check if this could be a table start
-            let mut table_rows_indices = vec![i];
-            let mut j = i + 1;
-            
-            // Look for consecutive rows that could be part of same table
-            while j < rows.len() {
-                let row_gap = if j > 0 {
-                    rows[j][0].1.bbox.y0 - rows[j-1][0].1.bbox.y1
-                } else {
-                    0.0
-                };
-                
-                // If gap is too large, probably not same table
-                if row_gap > 50.0 {
-                    break;
+        for (i, row) in rows.iter().enumerate() {
+            if row.len() >= 2 {
+                if consecutive_multi_cell_rows == 0 {
+                    table_start = i;
                 }
-                
-                table_rows_indices.push(j);
-                j += 1;
-            }
-            
-            // Check if this looks like a table
-            let multi_cell_rows = table_rows_indices.iter()
-                .filter(|&&idx| rows[idx].len() >= 2)
-                .count();
-            
-            let has_numeric_content = table_rows_indices.iter()
-                .any(|&idx| {
-                    rows[idx].iter().any(|(_, block)| {
-                        let text = match &block.kind {
-                            FerrulesKind::Text { text } => text,
-                            FerrulesKind::Structured { text, .. } => text,
-                            _ => "",
-                        };
-                        text.trim().parse::<f64>().is_ok() || 
-                        text.contains('$') || 
-                        text.contains('%') ||
-                        text.contains('.')
-                    })
-                });
-            
-            // If we have at least 2 rows and some multi-cell rows OR numeric content
-            if table_rows_indices.len() >= 2 && (multi_cell_rows >= 1 || has_numeric_content) {
+                consecutive_multi_cell_rows += 1;
+            } else {
+                if consecutive_multi_cell_rows >= 3 {
                     // Found a potential table
                     let mut detected_table = DetectedTable {
                         rows: Vec::new(),
@@ -413,8 +749,8 @@ fn detect_tables(blocks: &[FerrulesBlock], page_id: i32) -> Vec<DetectedTable> {
                         },
                     };
                     
-                    for &row_idx in &table_rows_indices {
-                        if let Some(row) = rows.get(row_idx) {
+                    for j in table_start..i {
+                        if let Some(row) = rows.get(j) {
                             let y_center = if let Some((_, first)) = row.first() {
                                 (first.bbox.y0 + first.bbox.y1) / 2.0
                             } else {
@@ -450,13 +786,10 @@ fn detect_tables(blocks: &[FerrulesBlock], page_id: i32) -> Vec<DetectedTable> {
                     }
                     
                     if detected_table.rows.len() >= 2 {
-                        println!("    💡 Found table with {} rows", detected_table.rows.len());
                         tables.push(detected_table);
                     }
-                
-                i = j; // Skip past this table
-            } else {
-                i += 1;
+                }
+                consecutive_multi_cell_rows = 0;
             }
         }
     }
@@ -468,6 +801,80 @@ fn detect_tables(blocks: &[FerrulesBlock], page_id: i32) -> Vec<DetectedTable> {
     }
     
     tables
+}
+
+impl StructuredTextWidget {
+    
+    pub fn clear_document(&mut self) {
+        *self.document.borrow_mut() = None;
+        *self.selected_block.borrow_mut() = None;
+        self.redraw();
+    }
+    
+    pub fn edit_selected_block(&mut self) {
+        let block_idx = match *self.selected_block.borrow() {
+            Some(idx) => idx,
+            None => return,
+        };
+        
+        if let Some(ref mut doc) = *self.document.borrow_mut() {
+            if let Some(block) = doc.blocks.get_mut(block_idx) {
+                let text_mut = match &mut block.kind {
+                    FerrulesKind::Structured { ref mut text, .. } => Some(text),
+                    FerrulesKind::Text { ref mut text } => Some(text),
+                    _ => None,
+                };
+                
+                if let Some(text) = text_mut {
+                    // Create edit dialog
+                    let mut dialog_window = Window::default()
+                        .with_size(500, 300)
+                        .with_label("Edit Text Block");
+                    dialog_window.make_modal(true);
+                    
+                    let mut input = MultilineInput::default()
+                        .with_size(480, 250)
+                        .with_pos(10, 10);
+                    input.set_value(text);
+                    
+                    let mut ok_btn = Button::default()
+                        .with_size(80, 30)
+                        .with_pos(320, 265)
+                        .with_label("OK");
+                    
+                    let mut cancel_btn = Button::default()
+                        .with_size(80, 30)
+                        .with_pos(410, 265)
+                        .with_label("Cancel");
+                    
+                    dialog_window.end();
+                    dialog_window.show();
+                    
+                    let _text_clone = text.clone();
+                    let (s, r) = app::channel::<bool>();
+                    
+                    ok_btn.set_callback(move |_| {
+                        s.send(true);
+                    });
+                    
+                    cancel_btn.set_callback(move |_| {
+                        s.send(false);
+                    });
+                    
+                    while dialog_window.shown() {
+                        app::wait();
+                        if let Some(msg) = r.recv() {
+                            if msg {
+                                *text = input.value();
+                            }
+                            dialog_window.hide();
+                        }
+                    }
+                }
+            }
+        }
+        self.redraw();
+    }
 }
 
 struct Chonker5App {
@@ -482,11 +889,11 @@ struct Chonker5App {
     prev_btn: Button,
     next_btn: Button,
     extract_btn: Button,
-    table_btn: Button,
-    // structured_btn: Button, // REMOVED
-    // compare_btn: Button,   // REMOVED
+    structured_btn: Button,
+    compare_btn: Button,
     extracted_text_display: TextDisplay,
     extracted_text_buffer: TextBuffer,
+    structured_view: StructuredTextWidget,
     structured_html_content: String,
     structured_json_data: Option<FerrulesDocument>,
     compare_mode: bool,
@@ -596,19 +1003,6 @@ impl Chonker5App {
         extract_btn.deactivate(); // Start disabled until PDF is loaded
         
         x_pos += 130;
-        let mut table_btn = Button::default()
-            .with_pos(x_pos, y_pos)
-            .with_size(140, 40)
-            .with_label("📊 Analyze Structure");
-        table_btn.set_color(Color::from_rgb(0x8B, 0x00, 0x8B)); // Purple color for distinction
-        table_btn.set_label_color(Color::White);
-        table_btn.set_frame(FrameType::UpBox);
-        table_btn.set_label_size(14);
-        table_btn.deactivate(); // Start disabled until PDF is loaded
-        
-        // Pretty View and Compare buttons removed - functionality was broken
-        /*
-        x_pos += 130;
         let mut structured_btn = Button::default()
             .with_pos(x_pos, y_pos)
             .with_size(140, 40)
@@ -629,7 +1023,6 @@ impl Chonker5App {
         compare_btn.set_frame(FrameType::UpBox);
         compare_btn.set_label_size(14);
         compare_btn.deactivate(); // Start disabled until extraction is done
-        */
         
         x_pos += 110;
         let mut status_label = Frame::default()
@@ -696,6 +1089,15 @@ impl Chonker5App {
         extracted_text_display.set_buffer(extracted_text_buffer.clone());
         extracted_text_display.show();  // Start with text display visible
         
+        // Structured view with custom widget for ferrules JSON rendering
+        let mut structured_view = StructuredTextWidget::new(
+            right_group.x(), right_group.y(),
+            right_group.w(), right_group.h()
+        );
+        structured_view.set_frame(FrameType::FlatBox);
+        structured_view.set_color(Color::from_rgb(240, 240, 240));
+        structured_view.hide();  // Start with structured view hidden
+        
         right_group.end();
         
         content_flex.end();
@@ -741,11 +1143,11 @@ impl Chonker5App {
             prev_btn: prev_btn.clone(),
             next_btn: next_btn.clone(),
             extract_btn: extract_btn.clone(),
-            table_btn: table_btn.clone(),
-            // structured_btn: structured_btn.clone(), // REMOVED
-            // compare_btn: compare_btn.clone(),   // REMOVED
+            structured_btn: structured_btn.clone(),
+            compare_btn: compare_btn.clone(),
             extracted_text_display: extracted_text_display.clone(),
             extracted_text_buffer,
+            structured_view: structured_view.clone(),
             structured_html_content: String::new(),
             structured_json_data: None,
             compare_mode: false,
@@ -816,29 +1218,21 @@ impl Chonker5App {
             });
         }
         
-        // Table analysis button
+        // Structured data button
         {
             let state = app_state.clone();
-            table_btn.set_callback(move |_| {
-                state.borrow_mut().extract_and_analyze_structure();
+            structured_btn.set_callback(move |_| {
+                state.borrow_mut().extract_structured_data();
             });
         }
         
-        // Structured data button - REMOVED
-        /* Pretty view button disabled - functionality removed
-        structured_btn.deactivate();
-        structured_btn.set_label("❌ Removed");
-        */
-        
-        // Compare button - REMOVED
-        /*
+        // Compare button
         {
             let state = app_state.clone();
             compare_btn.set_callback(move |_| {
                 state.borrow_mut().toggle_compare_mode();
             });
         }
-        */
         
         
         // Remove focus tracking event handlers to avoid borrow checker issues
@@ -976,15 +1370,9 @@ impl Chonker5App {
                     self.extract_btn.set_color(Color::from_rgb(0x00, 0x8C, 0xBA));
                     self.extract_btn.set_label_color(Color::White);
                     
-                    // Enable table analysis button
-                    self.table_btn.activate();
-                    self.table_btn.set_color(Color::from_rgb(0x8B, 0x00, 0x8B));
-                    self.table_btn.set_label_color(Color::White);
-                    
-                    // Pretty View button removed
-                    // self.structured_btn.activate();
-                    // self.structured_btn.set_color(Color::from_rgb(0x00, 0x8C, 0x3A));
-                    // self.structured_btn.set_label_color(Color::White);
+                    self.structured_btn.activate();
+                    self.structured_btn.set_color(Color::from_rgb(0x00, 0x8C, 0x3A));
+                    self.structured_btn.set_label_color(Color::White);
                     
                     // Update UI
                     self.update_page_label();
@@ -1062,7 +1450,8 @@ impl Chonker5App {
     
     fn extract_current_page_text(&mut self) {
         if let Some(pdf_path) = self.pdf_path.clone() {
-            // Show text display
+            // Show text display and hide structured view
+            self.structured_view.hide();
             self.extracted_text_display.show();
             
             self.log("🔄 Extracting raw JSON with ferrules...");
@@ -1176,126 +1565,91 @@ impl Chonker5App {
     }
     
     fn extract_structured_data(&mut self) {
-        // Pretty view functionality has been removed
-        self.log("❌ Pretty View has been removed - too broken");
-        self.extracted_text_buffer.set_text("Pretty View functionality has been removed because it was too broken.\n\nUse the Raw JSON button instead.");
-    }
-    
-    fn extract_and_analyze_structure(&mut self) {
-        if let Some(pdf_path) = self.pdf_path.clone() {
-            self.log("🔍 Extracting and analyzing document structure...");
+        if let Some(pdf_path) = &self.pdf_path.clone() {
+            self.log("🔄 Loading pretty view with ferrules...");
+            
+            // Show structured view and hide text display
+            self.extracted_text_display.hide();
+            self.structured_view.show();
             
             // Create temp dir for ferrules output
             let temp_dir = std::env::temp_dir();
             let ferrules_dir = temp_dir.join("chonker5_ferrules");
             
+            // Create the directory if it doesn't exist
             if let Err(e) = fs::create_dir_all(&ferrules_dir) {
                 self.extracted_text_buffer.set_text(&format!("Error creating temp directory: {}", e));
                 self.log(&format!("❌ Failed to create temp dir: {}", e));
                 return;
             }
             
-            // Run ferrules to get structured data
+            // Run ferrules command
             let output = Command::new("ferrules")
-                .arg(&pdf_path)
+                .arg(pdf_path)
                 .arg("-o")
                 .arg(&ferrules_dir)
                 .output();
             
             match output {
                 Ok(result) => {
+                    self.log(&format!("🔧 Ferrules exit code: {}", result.status.code().unwrap_or(-1)));
+                    if !result.stderr.is_empty() {
+                        let stderr = String::from_utf8_lossy(&result.stderr);
+                        self.log(&format!("⚠️ Ferrules stderr: {}", stderr));
+                    }
+                    
                     if result.status.success() {
-                        // Find the JSON file
+                        // Ferrules creates a results directory - use same logic as Raw JSON button
                         let pdf_stem = pdf_path.file_stem().unwrap_or_default().to_string_lossy();
+                        // Remove special characters from filename (match ferrules' sanitization)
                         let safe_stem = pdf_stem.replace(")", "-").replace("(", "").replace("+", "-");
                         let results_dir = ferrules_dir.join(format!("{}-results", safe_stem));
+                        
+                        self.log(&format!("📂 Looking for files in: {:?}", results_dir));
+                        self.log(&format!("📂 PDF stem: '{}' -> Safe stem: '{}'", pdf_stem, safe_stem));
+                        
+                        // Look for JSON file in the results directory
                         let json_file = results_dir.join(format!("{}.json", safe_stem));
                         
-                        // Parse the ferrules JSON
-                        match fs::read_to_string(&json_file) {
-                            Ok(json_content) => {
-                                match serde_json::from_str::<FerrulesDocument>(&json_content) {
-                                    Ok(doc) => {
-                                        self.log(&format!("✅ Parsed ferrules data: {} pages, {} blocks", 
-                                            doc.pages.len(), doc.blocks.len()));
-                                        
-                                        // Analyze document structure for each page
-                                        let mut analysis = String::from("📊 DOCUMENT STRUCTURE ANALYSIS\n");
-                                        analysis.push_str("==============================\n\n");
-                                        
-                                        for page in &doc.pages {
-                                            let tables = detect_tables(&doc.blocks, page.id);
-                                            
-                                            analysis.push_str(&format!("📄 Page {} ({:.0}x{:.0} px)\n", 
-                                                page.id + 1, page.width, page.height));
-                                            
-                                            if tables.is_empty() {
-                                                analysis.push_str("   No structured sections detected\n");
-                                            } else {
-                                                analysis.push_str(&format!("   Found {} structured section(s):\n", tables.len()));
-                                                
-                                                for (i, table) in tables.iter().enumerate() {
-                                                    analysis.push_str(&format!("\n   📄 Section {} - {} content blocks\n", i + 1, table.rows.len()));
-                                                    analysis.push_str(&format!("      Location: ({:.0}, {:.0}) to ({:.0}, {:.0})\n",
-                                                        table.bbox.x0, table.bbox.y0, table.bbox.x1, table.bbox.y1));
-                                                    
-                                                    // Extract section content
-                                                    for (row_idx, row) in table.rows.iter().enumerate() {
-                                                        analysis.push_str(&format!("      Block {}: ", row_idx + 1));
-                                                        
-                                                        let cell_texts: Vec<String> = row.cells.iter()
-                                                            .filter_map(|cell| {
-                                                                doc.blocks.get(cell.block_idx)
-                                                                    .and_then(|block| match &block.kind {
-                                                                        FerrulesKind::Text { text } => Some(text.trim().to_string()),
-                                                                        FerrulesKind::Structured { text, .. } => Some(text.trim().to_string()),
-                                                                        _ => None,
-                                                                    })
-                                                            })
-                                                            .collect();
-                                                        
-                                                        analysis.push_str(&format!("[{}]\n", cell_texts.join(" | ")));
-                                                    }
-                                                }
-                                            }
-                                            analysis.push_str("\n");
-                                        }
-                                        
-                                        // Add summary
-                                        let total_tables: usize = doc.pages.iter()
-                                            .map(|p| detect_tables(&doc.blocks, p.id).len())
-                                            .sum();
-                                        
-                                        analysis.push_str(&format!("\n📈 SUMMARY\n"));
-                                        analysis.push_str(&format!("Total pages: {}\n", doc.pages.len()));
-                                        analysis.push_str(&format!("Total blocks: {}\n", doc.blocks.len()));
-                                        analysis.push_str(&format!("Total structured sections: {}\n", total_tables));
-                                        
-                                        self.extracted_text_buffer.set_text(&analysis);
-                                        self.log("✅ Document structure analysis complete");
-                                    }
-                                    Err(e) => {
-                                        self.extracted_text_buffer.set_text(&format!("Error parsing JSON: {}", e));
-                                        self.log(&format!("❌ Failed to parse JSON: {}", e));
-                                    }
+                        if let Ok(json_content) = fs::read_to_string(&json_file) {
+                            self.log(&format!("📄 Found JSON: {:?}", json_file));
+                            
+                            // Parse JSON directly for pretty view
+                            match serde_json::from_str::<FerrulesDocument>(&json_content) {
+                                Ok(doc) => {
+                                    self.structured_json_data = Some(doc.clone());
+                                    self.log(&format!("✅ Parsed ferrules JSON data: {} pages, {} blocks", 
+                                        doc.pages.len(), doc.blocks.len()));
+                                    
+                                    // Update the structured view widget with the document
+                                    self.structured_view.set_document(doc.clone());
+                                    
+                                    // Enable compare button
+                                    self.compare_btn.activate();
+                                    self.compare_btn.set_color(Color::from_rgb(0xFF, 0x85, 0x00));
+                                    
+                                    self.log("✅ Pretty view loaded successfully");
+                                }
+                                Err(e) => {
+                                    self.log(&format!("⚠️ Failed to parse JSON: {}", e));
+                                    self.extracted_text_buffer.set_text(&format!("Error parsing JSON: {}", e));
                                 }
                             }
-                            Err(e) => {
-                                self.extracted_text_buffer.set_text(&format!("Error reading JSON: {}", e));
-                                self.log(&format!("❌ Failed to read JSON: {}", e));
-                            }
+                        } else {
+                            self.log("❌ Failed to read JSON file");
+                            self.extracted_text_buffer.set_text("Error: Could not read JSON file");
                         }
                         
-                        // Clean up
+                        // Clean up temp directory
                         let _ = fs::remove_dir_all(&ferrules_dir);
                     } else {
-                        let stderr = String::from_utf8_lossy(&result.stderr);
-                        self.extracted_text_buffer.set_text(&format!("Ferrules error: {}", stderr));
-                        self.log(&format!("❌ Ferrules failed: {}", stderr));
+                        let error_msg = String::from_utf8_lossy(&result.stderr);
+                        self.extracted_text_buffer.set_text(&format!("Ferrules error: {}", error_msg));
+                        self.log(&format!("❌ Ferrules failed: {}", error_msg));
                     }
                 }
                 Err(e) => {
-                    self.extracted_text_buffer.set_text(&format!("Error running ferrules: {}", e));
+                    self.extracted_text_buffer.set_text(&format!("Failed to run ferrules: {}", e));
                     self.log(&format!("❌ Failed to run ferrules: {}", e));
                 }
             }
@@ -1530,16 +1884,14 @@ impl Chonker5App {
         self.compare_mode = !self.compare_mode;
         
         if self.compare_mode {
-            // Compare button removed
-            // self.compare_btn.set_label("Normal View");
-            // self.compare_btn.set_color(Color::from_rgb(0x00, 0x8C, 0xBA));
+            self.compare_btn.set_label("Normal View");
+            self.compare_btn.set_color(Color::from_rgb(0x00, 0x8C, 0xBA));
             self.log("📊 Compare mode enabled - showing position data");
             
             // The custom widget already shows position data through the bounding boxes
         } else {
-            // Compare button removed  
-            // self.compare_btn.set_label("Compare");
-            // self.compare_btn.set_color(Color::from_rgb(0xFF, 0x85, 0x00));
+            self.compare_btn.set_label("Compare");
+            self.compare_btn.set_color(Color::from_rgb(0xFF, 0x85, 0x00));
             self.log("📄 Normal view restored");
             
             // The custom widget handles this automatically

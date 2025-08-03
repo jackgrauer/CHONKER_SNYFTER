@@ -99,10 +99,17 @@ rustc chonker5.rs
 
 ## Recent Updates
 
-### Latest - Ferrules Integration
-- **HTML Rendering**: Switched to ferrules HTML output for better multi-page support
-- **Fixed Scrollbar Issue**: Removed duplicate scrollbar by using HelpView's native scrolling
-- **Improved Performance**: Faster rendering using native HTML display
+### Latest - Custom Widget Implementation
+- **Custom Rendering Widget**: Implemented StructuredTextWidget to solve text overlap issues
+- **Direct JSON Parsing**: Parse ferrules JSON output for precise positioning control
+- **Multi-Page Support**: Proper page layout with gaps between pages
+- **Bounding Box Display**: Shows text block boundaries for position verification
+- **Future Ready**: Prepared for click-to-edit and drag-and-drop functionality
+
+### Previous - Ferrules Integration  
+- **HTML Rendering**: Ferrules HTML output for multi-page support
+- **JSON Parsing**: Also parse JSON for custom rendering
+- **Improved Performance**: Faster rendering with native display
 - **Better Table Support**: Ferrules properly handles complex table structures
 
 ## License
