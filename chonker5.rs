@@ -5,8 +5,10 @@
 //! rfd = "0.15"
 //! image = "0.25"
 //! extractous = "0.3"
+//! pdfium-render = { version = "0.8", features = ["thread_safe"] }
 //! serde = { version = "1.0", features = ["derive"] }
 //! serde_json = "1.0"
+//! ordered-float = "4.2"
 //! ```
 
 use fltk::{
@@ -27,6 +29,11 @@ use std::rc::Rc;
 use std::process::Command;
 use std::fs;
 use extractous::Extractor;
+use std::error::Error;
+use serde::{Serialize, Deserialize};
+use pdfium_render::prelude::*;
+use std::collections::{HashMap, HashSet};
+use ordered_float::OrderedFloat;
 
 const WINDOW_WIDTH: i32 = 1200;
 const WINDOW_HEIGHT: i32 = 800;
@@ -37,6 +44,46 @@ const LOG_HEIGHT: i32 = 100;
 const COLOR_TEAL: Color = Color::from_rgb(0x1A, 0xBC, 0x9C);
 const COLOR_DARK_BG: Color = Color::from_rgb(0x52, 0x56, 0x59);
 const COLOR_DARKER_BG: Color = Color::from_rgb(0x2D, 0x2F, 0x31);
+
+// Table extraction structures
+#[derive(Debug, Clone)]
+struct TextFragment {
+    text: String,
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+    font_size: f64,
+    font_name: String,
+    page_number: u16,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct Cell {
+    content: String,
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+    row_span: usize,
+    col_span: usize,
+    row_index: usize,
+    col_index: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct Table {
+    cells: Vec<Vec<Option<Cell>>>,
+    rows: usize,
+    cols: usize,
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+    page_number: u16,
+}
+
+// TextFragment and Line structs removed - not needed without pdfium functions
 
 struct Chonker5App {
     app: App,
@@ -51,6 +98,7 @@ struct Chonker5App {
     next_btn: Button,
     extract_btn: Button,
     structured_btn: Button,
+    table_btn: Button,
     extracted_text_display: TextDisplay,
     extracted_text_buffer: TextBuffer,
     structured_html_view: HelpView,
@@ -170,7 +218,18 @@ impl Chonker5App {
         structured_btn.set_label_size(14);
         structured_btn.deactivate(); // Start disabled until PDF is loaded
         
-        x_pos += 160;
+        x_pos += 150;
+        let mut table_btn = Button::default()
+            .with_pos(x_pos, y_pos)
+            .with_size(160, 40)
+            .with_label("Pdfium - Tables");
+        table_btn.set_color(Color::from_rgb(0xE6, 0x7E, 0x22)); // Orange color for distinction
+        table_btn.set_label_color(Color::White);
+        table_btn.set_frame(FrameType::UpBox);
+        table_btn.set_label_size(14);
+        table_btn.deactivate(); // Start disabled until PDF is loaded
+        
+        x_pos += 170;
         let mut status_label = Frame::default()
             .with_pos(x_pos, y_pos)
             .with_size(300, 40)
@@ -285,6 +344,7 @@ impl Chonker5App {
             next_btn: next_btn.clone(),
             extract_btn: extract_btn.clone(),
             structured_btn: structured_btn.clone(),
+            table_btn: table_btn.clone(),
             extracted_text_display: extracted_text_display.clone(),
             extracted_text_buffer,
             structured_html_view: structured_html_view.clone(),
@@ -360,6 +420,14 @@ impl Chonker5App {
             let state = app_state.clone();
             structured_btn.set_callback(move |_| {
                 state.borrow_mut().extract_structured_data();
+            });
+        }
+        
+        // Table extraction button
+        {
+            let state = app_state.clone();
+            table_btn.set_callback(move |_| {
+                state.borrow_mut().extract_tables();
             });
         }
         
@@ -502,6 +570,10 @@ impl Chonker5App {
                     self.structured_btn.activate();
                     self.structured_btn.set_color(Color::from_rgb(0x00, 0x8C, 0x3A));
                     self.structured_btn.set_label_color(Color::White);
+                    
+                    self.table_btn.activate();
+                    self.table_btn.set_color(Color::from_rgb(0xE6, 0x7E, 0x22));
+                    self.table_btn.set_label_color(Color::White);
                     
                     // Update UI
                     self.update_page_label();
@@ -725,6 +797,280 @@ impl Chonker5App {
         }
     }
     
+    fn extract_tables(&mut self) {
+        if let Some(pdf_path) = &self.pdf_path.clone() {
+            self.log("🔄 Extracting tables with pdfium-render...");
+            
+            // Show text display and hide structured view
+            self.structured_html_view.hide();
+            self.extracted_text_display.show();
+            
+            match self.simple_table_extraction(pdf_path) {
+                Ok(result) => {
+                    self.extracted_text_buffer.set_text(&result);
+                    self.log("✅ Table extraction completed");
+                }
+                Err(e) => {
+                    let error_msg = format!(
+                        "Table Extraction Error\n\n\
+                        Failed to extract tables: {}\n\n\
+                        This might be due to:\n\
+                        • PDF format incompatibility\n\
+                        • No structured tables in the document\n\
+                        • Missing pdfium library\n\n\
+                        Try using 'Ferrules - HTML' for structured document layout instead.",
+                        e
+                    );
+                    self.extracted_text_buffer.set_text(&error_msg);
+                    self.log(&format!("❌ Table extraction error: {}", e));
+                }
+            }
+            
+            app::awake();
+        } else {
+            self.log("⚠️ No PDF loaded. Press Cmd+O to open a file first.");
+        }
+    }
+    
+    fn simple_table_extraction(&self, pdf_path: &std::path::Path) -> Result<String, Box<dyn Error>> {
+        // Use pdfium-render with static linking
+        self.pdfium_table_extraction(pdf_path)
+    }
+    
+    fn pdfium_table_extraction(&self, pdf_path: &std::path::Path) -> Result<String, Box<dyn Error>> {
+        let mut output = String::new();
+        
+        // Initialize pdfium - try to load from lib directory
+        let pdfium = Pdfium::new(
+            Pdfium::bind_to_library(Pdfium::pdfium_platform_library_name_at_path("./lib/"))?
+        );
+        
+        // Load the PDF document
+        let document = pdfium.load_pdf_from_file(pdf_path, None)?;
+        
+        output.push_str(&format!("📊 PDFIUM TABLE EXTRACTION RESULTS\n"));
+        output.push_str(&format!("Document: {}\n", pdf_path.file_name().unwrap_or_default().to_string_lossy()));
+        output.push_str(&format!("Total Pages: {}\n", document.pages().len()));
+        output.push_str(&format!("Method: Pdfium-render text extraction\n\n"));
+        
+        let mut tables_found = 0;
+        
+        // Process each page
+        for (page_index, page) in document.pages().iter().enumerate() {
+            let page_number = page_index + 1;
+            
+            // Extract all text from the page
+            let text_page = page.text()?;
+            let char_count = text_page.chars().len();
+            
+            let mut page_text = String::new();
+            for index in 0..char_count {
+                if let Ok(character) = text_page.chars().get(index) {
+                    if let Some(ch) = character.unicode_char() {
+                        page_text.push(ch);
+                    }
+                }
+            }
+            
+            // Simple table detection: look for patterns that suggest tabular data
+            let detected_tables = self.detect_simple_tables(&page_text);
+            
+            if !detected_tables.is_empty() {
+                output.push_str(&format!("📄 PAGE {} TABLES:\n", page_number));
+                output.push_str(&format!("Found {} potential table(s)\n\n", detected_tables.len()));
+                
+                for (table_idx, table_text) in detected_tables.iter().enumerate() {
+                    tables_found += 1;
+                    output.push_str(&format!("🔢 Table {} (Page {}):\n", table_idx + 1, page_number));
+                    output.push_str("```\n");
+                    output.push_str(table_text);
+                    output.push_str("\n```\n\n");
+                }
+            }
+        }
+        
+        if tables_found == 0 {
+            output.push_str("ℹ️ No tables detected in this document.\n\n");
+            output.push_str("This could mean:\n");
+            output.push_str("• The document contains no tabular data\n");
+            output.push_str("• Tables are embedded as images\n");
+            output.push_str("• Tables don't follow recognizable patterns\n\n");
+            output.push_str("Try using 'Ferrules - HTML' for better structure detection.\n");
+        } else {
+            output.push_str(&format!("✅ Successfully detected {} table(s) across all pages.\n", tables_found));
+        }
+        
+        Ok(output)
+    }
+    
+    fn extract_text_fragments(&self, page: &PdfPage, page_number: u16) -> Result<Vec<TextFragment>, Box<dyn Error>> {
+        let mut fragments = Vec::new();
+        let text_page = page.text()?;
+        let chars = text_page.chars();
+        let char_count = chars.len();
+        
+        let mut current_fragment = String::new();
+        let mut fragment_start_x = 0.0;
+        let mut fragment_start_y = 0.0;
+        let mut fragment_font_size = 0.0;
+        let mut fragment_font_name = String::new();
+        let mut last_x = 0.0;
+        let mut last_y = 0.0;
+        
+        let vertical_tolerance = 3.0;
+        
+        for index in 0..char_count {
+            if let Ok(character) = chars.get(index) {
+                // Get character position 
+                if let Ok(bounds_result) = character.loose_bounds() {
+                    let font_size = 10.0; // Default font size
+                    let font_name = String::from("Unknown"); // Default font name
+                    
+                    // Convert PdfPoints to f64
+                    let bounds_left = bounds_result.left().value as f64;
+                    let bounds_top = bounds_result.top().value as f64;
+                    let bounds_right = bounds_result.right().value as f64;
+                    
+                    let is_new_fragment = current_fragment.is_empty() ||
+                        (bounds_top - last_y).abs() > vertical_tolerance ||
+                        bounds_left - last_x > font_size * 0.3 ||
+                        font_size != fragment_font_size ||
+                        font_name != fragment_font_name;
+                    
+                    if is_new_fragment && !current_fragment.is_empty() {
+                        fragments.push(TextFragment {
+                            text: current_fragment.clone(),
+                            x: fragment_start_x,
+                            y: fragment_start_y,
+                            width: last_x - fragment_start_x,
+                            height: fragment_font_size,
+                            font_size: fragment_font_size,
+                            font_name: fragment_font_name.clone(),
+                            page_number,
+                        });
+                        current_fragment.clear();
+                    }
+                    
+                    if current_fragment.is_empty() {
+                        fragment_start_x = bounds_left;
+                        fragment_start_y = bounds_top;
+                        fragment_font_size = font_size;
+                        fragment_font_name = font_name.clone();
+                    }
+                    
+                    if let Some(ch) = character.unicode_char() {
+                        current_fragment.push(ch);
+                    }
+                    last_x = bounds_right;
+                    last_y = bounds_top;
+                }
+            }
+        }
+        
+        if !current_fragment.is_empty() {
+            fragments.push(TextFragment {
+                text: current_fragment,
+                x: fragment_start_x,
+                y: fragment_start_y,
+                width: last_x - fragment_start_x,
+                height: fragment_font_size,
+                font_size: fragment_font_size,
+                font_name: fragment_font_name,
+                page_number,
+            });
+        }
+        
+        Ok(fragments)
+    }
+    
+    fn detect_simple_tables(&self, text: &str) -> Vec<String> {
+        let mut tables = Vec::new();
+        let lines: Vec<&str> = text.lines().collect();
+        
+        let mut current_table = Vec::new();
+        let mut in_table = false;
+        
+        for line in lines {
+            // Simple heuristics for table detection
+            let trimmed = line.trim();
+            
+            // Skip empty lines
+            if trimmed.is_empty() {
+                if in_table && !current_table.is_empty() {
+                    // End current table
+                    let table_text = current_table.join("\n");
+                    if self.looks_like_table(&table_text) {
+                        tables.push(table_text);
+                    }
+                    current_table.clear();
+                    in_table = false;
+                }
+                continue;
+            }
+            
+            // Check if line looks like it could be part of a table
+            if self.line_looks_tabular(trimmed) {
+                if !in_table {
+                    in_table = true;
+                    current_table.clear();
+                }
+                current_table.push(trimmed.to_string());
+            } else if in_table {
+                // End current table
+                let table_text = current_table.join("\n");
+                if self.looks_like_table(&table_text) {
+                    tables.push(table_text);
+                }
+                current_table.clear();
+                in_table = false;
+            }
+        }
+        
+        // Handle table at end of text
+        if in_table && !current_table.is_empty() {
+            let table_text = current_table.join("\n");
+            if self.looks_like_table(&table_text) {
+                tables.push(table_text);
+            }
+        }
+        
+        tables
+    }
+    
+    fn line_looks_tabular(&self, line: &str) -> bool {
+        // Count potential separators and data patterns
+        let tab_count = line.matches('\t').count();
+        let space_groups = line.split_whitespace().count();
+        let has_numbers = line.chars().any(|c| c.is_numeric());
+        let has_multiple_words = space_groups >= 2;
+        
+        // Simple heuristics:
+        // - Has tabs (common in extracted tables)
+        // - Has multiple space-separated items with numbers
+        // - Contains common table patterns
+        tab_count > 0 || 
+        (has_multiple_words && has_numbers) ||
+        line.contains('|') ||
+        line.contains("  ") // Multiple spaces often indicate column alignment
+    }
+    
+    fn looks_like_table(&self, text: &str) -> bool {
+        let lines: Vec<&str> = text.lines().collect();
+        
+        // Must have at least 2 rows to be a table
+        if lines.len() < 2 {
+            return false;
+        }
+        
+        // Check if most lines have similar structure
+        let tabular_lines = lines.iter()
+            .filter(|line| self.line_looks_tabular(line.trim()))
+            .count();
+        
+        // At least 60% of lines should look tabular
+        tabular_lines as f64 / lines.len() as f64 >= 0.6
+    }
+    
     fn prev_page(&mut self) {
         if self.current_page > 0 {
             self.current_page -= 1;
@@ -821,6 +1167,251 @@ impl Chonker5App {
     fn run(app_state: Rc<RefCell<Self>>) {
         let app = app_state.borrow().app.clone();
         app.run().unwrap();
+    }
+    
+    // Advanced table detection methods
+    fn detect_tables(&self, text_fragments: Vec<TextFragment>, page_number: u16) -> Vec<Table> {
+        let mut tables = Vec::new();
+        let row_groups = self.group_fragments_by_row(&text_fragments);
+        let table_regions = self.find_table_regions(&row_groups);
+        
+        for region in table_regions {
+            if let Some(table) = self.extract_table_from_region(region, page_number) {
+                tables.push(table);
+            }
+        }
+        
+        tables
+    }
+    
+    fn group_fragments_by_row(&self, fragments: &[TextFragment]) -> Vec<Vec<TextFragment>> {
+        let vertical_tolerance = 3.0;
+        let mut row_map: HashMap<OrderedFloat<f64>, Vec<TextFragment>> = HashMap::new();
+        
+        for fragment in fragments {
+            let y_key = OrderedFloat((fragment.y / vertical_tolerance).round() * vertical_tolerance);
+            row_map.entry(y_key).or_insert_with(Vec::new).push(fragment.clone());
+        }
+        
+        let mut rows: Vec<(OrderedFloat<f64>, Vec<TextFragment>)> = row_map.into_iter().collect();
+        rows.sort_by_key(|(y, _)| *y);
+        
+        rows.into_iter().map(|(_, mut fragments)| {
+            fragments.sort_by(|a, b| OrderedFloat(a.x).cmp(&OrderedFloat(b.x)));
+            fragments
+        }).collect()
+    }
+    
+    fn find_table_regions(&self, rows: &[Vec<TextFragment>]) -> Vec<Vec<Vec<TextFragment>>> {
+        let mut regions = Vec::new();
+        let mut current_region = Vec::new();
+        let mut in_table = false;
+        let min_table_rows = 2;
+        let _min_table_cols = 2;
+        
+        for (i, row) in rows.iter().enumerate() {
+            if self.is_table_row(row, i, rows) {
+                if !in_table {
+                    in_table = true;
+                    current_region.clear();
+                }
+                current_region.push(row.clone());
+            } else if in_table {
+                if current_region.len() >= min_table_rows {
+                    regions.push(current_region.clone());
+                }
+                current_region.clear();
+                in_table = false;
+            }
+        }
+        
+        if in_table && current_region.len() >= min_table_rows {
+            regions.push(current_region);
+        }
+        
+        regions
+    }
+    
+    fn is_table_row(&self, row: &[TextFragment], row_index: usize, all_rows: &[Vec<TextFragment>]) -> bool {
+        let min_table_cols = 2;
+        let horizontal_tolerance = 3.0;
+        
+        if row.len() < min_table_cols {
+            return false;
+        }
+        
+        // Check alignment with previous and next rows
+        if row_index > 0 && row_index < all_rows.len() - 1 {
+            let prev_row = &all_rows[row_index - 1];
+            let next_row = &all_rows[row_index + 1];
+            
+            let mut aligned_count = 0;
+            for fragment in row {
+                let has_prev_aligned = prev_row.iter().any(|pf| 
+                    (pf.x - fragment.x).abs() < horizontal_tolerance
+                );
+                let has_next_aligned = next_row.iter().any(|nf| 
+                    (nf.x - fragment.x).abs() < horizontal_tolerance
+                );
+                
+                if has_prev_aligned || has_next_aligned {
+                    aligned_count += 1;
+                }
+            }
+            
+            // At least half the columns should be aligned
+            if aligned_count < row.len() / 2 {
+                return false;
+            }
+        }
+        
+        true
+    }
+    
+    fn extract_table_from_region(&self, region: Vec<Vec<TextFragment>>, page_number: u16) -> Option<Table> {
+        let min_table_rows = 2;
+        let min_table_cols = 2;
+        let horizontal_tolerance = 3.0;
+        
+        if region.len() < min_table_rows {
+            return None;
+        }
+        
+        // Find all unique column positions
+        let mut all_x_positions = HashSet::new();
+        for row in &region {
+            for fragment in row {
+                all_x_positions.insert(OrderedFloat(fragment.x));
+            }
+        }
+        
+        let mut column_positions: Vec<f64> = all_x_positions.into_iter()
+            .map(|x| x.0)
+            .collect();
+        column_positions.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        
+        // Merge close column positions
+        let mut merged_positions = Vec::new();
+        let mut last_pos = None;
+        for pos in column_positions {
+            if let Some(last) = last_pos {
+                if pos - last > horizontal_tolerance {
+                    merged_positions.push(pos);
+                }
+            } else {
+                merged_positions.push(pos);
+            }
+            last_pos = Some(pos);
+        }
+        column_positions = merged_positions;
+        
+        if column_positions.len() < min_table_cols {
+            return None;
+        }
+        
+        let rows = region.len();
+        let cols = column_positions.len();
+        let mut cells: Vec<Vec<Option<Cell>>> = vec![vec![None; cols]; rows];
+        
+        // Fill cells based on fragment positions
+        for (row_idx, row_fragments) in region.iter().enumerate() {
+            for fragment in row_fragments {
+                let col_idx = column_positions.iter()
+                    .position(|&col_x| (fragment.x - col_x).abs() < horizontal_tolerance)
+                    .unwrap_or_else(|| {
+                        column_positions.iter()
+                            .enumerate()
+                            .min_by_key(|(_, &col_x)| OrderedFloat((fragment.x - col_x).abs()))
+                            .map(|(idx, _)| idx)
+                            .unwrap_or(0)
+                    });
+                
+                if col_idx < cols {
+                    if let Some(ref mut existing_cell) = cells[row_idx][col_idx] {
+                        existing_cell.content.push(' ');
+                        existing_cell.content.push_str(&fragment.text);
+                        existing_cell.width = existing_cell.width.max(fragment.x + fragment.width - existing_cell.x);
+                    } else {
+                        cells[row_idx][col_idx] = Some(Cell {
+                            content: fragment.text.clone(),
+                            x: fragment.x,
+                            y: fragment.y,
+                            width: fragment.width,
+                            height: fragment.height,
+                            row_span: 1,
+                            col_span: 1,
+                            row_index: row_idx,
+                            col_index: col_idx,
+                        });
+                    }
+                }
+            }
+        }
+        
+        // Calculate table bounds
+        let min_x = region.iter()
+            .flat_map(|row| row.iter().map(|f| f.x))
+            .min_by_key(|&x| OrderedFloat(x))
+            .unwrap_or(0.0);
+        
+        let max_x = region.iter()
+            .flat_map(|row| row.iter().map(|f| f.x + f.width))
+            .max_by_key(|&x| OrderedFloat(x))
+            .unwrap_or(0.0);
+        
+        let min_y = region.first()
+            .and_then(|row| row.first())
+            .map(|f| f.y)
+            .unwrap_or(0.0);
+        
+        let max_y = region.last()
+            .and_then(|row| row.first())
+            .map(|f| f.y + f.height)
+            .unwrap_or(0.0);
+        
+        Some(Table {
+            cells, rows, cols,
+            x: min_x,
+            y: min_y,
+            width: max_x - min_x,
+            height: max_y - min_y,
+            page_number,
+        })
+    }
+    
+    fn export_to_markdown(&self, table: &Table) -> String {
+        let mut markdown = String::new();
+        
+        if !table.cells.is_empty() {
+            // Header row
+            markdown.push('|');
+            for cell in &table.cells[0] {
+                markdown.push(' ');
+                markdown.push_str(&cell.as_ref().map(|c| c.content.as_str()).unwrap_or(""));
+                markdown.push_str(" |");
+            }
+            markdown.push('\n');
+            
+            // Separator
+            markdown.push('|');
+            for _ in 0..table.cols {
+                markdown.push_str(" --- |");
+            }
+            markdown.push('\n');
+            
+            // Data rows
+            for row_idx in 1..table.rows {
+                markdown.push('|');
+                for cell in &table.cells[row_idx] {
+                    markdown.push(' ');
+                    markdown.push_str(&cell.as_ref().map(|c| c.content.as_str()).unwrap_or(""));
+                    markdown.push_str(" |");
+                }
+                markdown.push('\n');
+            }
+        }
+        
+        markdown
     }
 }
 
