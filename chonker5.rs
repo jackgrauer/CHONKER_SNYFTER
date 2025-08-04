@@ -18,7 +18,6 @@ use eframe::egui;
 use egui::{Color32, RichText, FontId, Stroke, Rounding};
 use std::path::PathBuf;
 use std::process::Command;
-use std::fs;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use anyhow::Result;
@@ -28,13 +27,13 @@ use serde::{Deserialize, Serialize};
 
 // Teal and chrome color scheme
 const TERM_BG: Color32 = Color32::from_rgb(10, 15, 20); // Dark blue-black
-const TERM_FG: Color32 = Color32::from_rgb(0, 200, 180); // Teal
+const TERM_FG: Color32 = Color32::from_rgb(26, 188, 156); // Teal (#1ABC9C)
 const TERM_BORDER: Color32 = Color32::from_rgb(192, 192, 192); // Chrome/silver
-const TERM_HIGHLIGHT: Color32 = Color32::from_rgb(0, 255, 230); // Bright teal
+const TERM_HIGHLIGHT: Color32 = Color32::from_rgb(22, 160, 133); // Darker teal (#16A085)
 const TERM_ERROR: Color32 = Color32::from_rgb(255, 80, 80); // Soft red
 const TERM_DIM: Color32 = Color32::from_rgb(80, 100, 100); // Muted teal-gray
 const TERM_YELLOW: Color32 = Color32::from_rgb(255, 200, 0); // Gold accent
-const CHROME: Color32 = Color32::from_rgb(224, 224, 224); // Light chrome
+const CHROME: Color32 = Color32::from_rgb(82, 86, 89); // Chrome (#525659)
 
 // Box drawing characters
 const BOX_TL: &str = "╔";
@@ -118,6 +117,10 @@ struct Chonker5App {
     total_pages: usize,
     zoom_level: f32,
     pdf_texture: Option<egui::TextureHandle>,
+    needs_render: bool,
+    
+    // UI assets
+    hamster_texture: Option<egui::TextureHandle>,
     
     // Extraction state
     page_range: String,
@@ -151,7 +154,7 @@ enum ExtractionTab {
 }
 
 impl Chonker5App {
-    fn new(_cc: &eframe::CreationContext<'_>) -> Self {
+    fn new(cc: &eframe::CreationContext<'_>) -> Self {
         
         // Initialize async runtime
         let runtime = Arc::new(
@@ -161,12 +164,36 @@ impl Chonker5App {
         // Initialize tracing
         tracing_subscriber::fmt::init();
         
+        // Load hamster image
+        let hamster_texture = if let Ok(image_data) = std::fs::read("./assets/emojis/chonker.png") {
+            if let Ok(image) = image::load_from_memory(&image_data) {
+                let size = [image.width() as _, image.height() as _];
+                let image_buffer = image.to_rgba8();
+                let pixels = image_buffer.as_flat_samples();
+                let color_image = egui::ColorImage::from_rgba_unmultiplied(
+                    size,
+                    pixels.as_slice(),
+                );
+                Some(cc.egui_ctx.load_texture(
+                    "hamster",
+                    color_image,
+                    Default::default()
+                ))
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+        
         let mut app = Self {
             pdf_path: None,
             current_page: 0,
             total_pages: 0,
             zoom_level: 1.0,
             pdf_texture: None,
+            needs_render: false,
+            hamster_texture,
             page_range: "1-10".to_string(),
             vision_result: Default::default(),
             data_result: Default::default(),
@@ -390,18 +417,21 @@ impl Chonker5App {
                     .duration_since(std::time::UNIX_EPOCH)
                     .unwrap()
                     .as_millis();
-                let temp_dir = std::env::temp_dir().join(format!("ferrules_{}", timestamp));
-                fs::create_dir_all(&temp_dir)?;
+                let temp_dir = std::env::temp_dir().join(format!("chonker5_ferrules_{}", timestamp));
+                std::fs::create_dir_all(&temp_dir)?;
                 
-                // Build ferrules command using correct arguments
+                // Build ferrules command
                 let mut cmd = Command::new(&ferrules_path);
-                cmd.arg(&pdf_path)
-                    .arg("--output-dir").arg(&temp_dir);
+                cmd.arg(&pdf_path);
+                cmd.arg("--output-dir").arg(&temp_dir);
                 
                 // Add page range if specified  
                 if let Some(range) = parsed_range {
                     cmd.arg("--page-range").arg(format!("{}-{}", range.start + 1, range.end));
                 }
+                
+                // Use markdown output
+                cmd.arg("--md");
                 
                 // Execute ferrules
                 let output = cmd.output()?;
@@ -413,24 +443,144 @@ impl Chonker5App {
                         output.status, stderr, stdout));
                 }
                 
-                // Ferrules doesn't output JSON directly, so we'll create a simple structure from the text output
-                // For now, let's create a mock parsed document and use the stdout as content
-                let stdout = String::from_utf8_lossy(&output.stdout);
+                // Read the markdown file that ferrules created
+                let mut markdown_content = String::new();
                 
-                // Create a simple parsed document structure
-                let parsed_doc = ParsedDocument {
-                    pages: vec![Page {
+                // Log the temp directory
+                eprintln!("Looking for ferrules output in: {:?}", temp_dir);
+                
+                // Look for files in the output directory and subdirectories
+                let mut dirs_to_check = vec![temp_dir.clone()];
+                
+                // Also check subdirectories - ferrules creates subdirectories for each page
+                if let Ok(entries) = std::fs::read_dir(&temp_dir) {
+                    for entry in entries {
+                        if let Ok(entry) = entry {
+                            let path = entry.path();
+                            if path.is_dir() {
+                                eprintln!("Found subdirectory: {:?}", path);
+                                dirs_to_check.push(path);
+                            }
+                        }
+                    }
+                }
+                
+                // Collect all markdown content from all directories
+                let mut all_markdown_content = Vec::new();
+                
+                for dir in dirs_to_check {
+                    eprintln!("Checking directory: {:?}", dir);
+                    
+                    // First check for markdown files directly in the directory
+                    if let Ok(entries) = std::fs::read_dir(&dir) {
+                        for entry in entries {
+                            if let Ok(entry) = entry {
+                                let path = entry.path();
+                                
+                                if path.is_file() {
+                                    eprintln!("Checking file: {:?}", path);
+                                    
+                                    // Check for .md extension
+                                    if path.extension().and_then(|s| s.to_str()) == Some("md") {
+                                        if let Ok(content) = std::fs::read_to_string(&path) {
+                                            eprintln!("Read markdown file {} with {} bytes", path.display(), content.len());
+                                            if !content.is_empty() {
+                                                all_markdown_content.push(content);
+                                            }
+                                        }
+                                    }
+                                } else if path.is_dir() {
+                                    // Check nested directories
+                                    eprintln!("Checking nested directory: {:?}", path);
+                                    if let Ok(nested_entries) = std::fs::read_dir(&path) {
+                                        for nested_entry in nested_entries {
+                                            if let Ok(nested_entry) = nested_entry {
+                                                let nested_path = nested_entry.path();
+                                                if nested_path.is_file() && nested_path.extension().and_then(|s| s.to_str()) == Some("md") {
+                                                    if let Ok(content) = std::fs::read_to_string(&nested_path) {
+                                                        eprintln!("Read nested markdown file {} with {} bytes", nested_path.display(), content.len());
+                                                        if !content.is_empty() {
+                                                            all_markdown_content.push(content);
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                // Combine all markdown content
+                if !all_markdown_content.is_empty() {
+                    markdown_content = all_markdown_content.join("\n\n---\n\n");
+                    eprintln!("Combined {} markdown files into {} total bytes", all_markdown_content.len(), markdown_content.len());
+                } else {
+                    // If no markdown file found, check stdout
+                    let stdout = String::from_utf8_lossy(&output.stdout);
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    eprintln!("No markdown files found. STDOUT: {}, STDERR: {}", stdout, stderr);
+                    
+                    if !stdout.trim().is_empty() {
+                        markdown_content = stdout.to_string();
+                    } else {
+                        markdown_content = format!("Extraction completed. Files saved to:\n{}\n\nPlease check the directory for the extracted content.", temp_dir.display());
+                    }
+                }
+                
+                // Parse the markdown content
+                let mut pages = Vec::new();
+                let mut current_page = Page {
+                    page_id: PageId(0),
+                    elements: Vec::new(),
+                };
+                
+                // Parse markdown into elements
+                for line in markdown_content.lines() {
+                    if line.trim().is_empty() {
+                        continue;
+                    }
+                    
+                    let element_type = if line.starts_with('#') {
+                        let level = line.chars().take_while(|&c| c == '#').count();
+                        ElementType::Title { level: TitleLevel(level) }
+                    } else if line.starts_with('|') {
+                        ElementType::Table
+                    } else if line.starts_with('-') || line.starts_with('*') {
+                        ElementType::List { items: vec![line.trim_start_matches(|c| c == '-' || c == '*').trim().to_string()] }
+                    } else {
+                        ElementType::Text
+                    };
+                    
+                    current_page.elements.push(Element {
+                        text: line.to_string(),
+                        bbox: BBox { x0: 0.0, y0: 0.0, x1: 100.0, y1: 100.0 },
+                        element_type,
+                    });
+                }
+                
+                if !current_page.elements.is_empty() {
+                    pages.push(current_page);
+                }
+                
+                // If no elements found, show the raw content
+                if pages.is_empty() {
+                    pages.push(Page {
                         page_id: PageId(0),
                         elements: vec![Element {
-                            text: stdout.to_string(),
+                            text: markdown_content,
                             bbox: BBox { x0: 0.0, y0: 0.0, x1: 100.0, y1: 100.0 },
                             element_type: ElementType::Text,
                         }],
-                    }],
-                };
+                    });
+                }
+                
+                let parsed_doc = ParsedDocument { pages };
                 
                 // Clean up temp directory
-                let _ = fs::remove_dir_all(&temp_dir);
+                let _ = std::fs::remove_dir_all(&temp_dir);
                 
                 Ok::<_, anyhow::Error>(parsed_doc)
             }.await;
@@ -587,6 +737,12 @@ fn draw_terminal_box(ui: &mut egui::Ui, title: &str, add_contents: impl FnOnce(&
 
 impl eframe::App for Chonker5App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // Handle deferred rendering
+        if self.needs_render {
+            self.needs_render = false;
+            self.render_current_page(ctx);
+        }
+        
         // Set up terminal style
         let mut style = (*ctx.style()).clone();
         style.visuals.dark_mode = true;
@@ -596,6 +752,12 @@ impl eframe::App for Chonker5App {
         style.visuals.extreme_bg_color = TERM_BG;
         style.visuals.widgets.noninteractive.bg_fill = TERM_BG;
         style.visuals.widgets.noninteractive.fg_stroke = Stroke::new(1.0, TERM_FG);
+        style.visuals.widgets.inactive.bg_fill = TERM_BG;
+        style.visuals.widgets.inactive.bg_stroke = Stroke::new(1.0, CHROME);
+        style.visuals.widgets.hovered.bg_fill = Color32::from_rgb(30, 40, 50);
+        style.visuals.widgets.hovered.bg_stroke = Stroke::new(1.0, TERM_HIGHLIGHT);
+        style.visuals.widgets.active.bg_fill = Color32::from_rgb(40, 50, 60);
+        style.visuals.widgets.active.bg_stroke = Stroke::new(1.0, TERM_HIGHLIGHT);
         style.visuals.widgets.noninteractive.weak_bg_fill = TERM_BG;
         style.visuals.widgets.inactive.bg_fill = Color32::from_rgb(20, 25, 30);
         style.visuals.widgets.inactive.fg_stroke = Stroke::new(1.0, TERM_DIM);
@@ -634,11 +796,22 @@ impl eframe::App for Chonker5App {
             .show(ctx, |ui| {
                 // Compact header and controls
                 ui.horizontal(|ui| {
+                    // Display hamster image if available, otherwise emoji
+                    if let Some(hamster) = &self.hamster_texture {
+                        ui.image(egui::load::SizedTexture::new(hamster.id(), egui::vec2(32.0, 32.0)));
+                    } else {
+                        ui.label(
+                            RichText::new("🐹")
+                                .size(24.0)
+                        );
+                    }
+                    
                     ui.label(
-                        RichText::new("🐹 CHONKER 5")
+                        RichText::new("CHONKER 5")
                             .color(TERM_HIGHLIGHT)
                             .monospace()
-                            .size(14.0)
+                            .size(16.0)
+                            .strong()
                     );
                     
                     ui.label(RichText::new("│").color(CHROME).monospace());
@@ -727,15 +900,20 @@ impl eframe::App for Chonker5App {
                 
                 // Main content area - Split pane view
                 if self.pdf_path.is_some() {
-                    ui.horizontal(|ui| {
-                        let available_width = ui.available_width();
-                        let separator_width = 5.0;
-                        let left_width = (available_width - separator_width) * self.split_ratio;
-                        let right_width = (available_width - separator_width) * (1.0 - self.split_ratio);
-                        
+                    let available_size = ui.available_size();
+                    let available_width = available_size.x;
+                    let available_height = available_size.y;
+                    let separator_width = 8.0;
+                    let padding = 20.0; // Increased padding to ensure right border is visible
+                    let usable_width = available_width - (padding * 2.0);
+                    let left_width = (usable_width - separator_width) * self.split_ratio;
+                    let right_width = (usable_width - separator_width) * (1.0 - self.split_ratio);
+                    
+                    ui.horizontal_top(|ui| {
+                        ui.add_space(padding); // Add left padding
                         // Left pane - PDF View
                         ui.allocate_ui_with_layout(
-                            egui::vec2(left_width, ui.available_height()),
+                            egui::vec2(left_width, available_height),
                             egui::Layout::left_to_right(egui::Align::TOP),
                             |ui| {
                                 draw_terminal_box(ui, "PDF VIEW", |ui| {
@@ -746,13 +924,41 @@ impl eframe::App for Chonker5App {
                                                 let size = texture.size_vec2();
                                                 let available_size = ui.available_size();
                                                 
-                                                // Calculate scaling to fit
-                                                let scale = (available_size.x / size.x).min(available_size.y / size.y).min(1.0);
+                                                // Calculate scaling to fit with zoom
+                                                let base_scale = (available_size.x / size.x).min(available_size.y / size.y).min(1.0);
+                                                let scale = base_scale * self.zoom_level;
                                                 let display_size = size * scale;
                                                 
-                                                // Center the image
+                                                // Extract values needed for the closure
+                                                let texture_id = texture.id();
+                                                let current_zoom = self.zoom_level;
+                                                let current_page = self.current_page;
+                                                let total_pages = self.total_pages;
+                                                
+                                                // Center the image with trackpad support
                                                 ui.vertical_centered(|ui| {
-                                                    ui.image(egui::load::SizedTexture::new(texture.id(), display_size));
+                                                    let response = ui.image(egui::load::SizedTexture::new(texture_id, display_size));
+                                                    
+                                                    // Handle trackpad zoom (pinch gesture)
+                                                    if response.hovered() {
+                                                        let zoom_delta = ui.input(|i| i.zoom_delta());
+                                                        if zoom_delta != 1.0 {
+                                                            self.zoom_level = (current_zoom * zoom_delta).clamp(0.5, 3.0);
+                                                            self.needs_render = true;
+                                                        }
+                                                        
+                                                        // Handle scroll for navigation
+                                                        let scroll_delta = ui.input(|i| i.scroll_delta);
+                                                        if scroll_delta.y.abs() > 10.0 {
+                                                            if scroll_delta.y > 0.0 && current_page > 0 {
+                                                                self.current_page = current_page - 1;
+                                                                self.needs_render = true;
+                                                            } else if scroll_delta.y < 0.0 && current_page < total_pages - 1 {
+                                                                self.current_page = current_page + 1;
+                                                                self.needs_render = true;
+                                                            }
+                                                        }
+                                                    }
                                                 });
                                             } else {
                                                 ui.centered_and_justified(|ui| {
@@ -766,24 +972,46 @@ impl eframe::App for Chonker5App {
                             }
                         );
                         
-                        // Draggable separator
+                        // Draggable separator with visual indicator
                         let separator_rect = ui.available_rect_before_wrap();
                         let separator_rect = egui::Rect::from_min_size(
                             separator_rect.min,
-                            egui::vec2(separator_width, separator_rect.height())
+                            egui::vec2(separator_width, available_height)
                         );
                         let separator_response = ui.allocate_rect(separator_rect, egui::Sense::drag());
-                        ui.painter().rect_filled(separator_response.rect, 0.0, CHROME);
+                        
+                        // Visual feedback
+                        let separator_color = if separator_response.hovered() {
+                            TERM_HIGHLIGHT
+                        } else {
+                            CHROME
+                        };
+                        ui.painter().rect_filled(separator_response.rect, 0.0, separator_color);
+                        
+                        // Draw grip dots
+                        let center = separator_response.rect.center();
+                        for i in -2..=2 {
+                            ui.painter().circle_filled(
+                                egui::pos2(center.x, center.y + i as f32 * 10.0),
+                                1.5,
+                                TERM_DIM
+                            );
+                        }
+                        
+                        // Change cursor on hover
+                        if separator_response.hovered() {
+                            ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
+                        }
                         
                         if separator_response.dragged() {
                             let delta = separator_response.drag_delta().x;
-                            self.split_ratio = (self.split_ratio + delta / available_width).clamp(0.5, 0.85);
+                            self.split_ratio = (self.split_ratio + delta / available_width).clamp(0.2, 0.8);
                         }
                         
                         // Right pane - Extraction Results
                         ui.allocate_ui_with_layout(
-                            egui::vec2(right_width, ui.available_height()),
-                            egui::Layout::left_to_right(egui::Align::TOP),
+                            egui::vec2(right_width, available_height),
+                            egui::Layout::top_down(egui::Align::LEFT),
                             |ui| {
                                 draw_terminal_box(ui, "EXTRACTION RESULTS", |ui| {
                                     // Tab buttons
@@ -866,6 +1094,8 @@ impl eframe::App for Chonker5App {
                                 });
                             }
                         );
+                        
+                        ui.add_space(padding); // Add right padding
                     });
                 } else {
                     // No PDF loaded - show welcome screen
