@@ -222,7 +222,7 @@ impl Chonker5App {
         let mut table_btn = Button::default()
             .with_pos(x_pos, y_pos)
             .with_size(160, 40)
-            .with_label("Pdfium - Tables");
+            .with_label("Pdfium - All Content");
         table_btn.set_color(Color::from_rgb(0xE6, 0x7E, 0x22)); // Orange color for distinction
         table_btn.set_label_color(Color::White);
         table_btn.set_frame(FrameType::UpBox);
@@ -650,40 +650,141 @@ impl Chonker5App {
     }
     
     fn extract_current_page_text(&mut self) {
-        if let Some(pdf_path) = &self.pdf_path {
-            // Show text display and hide structured view
-            self.structured_html_view.hide();
-            self.extracted_text_display.show();
+        if let Some(pdf_path) = &self.pdf_path.clone() {
+            // Show structured view and hide text display
+            self.extracted_text_display.hide();
+            self.structured_html_view.show();
             
-            // Use extractous directly to extract text
-            let extractor = Extractor::new();
+            // Use extractous with XML output enabled
+            let extractor = Extractor::new()
+                .set_xml_output(true);
             
             // Call awake periodically to prevent beach ball
             app::awake();
             
             match extractor.extract_file_to_string(pdf_path.to_str().unwrap_or("")) {
-                Ok((text, _metadata)) => {
-                    if text.trim().is_empty() {
-                        self.extracted_text_buffer.set_text("No text found in PDF.");
-                    } else {
-                        // Normalize spacing: replace multiple newlines with single newlines
-                        let normalized_text = text
-                            .lines()
-                            .filter(|line| !line.trim().is_empty())
-                            .collect::<Vec<&str>>()
-                            .join("\n");
+                Ok((content, metadata)) => {
+                    // Check if we got XML or text
+                    if content.trim().starts_with("<?xml") || content.trim().starts_with("<") {
+                        // We got XML content
+                        let escaped_xml = content
+                            .replace("&", "&amp;")
+                            .replace("<", "&lt;")
+                            .replace(">", "&gt;");
                         
-                        self.extracted_text_buffer.set_text(&normalized_text);
-                        self.log("✅ Text extracted with extractous");
+                        let html = format!(r#"
+                        <html>
+                        <head>
+                            <style>
+                                body {{ font-family: Arial, sans-serif; margin: 20px; }}
+                                h2 {{ color: #2c3e50; border-bottom: 2px solid #3498db; padding-bottom: 10px; }}
+                                .metadata {{ background: #f8f9fa; padding: 10px; border-radius: 5px; margin-bottom: 20px; }}
+                                .metadata dt {{ font-weight: bold; color: #495057; }}
+                                .metadata dd {{ margin-left: 20px; margin-bottom: 5px; }}
+                                pre {{ background: #f5f5f5; padding: 15px; border-radius: 5px; overflow-x: auto; }}
+                                code {{ font-family: 'Courier New', monospace; font-size: 14px; }}
+                            </style>
+                        </head>
+                        <body>
+                            <h2>📄 Extractous XML Output</h2>
+                            <div class="metadata">
+                                <dl>
+                                    <dt>Document:</dt>
+                                    <dd>{}</dd>
+                                    <dt>Method:</dt>
+                                    <dd>Extractous XML extraction</dd>
+                                </dl>
+                            </div>
+                            <pre><code>{}</code></pre>
+                        </body>
+                        </html>"#,
+                        pdf_path.file_name().unwrap_or_default().to_string_lossy(),
+                        escaped_xml);
+                        
+                        self.structured_html_view.set_value(&html);
+                        self.log("✅ XML extracted with extractous");
+                    } else {
+                        // We got plain text, format it nicely
+                        self.extract_text_fallback(pdf_path);
                     }
                 }
                 Err(e) => {
-                    self.extracted_text_buffer.set_text(&format!("Error extracting text: {}", e));
+                    let html = format!(r#"
+                    <html>
+                    <head>
+                        <style>
+                            body {{ font-family: Arial, sans-serif; margin: 20px; }}
+                            .error {{ color: #d9534f; background: #f2dede; padding: 15px; border-radius: 5px; }}
+                        </style>
+                    </head>
+                    <body>
+                        <h2>Extractous Error</h2>
+                        <div class="error">
+                            <p>Error extracting content: {}</p>
+                        </div>
+                    </body>
+                    </html>"#, e);
+                    self.structured_html_view.set_value(&html);
                     self.log(&format!("❌ Extractous error: {}", e));
                 }
             }
             
             app::awake();
+        }
+    }
+    
+    fn extract_text_fallback(&mut self, pdf_path: &std::path::Path) {
+        // Fallback to regular text extraction
+        let extractor = Extractor::new();
+        
+        match extractor.extract_file_to_string(pdf_path.to_str().unwrap_or("")) {
+            Ok((text, _metadata)) => {
+                let escaped_text = text
+                    .replace("&", "&amp;")
+                    .replace("<", "&lt;")
+                    .replace(">", "&gt;");
+                
+                let html = format!(r#"
+                <html>
+                <head>
+                    <style>
+                        body {{ font-family: Arial, sans-serif; margin: 20px; }}
+                        h2 {{ color: #2c3e50; border-bottom: 2px solid #3498db; padding-bottom: 10px; }}
+                        .note {{ background: #fff3cd; padding: 10px; border-radius: 5px; margin-bottom: 20px; }}
+                        pre {{ background: #f5f5f5; padding: 15px; border-radius: 5px; overflow-x: auto; white-space: pre-wrap; }}
+                    </style>
+                </head>
+                <body>
+                    <h2>📄 Extractous Text Output</h2>
+                    <div class="note">
+                        <p>Note: XML extraction not available, showing plain text instead.</p>
+                    </div>
+                    <pre>{}</pre>
+                </body>
+                </html>"#, escaped_text);
+                
+                self.structured_html_view.set_value(&html);
+                self.log("✅ Text extracted with extractous (fallback)");
+            }
+            Err(e) => {
+                let html = format!(r#"
+                <html>
+                <head>
+                    <style>
+                        body {{ font-family: Arial, sans-serif; margin: 20px; }}
+                        .error {{ color: #d9534f; background: #f2dede; padding: 15px; border-radius: 5px; }}
+                    </style>
+                </head>
+                <body>
+                    <h2>Extractous Error</h2>
+                    <div class="error">
+                        <p>Error extracting content: {}</p>
+                    </div>
+                </body>
+                </html>"#, e);
+                self.structured_html_view.set_value(&html);
+                self.log(&format!("❌ Extractous error: {}", e));
+            }
         }
     }
     
@@ -799,30 +900,47 @@ impl Chonker5App {
     
     fn extract_tables(&mut self) {
         if let Some(pdf_path) = &self.pdf_path.clone() {
-            self.log("🔄 Extracting tables with pdfium-render...");
+            self.log("🔄 Extracting all content with pdfium-render...");
             
-            // Show text display and hide structured view
-            self.structured_html_view.hide();
-            self.extracted_text_display.show();
+            // Show structured view and hide text display
+            self.extracted_text_display.hide();
+            self.structured_html_view.show();
             
-            match self.simple_table_extraction(pdf_path) {
-                Ok(result) => {
-                    self.extracted_text_buffer.set_text(&result);
-                    self.log("✅ Table extraction completed");
+            match self.pdfium_html_extraction(pdf_path) {
+                Ok(html) => {
+                    self.structured_html_view.set_value(&html);
+                    self.log("✅ Content extraction completed");
                 }
                 Err(e) => {
-                    let error_msg = format!(
-                        "Table Extraction Error\n\n\
-                        Failed to extract tables: {}\n\n\
-                        This might be due to:\n\
-                        • PDF format incompatibility\n\
-                        • No structured tables in the document\n\
-                        • Missing pdfium library\n\n\
-                        Try using 'Ferrules - HTML' for structured document layout instead.",
-                        e
-                    );
-                    self.extracted_text_buffer.set_text(&error_msg);
-                    self.log(&format!("❌ Table extraction error: {}", e));
+                    let error_html = format!(r#"
+                    <html>
+                    <head>
+                        <style>
+                            body {{ font-family: Arial, sans-serif; margin: 20px; }}
+                            h2 {{ color: #d9534f; }}
+                            .error {{ background: #f2dede; padding: 15px; border-radius: 5px; color: #a94442; }}
+                            .suggestions {{ margin-top: 20px; }}
+                            .suggestions li {{ margin-bottom: 10px; }}
+                        </style>
+                    </head>
+                    <body>
+                        <h2>⚠️ Pdfium Extraction Error</h2>
+                        <div class="error">
+                            <p>Failed to extract content: {}</p>
+                        </div>
+                        <div class="suggestions">
+                            <h3>This might be due to:</h3>
+                            <ul>
+                                <li>PDF format incompatibility</li>
+                                <li>No structured content in the document</li>
+                                <li>Missing pdfium library</li>
+                            </ul>
+                            <p>Try using 'Ferrules - HTML' for structured document layout instead.</p>
+                        </div>
+                    </body>
+                    </html>"#, e);
+                    self.structured_html_view.set_value(&error_html);
+                    self.log(&format!("❌ Pdfium extraction error: {}", e));
                 }
             }
             
@@ -830,6 +948,135 @@ impl Chonker5App {
         } else {
             self.log("⚠️ No PDF loaded. Press Cmd+O to open a file first.");
         }
+    }
+    
+    fn pdfium_html_extraction(&self, pdf_path: &std::path::Path) -> Result<String, Box<dyn Error>> {
+        let mut html = String::from(r#"
+        <html>
+        <head>
+            <style>
+                body { font-family: Arial, sans-serif; margin: 20px; line-height: 1.6; }
+                h2 { color: #2c3e50; border-bottom: 2px solid #e67e22; padding-bottom: 10px; }
+                h3 { color: #34495e; margin-top: 20px; }
+                .metadata { background: #f8f9fa; padding: 15px; border-radius: 5px; margin-bottom: 20px; }
+                .metadata dt { font-weight: bold; color: #495057; display: inline-block; width: 120px; }
+                .metadata dd { display: inline; margin-left: 10px; }
+                .page { margin-bottom: 30px; border: 1px solid #dee2e6; padding: 20px; border-radius: 5px; }
+                .page-header { background: #e9ecef; margin: -20px -20px 15px -20px; padding: 10px 20px; border-radius: 5px 5px 0 0; }
+                .table-container { background: #f5f5f5; padding: 15px; border-radius: 5px; margin: 15px 0; overflow-x: auto; }
+                pre { white-space: pre-wrap; word-wrap: break-word; }
+                .no-tables { color: #6c757d; font-style: italic; }
+                .stats { background: #e7f3ff; padding: 10px; border-radius: 5px; margin-top: 20px; }
+            </style>
+        </head>
+        <body>
+            <h2>📊 Pdfium Full Content Extraction</h2>
+        "#);
+        
+        // Initialize pdfium
+        let pdfium = Pdfium::new(
+            Pdfium::bind_to_library(Pdfium::pdfium_platform_library_name_at_path("./lib/"))?
+        );
+        
+        // Load the PDF document
+        let document = pdfium.load_pdf_from_file(pdf_path, None)?;
+        let total_pages = document.pages().len();
+        
+        html.push_str(&format!(r#"
+            <div class="metadata">
+                <dl>
+                    <dt>Document:</dt>
+                    <dd>{}</dd>
+                </dl>
+                <dl>
+                    <dt>Total Pages:</dt>
+                    <dd>{}</dd>
+                </dl>
+                <dl>
+                    <dt>Method:</dt>
+                    <dd>Pdfium-render extraction</dd>
+                </dl>
+            </div>
+        "#, 
+        pdf_path.file_name().unwrap_or_default().to_string_lossy(),
+        total_pages));
+        
+        let mut total_tables_found = 0;
+        let mut total_text_length = 0;
+        
+        // Process each page
+        for (page_index, page) in document.pages().iter().enumerate() {
+            let page_number = page_index + 1;
+            
+            html.push_str(&format!(r#"
+            <div class="page">
+                <div class="page-header">
+                    <h3>📄 Page {}</h3>
+                </div>
+            "#, page_number));
+            
+            // Extract all text from the page
+            let text_page = page.text()?;
+            let char_count = text_page.chars().len();
+            
+            let mut page_text = String::new();
+            for index in 0..char_count {
+                if let Ok(character) = text_page.chars().get(index) {
+                    if let Some(ch) = character.unicode_char() {
+                        page_text.push(ch);
+                    }
+                }
+            }
+            
+            total_text_length += page_text.len();
+            
+            // Detect tables
+            let detected_tables = self.detect_simple_tables(&page_text);
+            
+            if !detected_tables.is_empty() {
+                html.push_str(&format!("<h4>Found {} table(s):</h4>", detected_tables.len()));
+                
+                for (table_idx, table_text) in detected_tables.iter().enumerate() {
+                    total_tables_found += 1;
+                    html.push_str(&format!(r#"
+                    <div class="table-container">
+                        <h5>Table {} (Page {}):</h5>
+                        <pre>{}</pre>
+                    </div>
+                    "#, 
+                    table_idx + 1, 
+                    page_number,
+                    table_text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")));
+                }
+            } else {
+                html.push_str(r#"<p class="no-tables">No tables detected on this page.</p>"#);
+            }
+            
+            // Show full page text - no truncation
+            if !page_text.trim().is_empty() {
+                html.push_str(r#"<h4>Full Page Text:</h4><div style="background: #f8f9fa; padding: 15px; border-radius: 5px; margin-top: 10px;"><pre style="font-size: 12px; white-space: pre-wrap;">"#);
+                html.push_str(&page_text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"));
+                html.push_str("</pre></div>");
+            }
+            
+            html.push_str("</div>");
+        }
+        
+        // Add summary statistics
+        html.push_str(&format!(r#"
+        <div class="stats">
+            <h3>📊 Extraction Summary:</h3>
+            <ul>
+                <li>Total tables found: {}</li>
+                <li>Total text extracted: {} characters</li>
+                <li>Pages processed: {}</li>
+            </ul>
+        </div>
+        "#, total_tables_found, total_text_length, total_pages));
+        
+        html.push_str("</body></html>");
+        
+        Ok(html)
     }
     
     fn simple_table_extraction(&self, pdf_path: &std::path::Path) -> Result<String, Box<dyn Error>> {
@@ -1038,27 +1285,44 @@ impl Chonker5App {
     }
     
     fn line_looks_tabular(&self, line: &str) -> bool {
-        // Count potential separators and data patterns
+        // Very strict table detection - only actual data tables
         let tab_count = line.matches('\t').count();
-        let space_groups = line.split_whitespace().count();
-        let has_numbers = line.chars().any(|c| c.is_numeric());
-        let has_multiple_words = space_groups >= 2;
+        let pipe_count = line.matches('|').count();
         
-        // Simple heuristics:
-        // - Has tabs (common in extracted tables)
-        // - Has multiple space-separated items with numbers
-        // - Contains common table patterns
-        tab_count > 0 || 
-        (has_multiple_words && has_numbers) ||
-        line.contains('|') ||
-        line.contains("  ") // Multiple spaces often indicate column alignment
+        // Only consider lines with actual tab or pipe separators
+        if tab_count >= 2 || pipe_count >= 2 {
+            return true;
+        }
+        
+        // Look for numeric data patterns that strongly suggest tables
+        let words: Vec<&str> = line.split_whitespace().collect();
+        if words.len() < 3 {
+            return false;
+        }
+        
+        // Count numeric tokens (numbers, currency, percentages)
+        let numeric_count = words.iter().filter(|w| {
+            w.chars().any(|c| c.is_numeric()) || 
+            w.contains('$') || w.contains('%') || w.contains('.')
+        }).count();
+        
+        // At least half the tokens should be numeric for it to be a data table
+        if numeric_count >= words.len() / 2 && words.len() >= 4 {
+            // Additional check: consistent spacing pattern
+            let double_space_count = line.matches("  ").count();
+            if double_space_count >= 2 {
+                return true;
+            }
+        }
+        
+        false
     }
     
     fn looks_like_table(&self, text: &str) -> bool {
         let lines: Vec<&str> = text.lines().collect();
         
         // Must have at least 2 rows to be a table
-        if lines.len() < 2 {
+        if lines.len() < 2 || lines.len() > 50 {
             return false;
         }
         
@@ -1067,8 +1331,8 @@ impl Chonker5App {
             .filter(|line| self.line_looks_tabular(line.trim()))
             .count();
         
-        // At least 60% of lines should look tabular
-        tabular_lines as f64 / lines.len() as f64 >= 0.6
+        // At least 90% of lines should look tabular for very strict detection
+        tabular_lines as f64 / lines.len() as f64 >= 0.9
     }
     
     fn prev_page(&mut self) {
