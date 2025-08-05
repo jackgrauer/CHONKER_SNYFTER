@@ -2028,7 +2028,7 @@ enum FocusedPane {
     MatrixView,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 enum DragAction {
     StartDrag(usize, usize),
     UpdateDrag(usize, usize),
@@ -4153,8 +4153,6 @@ impl eframe::App for Chonker5App {
                                     egui::ScrollArea::both()
                                         .auto_shrink([false; 2])
                                         .show(ui, |ui| {
-                                            // Track edits made during this frame
-                                            let mut frame_edits: Vec<(usize, usize, char, char)> = Vec::new();
                                             
                                             match self.active_tab {
                                                 ExtractionTab::Matrix => {
@@ -4185,7 +4183,6 @@ impl eframe::App for Chonker5App {
                                                         let mut enter_pressed = None;
                                                         let mut new_selected_cell = self.selected_cell;
                                                         let mut clear_selection = false;
-                                                        let mut edits_made: Vec<(usize, usize, char, char)> = Vec::new(); // x, y, old, new
 
                                                         // Handle keyboard input for matrix view - NOW we have editable_matrix in scope!
                                                         if self.focused_pane == FocusedPane::MatrixView {
@@ -4195,30 +4192,51 @@ impl eframe::App for Chonker5App {
                                                                     return;
                                                                 }
                                                                 
+                                                                // Only log meaningful events (not just pointer movement)
+                                                                let has_meaningful_event = i.events.iter().any(|e| matches!(e, 
+                                                                    egui::Event::Text(_) | 
+                                                                    egui::Event::Key { .. } | 
+                                                                    egui::Event::Paste(_) |
+                                                                    egui::Event::Copy |
+                                                                    egui::Event::Cut
+                                                                ));
+                                                                
+                                                                if has_meaningful_event {
+                                                                    println!("📊 PROCESSING {} EVENTS, selected={:?}", i.events.len(), self.selected_cell);
+                                                                }
+                                                                
                                                                 // Process all events in a single loop
                                                                 for event in &i.events {
                                                                     match event {
                                                                         egui::Event::Text(text) => {
-                                                                            println!("📝 Text event: '{}'", text);
+                                                                            println!("📝 Text event: '{}', selected_cell={:?}", text, self.selected_cell);
                                                                             if let Some((sel_x, sel_y)) = self.selected_cell {
+                                                                                println!("📝 HAVE SELECTION: ({}, {})", sel_x, sel_y);
                                                                                 if sel_y < editable_matrix.len() && sel_x < editable_matrix[sel_y].len() {
-                                                                                    // Direct character typing - NO DIALOG, just edit!
+                                                                                    println!("📝 BOUNDS OK: matrix size = {}x{}", editable_matrix[0].len(), editable_matrix.len());
+                                                                                    // Direct inline editing - just type!
                                                                                     if let Some(new_char) = text.chars().next() {
                                                                                         if new_char.is_ascii_graphic() || new_char == ' ' {
-                                                                                            // Debug to console
-                                                                                            println!("🔤 TYPED '{}' at cell ({}, {})", new_char, sel_x, sel_y);
+                                                                                            println!("✏️ Direct edit: '{}' at ({}, {})", new_char, sel_x, sel_y);
                                                                                             
-                                                                                            // DIRECT EDIT - Update the character immediately
-                                                                                            let old_char = editable_matrix[sel_y][sel_x];
+                                                                                            // Update the matrix directly
                                                                                             editable_matrix[sel_y][sel_x] = new_char;
                                                                                             self.matrix_result.matrix_dirty = true;
-                                                                                            println!("✏️ EDIT SUCCESS: Changed '{}' to '{}' at ({}, {})", old_char, new_char, sel_x, sel_y);
                                                                                             
-                                                                                            // Track edit for logging after closure
-                                                                                            edits_made.push((sel_x, sel_y, old_char, new_char));
+                                                                                            // Move to next cell
+                                                                                            if sel_x + 1 < editable_matrix[sel_y].len() {
+                                                                                                self.selected_cell = Some((sel_x + 1, sel_y));
+                                                                                            }
                                                                                         }
                                                                                     }
+                                                                                } else {
+                                                                                    println!("📝 BOUNDS FAIL: sel=({}, {}), matrix={}x{}", 
+                                                                                        sel_x, sel_y, 
+                                                                                        if !editable_matrix.is_empty() { editable_matrix[0].len() } else { 0 }, 
+                                                                                        editable_matrix.len());
                                                                                 }
+                                                                            } else {
+                                                                                println!("📝 NO SELECTION!");
                                                                             }
                                                                         }
                                                                         egui::Event::Paste(paste_text) => {
@@ -4273,10 +4291,20 @@ impl eframe::App for Chonker5App {
                                                                                 egui::Key::ArrowDown if sel_y < matrix_height - 1 => {
                                                                                     new_selected_cell = Some((sel_x, sel_y + 1));
                                                                                 }
-                                                                                egui::Key::Delete | egui::Key::Backspace => {
+                                                                                egui::Key::Delete => {
                                                                                     if sel_y < editable_matrix.len() && sel_x < editable_matrix[sel_y].len() {
                                                                                         editable_matrix[sel_y][sel_x] = ' ';
                                                                                         self.matrix_result.matrix_dirty = true;
+                                                                                    }
+                                                                                }
+                                                                                egui::Key::Backspace => {
+                                                                                    // Move left and delete
+                                                                                    if sel_x > 0 {
+                                                                                        new_selected_cell = Some((sel_x - 1, sel_y));
+                                                                                        if sel_y < editable_matrix.len() && sel_x - 1 < editable_matrix[sel_y].len() {
+                                                                                            editable_matrix[sel_y][sel_x - 1] = ' ';
+                                                                                            self.matrix_result.matrix_dirty = true;
+                                                                                        }
                                                                                     }
                                                                                 }
                                                                                 egui::Key::Tab => {
@@ -4337,8 +4365,7 @@ impl eframe::App for Chonker5App {
                                                             ctx.request_repaint();
                                                         }
                                                         
-                                                        // Pass edits to outer scope
-                                                        frame_edits.extend(edits_made);
+                                                        
 
                                                         // Execute copy operations outside of input closure
                                                         let mut copy_log_msg = None;
@@ -4412,9 +4439,8 @@ impl eframe::App for Chonker5App {
                                                         };
 
                                                         // Display the editable matrix as a tight grid (Dwarf Fortress style)
-                                                        let scroll_output = egui::ScrollArea::both()
-                                                            .auto_shrink([false; 2])
-                                                            .show(ui, |ui| {
+                                                        // REMOVED inner ScrollArea - we already have one wrapping the content
+                                                        let scroll_output = {
                                                                 // Use a custom widget to draw the entire matrix at once
                                                                 let matrix_size = egui::vec2(
                                                                     matrix_width as f32 * char_size,
@@ -4422,6 +4448,11 @@ impl eframe::App for Chonker5App {
                                                                 );
 
                                                                 let (response, painter) = ui.allocate_painter(matrix_size, egui::Sense::click_and_drag());
+                                                                
+                                                                // Debug the response - only log clicks
+                                                                if response.clicked() {
+                                                                    println!("🎯 MATRIX CLICKED! has_focus={}", response.has_focus());
+                                                                }
                                                                 
                                                                 // Always request focus when matrix is being interacted with
                                                                 // This ensures keyboard events are properly captured
@@ -4522,9 +4553,24 @@ impl eframe::App for Chonker5App {
 
                                                                 // Return drag action to be handled outside the closure
                                                                 let mut drag_action = DragAction::None;
-
-                                                                // Handle clicks and drags on the matrix
-                                                                if response.drag_started() {
+                                                                
+                                                                // Check if this is a click (released at same position as start)
+                                                                if response.drag_released() && is_dragging {
+                                                                    if let (Some(start), Some(end)) = (selection_start, selection_end) {
+                                                                        // If start and end are the same, it's a click not a drag
+                                                                        if start == end {
+                                                                            println!("🖱️ CLICK DETECTED (start==end)!");
+                                                                            drag_action = DragAction::SingleClick(start.0, start.1);
+                                                                            println!("🖱️ SETTING DRAG ACTION: SingleClick({}, {})", start.0, start.1);
+                                                                        } else {
+                                                                            drag_action = DragAction::EndDrag;
+                                                                        }
+                                                                    } else {
+                                                                        drag_action = DragAction::EndDrag;
+                                                                    }
+                                                                }
+                                                                // Handle drag start
+                                                                else if response.drag_started() {
                                                                     if let Some(pos) = response.interact_pointer_pos() {
                                                                         let rel_pos = pos - rect.min;
                                                                         let x = (rel_pos.x / char_size).round() as usize;
@@ -4546,38 +4592,16 @@ impl eframe::App for Chonker5App {
                                                                     }
                                                                 }
 
-                                                                if response.drag_released() {
-                                                                    drag_action = DragAction::EndDrag;
-                                                                }
-
-                                                                // Single click - check if it's a true single click (not a drag)
-                                                                if response.clicked() {
-                                                                    if let Some(pos) = response.interact_pointer_pos() {
-                                                                        let rel_pos = pos - rect.min;
-                                                                        let x = (rel_pos.x / char_size).round() as usize;
-                                                                        let y = (rel_pos.y / line_height).round() as usize;
-
-                                                                        if y < matrix_height && x < matrix_width {
-                                                                            // If we have a selection and clicked outside of it, clear selection
-                                                                            // Otherwise treat as single click
-                                                                            if selection_start.is_some() && selection_end.is_some() {
-                                                                                // Check if click is outside current selection
-                                                                                if !is_cell_selected(x, y) {
-                                                                                    drag_action = DragAction::SingleClick(x, y);
-                                                                                }
-                                                                            } else {
-                                                                                drag_action = DragAction::SingleClick(x, y);
-                                                                            }
-                                                                        }
-                                                                    }
-                                                                }
 
                                                                 // Return the drag action
                                                                 drag_action
-                                                            });
+                                                        };
 
                                                         // Handle the drag action returned from the closure
-                                                        match scroll_output.inner {
+                                                        if !matches!(scroll_output, DragAction::None) {
+                                                            println!("🎮 HANDLING DRAG ACTION: {:?}", scroll_output);
+                                                        }
+                                                        match scroll_output {
                                                                 DragAction::StartDrag(x, y) => {
                                                                     self.selection_start = Some((x, y));
                                                                     self.selection_end = Some((x, y));
@@ -4651,10 +4675,6 @@ impl eframe::App for Chonker5App {
                                                 _ => {}
                                             }
                                             
-                                            // Log any edits made during this frame (after editable_matrix borrow is done)
-                                            for (x, y, old_char, new_char) in frame_edits {
-                                                self.log(&format!("✏️ Edited cell ({}, {}): '{}' → '{}'", x, y, old_char, new_char));
-                                            }
                                         });
                                 });
                             }
@@ -4676,8 +4696,7 @@ impl eframe::App for Chonker5App {
 
             });
 
-        // Text editing overlay - REMOVED! We now do direct inline editing
-        // Just click a cell and type to edit it!
+        // Text editing modal dialog - DISABLED, using inline editing now
         /*
         if self.text_edit_mode {
             if let Some((x, y)) = self.text_edit_position {
