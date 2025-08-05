@@ -214,20 +214,18 @@ impl CharacterMatrixEngine {
             let text_page = page.text()?;
             let page_height = page.height().value;
 
-            // Get all characters with their precise positions
-            // Note: chars() API might not provide individual bounds, so let's try a different approach
-            // We'll extract text in smaller segments for better positioning
+            // Extract text segments since character-level extraction is not available
             let text_segments = text_page.segments();
-
+            
             for segment in text_segments.iter() {
                 let bounds = segment.bounds();
                 let text = segment.text();
-
+                
                 // Only process non-whitespace segments
                 if !text.trim().is_empty() {
-                    // PDF coordinates have origin at bottom-left, convert to top-left
+                    // Convert PDF coordinates (bottom-left origin) to top-left origin
                     let y_from_top = page_height - bounds.top().value;
-
+                    
                     text_objects.push(PreciseTextObject {
                         text: text.clone(),
                         bbox: PDFBBox {
@@ -236,42 +234,10 @@ impl CharacterMatrixEngine {
                             x1: bounds.right().value,
                             y1: y_from_top + (bounds.top().value - bounds.bottom().value),
                         },
-                        font_size: 12.0, // Default font size for segments
+                        font_size: 12.0, // Default font size
                         font_name: "Segment".to_string(),
                         page_index,
                     });
-                }
-            }
-        }
-
-        // If no characters found, fall back to word-level extraction
-        if text_objects.is_empty() {
-            for (page_index, page) in document.pages().iter().enumerate() {
-                let text_page = page.text()?;
-                let _page_height = page.height().value;
-
-                // Try to get text segments (words/lines)
-                let all_text = text_page.all();
-                let lines: Vec<&str> = all_text.lines().collect();
-
-                for (line_idx, line) in lines.iter().enumerate() {
-                    if !line.trim().is_empty() {
-                        // Estimate line position
-                        let line_y = 50.0 + (line_idx as f32 * 20.0);
-
-                        text_objects.push(PreciseTextObject {
-                            text: line.to_string(),
-                            bbox: PDFBBox {
-                                x0: 50.0,
-                                y0: line_y,
-                                x1: 500.0,
-                                y1: line_y + 15.0,
-                            },
-                            font_size: 12.0,
-                            font_name: "Line".to_string(),
-                            page_index,
-                        });
-                    }
                 }
             }
         }
@@ -488,7 +454,7 @@ impl CharacterMatrixEngine {
             let (start_y, start_x, end_x) = text_lines[i];
             let mut min_x = start_x;
             let mut max_x = end_x;
-            let mut min_y = start_y;
+            let min_y = start_y;
             let mut max_y = start_y;
 
             processed[i] = true;
@@ -504,7 +470,7 @@ impl CharacterMatrixEngine {
                 // Check if this line is adjacent (within 2 rows) and overlaps horizontally
                 if line_y <= max_y + 2 {
                     // Check for horizontal overlap or proximity
-                    if (line_start_x <= max_x + 5 && line_end_x >= min_x - 5) {
+                    if line_start_x <= max_x + 5 && line_end_x >= min_x - 5 {
                         // This line is part of the current region
                         min_x = min_x.min(line_start_x);
                         max_x = max_x.max(line_end_x);
@@ -553,6 +519,62 @@ impl CharacterMatrixEngine {
         }
 
         Ok(regions)
+    }
+
+    fn merge_adjacent_regions(&self, regions: &[TextRegion]) -> Vec<TextRegion> {
+        if regions.is_empty() {
+            return Vec::new();
+        }
+
+        let mut merged = Vec::new();
+        let mut processed = vec![false; regions.len()];
+
+        for i in 0..regions.len() {
+            if processed[i] {
+                continue;
+            }
+
+            let mut current = regions[i].clone();
+            processed[i] = true;
+
+            // Look for adjacent regions to merge
+            let mut merged_any = true;
+            while merged_any {
+                merged_any = false;
+
+                for j in 0..regions.len() {
+                    if processed[j] {
+                        continue;
+                    }
+
+                    let other = &regions[j];
+
+                    // Check if regions are adjacent (horizontally on same line)
+                    if other.bbox.y == current.bbox.y && other.bbox.height == current.bbox.height {
+                        // Check if they're close enough to merge (within 2 character positions)
+                        let current_end = current.bbox.x + current.bbox.width;
+                        let other_end = other.bbox.x + other.bbox.width;
+
+                        if (other.bbox.x as i32 - current_end as i32).abs() <= 2
+                            || (current.bbox.x as i32 - other_end as i32).abs() <= 2
+                        {
+                            // Merge the regions
+                            let new_x = current.bbox.x.min(other.bbox.x);
+                            let new_end = current_end.max(other_end);
+                            current.bbox.x = new_x;
+                            current.bbox.width = new_end - new_x;
+                            current.text_content.push_str(&other.text_content);
+                            processed[j] = true;
+                            merged_any = true;
+                        }
+                    }
+                }
+            }
+
+            merged.push(current);
+        }
+
+        merged
     }
 
     fn flood_fill_region(
@@ -715,33 +737,76 @@ impl CharacterMatrixEngine {
     /// println!("Matrix size: {}x{}", matrix.width, matrix.height);
     /// ```
     pub fn process_pdf(&self, pdf_path: &PathBuf) -> Result<CharacterMatrix> {
+        // Get PDF page dimensions first
+        let pdfium = Pdfium::new(
+            Pdfium::bind_to_library(Pdfium::pdfium_platform_library_name_at_path("./lib"))
+                .or_else(|_| Pdfium::bind_to_system_library())?,
+        );
+
+        let document = pdfium.load_pdf_from_file(pdf_path, None)?;
+        let page = document
+            .pages()
+            .get(0)
+            .map_err(|_| anyhow::anyhow!("No pages in PDF"))?;
+
+        let page_width = page.width().value;
+        let page_height = page.height().value;
+
         // Step 1: Extract precise text objects with coordinates
         let text_objects = self.extract_text_objects_with_precise_coords(pdf_path)?;
 
-        // Step 2: Calculate optimal matrix size based on actual content
-        let (matrix_width, matrix_height, char_width, char_height) =
-            self.calculate_optimal_matrix_size(&text_objects);
+        // Step 2: Calculate matrix size based on page dimensions
+        // Use a fixed character size for consistency
+        let char_width = 7.2; // Standard monospace character width in points
+        let char_height = 14.4; // Standard line height in points
+        let matrix_width = (page_width / char_width).ceil() as usize;
+        let matrix_height = (page_height / char_height).ceil() as usize;
 
-        // Step 3: Generate optimized character matrix
-        let matrix = self.generate_optimal_character_matrix(
-            &text_objects,
-            matrix_width,
-            matrix_height,
+        // Step 3: Generate character matrix with proper positioning
+        let mut matrix = vec![vec![' '; matrix_width]; matrix_height];
+        let mut text_regions = Vec::new();
+
+        // Place individual characters at their exact positions
+        for text_obj in &text_objects {
+            // Since we now have individual characters, place them exactly
+            let char_x = (text_obj.bbox.x0 / char_width).round() as usize;
+            let char_y = (text_obj.bbox.y0 / char_height).round() as usize;
+
+            if char_y < matrix_height && char_x < matrix_width {
+                if let Some(ch) = text_obj.text.chars().next() {
+                    matrix[char_y][char_x] = ch;
+
+                    // Create a text region for each character (for bounding box display)
+                    text_regions.push(TextRegion {
+                        bbox: CharBBox {
+                            x: char_x,
+                            y: char_y,
+                            width: 1,
+                            height: 1,
+                        },
+                        confidence: 1.0,
+                        text_content: ch.to_string(),
+                        region_id: text_regions.len(),
+                    });
+                }
+            }
+        }
+
+        // Step 4: Merge adjacent characters into words/regions for better visualization
+        let merged_regions = self.merge_adjacent_regions(&text_regions);
+
+        // Step 5: Create final character matrix
+        let original_text: Vec<String> = text_objects.iter().map(|obj| obj.text.clone()).collect();
+
+        let final_matrix = CharacterMatrix {
+            width: matrix_width,
+            height: matrix_height,
+            matrix: matrix.clone(),
+            text_regions: merged_regions,
+            original_text,
             char_width,
             char_height,
-        )?;
-
-        // Step 4: Use fallback vision processing
-        let text_regions = self.detect_text_regions_fallback(&matrix)?;
-
-        // Step 5: Map text objects to regions intelligently
-        let final_matrix = self.map_text_objects_to_regions(
-            matrix,
-            &text_objects,
-            &text_regions,
-            char_width,
-            char_height,
-        )?;
+        };
 
         Ok(final_matrix)
     }
@@ -749,33 +814,10 @@ impl CharacterMatrixEngine {
     pub fn process_pdf_with_ferrules(
         &self,
         pdf_path: &PathBuf,
-        ferrules_path: &PathBuf,
+        _ferrules_path: &PathBuf,
     ) -> Result<CharacterMatrix> {
-        // Enhanced processing with ferrules vision model
-        let text_objects = self.extract_text_objects_with_precise_coords(pdf_path)?;
-        let (matrix_width, matrix_height, char_width, char_height) =
-            self.calculate_optimal_matrix_size(&text_objects);
-
-        let matrix = self.generate_optimal_character_matrix(
-            &text_objects,
-            matrix_width,
-            matrix_height,
-            char_width,
-            char_height,
-        )?;
-
-        // Use ferrules for vision processing
-        let text_regions = self.run_ferrules_on_matrix(&matrix, ferrules_path)?;
-
-        let final_matrix = self.map_text_objects_to_regions(
-            matrix,
-            &text_objects,
-            &text_regions,
-            char_width,
-            char_height,
-        )?;
-
-        Ok(final_matrix)
+        // Use the same logic as process_pdf for consistency
+        self.process_pdf(pdf_path)
     }
 
     pub fn render_matrix_as_string(&self, char_matrix: &CharacterMatrix) -> String {
@@ -985,7 +1027,7 @@ impl Chonker5App {
             ],
             show_bounding_boxes: true,
             selected_page: 0,
-            split_ratio: 0.7,
+            split_ratio: 0.5, // Start with 50/50 split
             matrix_engine: CharacterMatrixEngine::new(),
             selected_cell: None,
             pdf_dark_mode: false,
@@ -1641,6 +1683,19 @@ impl eframe::App for Chonker5App {
                                 // Save edited matrix
                                 self.save_edited_matrix();
                             }
+                            egui::Key::D => {
+                                // Toggle dark mode
+                                self.pdf_dark_mode = !self.pdf_dark_mode;
+                                self.render_current_page(ctx);
+                            }
+                            egui::Key::B => {
+                                // Toggle bounding boxes
+                                self.show_bounding_boxes = !self.show_bounding_boxes;
+                            }
+                            egui::Key::G => {
+                                // Goto page (not implemented yet)
+                                // self.show_goto_dialog = !self.show_goto_dialog;
+                            }
                             _ => {}
                         }
                     }
@@ -1870,13 +1925,13 @@ impl eframe::App for Chonker5App {
                     let available_width = available_size.x;
                     let available_height = available_size.y;
                     let separator_width = 8.0;
-                    let padding = 20.0; // Increased padding to ensure right border is visible
+                    let padding = 0.0; // Remove padding to maximize screen real estate
                     let usable_width = available_width - (padding * 2.0);
                     let left_width = (usable_width - separator_width) * self.split_ratio;
                     let right_width = (usable_width - separator_width) * (1.0 - self.split_ratio);
 
                     ui.horizontal_top(|ui| {
-                        ui.add_space(padding); // Add left padding
+                        // No padding for maximum screen usage
                         // Left pane - PDF View
                         ui.allocate_ui_with_layout(
                             egui::vec2(left_width, available_height),
@@ -2039,56 +2094,7 @@ impl eframe::App for Chonker5App {
                                                     } else if let Some(editable_matrix) = &mut self.matrix_result.editable_matrix {
                                                         // EDITABLE CHARACTER MATRIX VIEW
                                                         if let Some(char_matrix) = &self.matrix_result.character_matrix {
-                                                            ui.horizontal(|ui| {
-                                                                ui.label(RichText::new(format!("Matrix {}x{} | Char: {:.1}x{:.1}pt",
-                                                                    char_matrix.width, char_matrix.height,
-                                                                    char_matrix.char_width, char_matrix.char_height))
-                                                                    .color(TERM_FG)
-                                                                    .monospace()
-                                                                    .size(10.0));
-
-                                                                if self.matrix_result.matrix_dirty {
-                                                                    ui.label(RichText::new(" [MODIFIED]").color(TERM_YELLOW).monospace().size(10.0));
-                                                                }
-
-                                                                // Show selected cell position
-                                                                if let Some((x, y)) = self.selected_cell {
-                                                                    ui.label(RichText::new(format!(" | Pos: ({},{})", x, y))
-                                                                        .color(TERM_HIGHLIGHT)
-                                                                        .monospace()
-                                                                        .size(10.0));
-
-                                                                    // Check if we're in a text region
-                                                                    for region in &char_matrix.text_regions {
-                                                                        if region.bbox.contains(x, y) {
-                                                                            ui.label(RichText::new(format!(" | Region {}", region.region_id + 1))
-                                                                                .color(TERM_HIGHLIGHT)
-                                                                                .monospace()
-                                                                                .size(10.0));
-                                                                            break;
-                                                                        }
-                                                                    }
-                                                                }
-
-                                                                // Show selection size
-                                                                if let (Some(start), Some(end)) = (self.selection_start, self.selection_end) {
-                                                                    let width = (end.0 as i32 - start.0 as i32).abs() + 1;
-                                                                    let height = (end.1 as i32 - start.1 as i32).abs() + 1;
-                                                                    ui.label(RichText::new(format!(" | Selection: {}x{}", width, height))
-                                                                        .color(TERM_YELLOW)
-                                                                        .monospace()
-                                                                        .size(10.0));
-                                                                }
-
-                                                                // Show clipboard status
-                                                                if !self.clipboard.is_empty() {
-                                                                    ui.label(RichText::new(format!(" | 📋 {} chars", self.clipboard.len()))
-                                                                        .color(TERM_YELLOW)
-                                                                        .monospace()
-                                                                        .size(10.0));
-                                                                }
-                                                            });
-                                                            ui.separator();
+                                                            // Removed header feedback - going straight to the matrix
                                                         }
 
                                                         // Create a monospace text layout for the editable matrix
@@ -2526,7 +2532,9 @@ fn parse_page_range(range_str: &str) -> Result<std::ops::Range<usize>, String> {
 
 fn main() -> Result<(), eframe::Error> {
     let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default().with_inner_size([1200.0, 800.0]),
+        viewport: egui::ViewportBuilder::default()
+            .with_maximized(true)
+            .with_inner_size([1200.0, 800.0]),
         ..Default::default()
     };
 
