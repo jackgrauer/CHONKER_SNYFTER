@@ -534,6 +534,87 @@ impl CharacterMatrixEngine {
         })
     }
 
+    // Extract text objects for a specific page
+    fn extract_text_objects_for_page(
+        &self,
+        pdf_path: &PathBuf,
+        target_page_index: usize,
+    ) -> Result<Vec<PreciseTextObject>> {
+        let pdfium = Pdfium::new(
+            Pdfium::bind_to_system_library()
+                .or_else(|_| Pdfium::bind_to_library("./lib/libpdfium.dylib"))
+                .or_else(|_| Pdfium::bind_to_library("/usr/local/lib/libpdfium.dylib"))
+                .map_err(|e| anyhow::anyhow!("Failed to bind pdfium: {}", e))?,
+        );
+
+        let document = pdfium.load_pdf_from_file(pdf_path, None)?;
+        let mut text_objects = Vec::new();
+
+        if target_page_index >= document.pages().len() as usize {
+            return Err(anyhow::anyhow!(
+                "Page index {} out of bounds",
+                target_page_index
+            ));
+        }
+
+        let page = document.pages().get(target_page_index as u16)?;
+        let text_page = page.text()?;
+        let page_height = page.height().value;
+
+        // Extract text segments to get individual characters
+        let text_segments = text_page.segments();
+        for segment in text_segments.iter() {
+            let bounds = segment.bounds();
+            let text = segment.text();
+
+            // Process each character in the segment individually
+            if !text.trim().is_empty() {
+                // Get average character width for this segment
+                let segment_width = bounds.right().value - bounds.left().value;
+                let char_count = text.chars().count() as f32;
+                let avg_char_width = if char_count > 0.0 {
+                    segment_width / char_count
+                } else {
+                    7.2 // Default fallback
+                };
+
+                // Extract font size from bounds height
+                let font_size = (bounds.top().value - bounds.bottom().value) * 0.8;
+
+                // Place each character individually
+                let mut current_x = bounds.left().value;
+                for ch in text.chars() {
+                    // Convert PDF coordinates (bottom-left origin) to top-left origin
+                    let y_from_top = page_height - bounds.top().value;
+
+                    // Calculate character width
+                    let char_width = if ch == ' ' {
+                        avg_char_width * 0.5 // Spaces are typically narrower
+                    } else {
+                        avg_char_width
+                    };
+
+                    text_objects.push(PreciseTextObject {
+                        text: ch.to_string(),
+                        bbox: PDFBBox {
+                            x0: current_x,
+                            y0: y_from_top,
+                            x1: current_x + char_width,
+                            y1: y_from_top + font_size,
+                        },
+                        font_size,
+                        font_name: "Unknown".to_string(),
+                        page_index: target_page_index,
+                    });
+
+                    current_x += char_width;
+                }
+            }
+        }
+
+        Ok(text_objects)
+    }
+
     // STEP 1: Extract precise text objects with coordinates (Enhanced Pdfium)
     fn extract_text_objects_with_precise_coords(
         &self,
@@ -1101,8 +1182,21 @@ impl CharacterMatrixEngine {
     /// println!("Matrix size: {}x{}", matrix.width, matrix.height);
     /// ```
     pub fn process_pdf(&self, pdf_path: &PathBuf) -> Result<CharacterMatrix> {
+        // Process all pages
+        self.process_pdf_page(pdf_path, None)
+    }
+
+    pub fn process_pdf_page(
+        &self,
+        pdf_path: &PathBuf,
+        page_index: Option<usize>,
+    ) -> Result<CharacterMatrix> {
         // Step 1: Extract precise text objects with coordinates (now extracts individual characters)
-        let text_objects = self.extract_text_objects_with_precise_coords(pdf_path)?;
+        let text_objects = if let Some(idx) = page_index {
+            self.extract_text_objects_for_page(pdf_path, idx)?
+        } else {
+            self.extract_text_objects_with_precise_coords(pdf_path)?
+        };
 
         if text_objects.is_empty() {
             return Err(anyhow::anyhow!("No text found in PDF"));
@@ -1913,9 +2007,14 @@ struct Chonker5App {
     selection_end: Option<(usize, usize)>,   // End of drag selection
     is_dragging: bool,                       // Currently dragging
     clipboard: String,                       // Internal clipboard for copy/paste
+
+    // Text editing state
+    text_edit_mode: bool,      // Whether we're currently editing text
+    text_edit_content: String, // Content being edited
+    text_edit_position: Option<(usize, usize)>, // Position where text editing started
 }
 
-#[derive(PartialEq, Clone)]
+#[derive(PartialEq, Clone, Debug)]
 enum ExtractionTab {
     Pdf,
     Matrix,
@@ -1923,7 +2022,7 @@ enum ExtractionTab {
     Semantic,
 }
 
-#[derive(PartialEq, Clone, Copy)]
+#[derive(PartialEq, Clone, Copy, Debug)]
 enum FocusedPane {
     PdfView,
     MatrixView,
@@ -2005,6 +2104,9 @@ impl Chonker5App {
             selection_end: None,
             is_dragging: false,
             clipboard: String::new(),
+            text_edit_mode: false,
+            text_edit_content: String::new(),
+            text_edit_position: None,
         };
 
         // Initialize ferrules binary path
@@ -2318,9 +2420,10 @@ impl Chonker5App {
 
         // Process PDF with multi-modal fusion (PDFium + ferrules)
         let ctx_clone = ctx.clone();
+        let current_page = self.current_page;
         runtime.spawn(async move {
             // Create semantic document with multi-modal fusion
-            let result = match Self::create_semantic_document(pdf_path).await {
+            let result = match Self::create_semantic_document(pdf_path, current_page).await {
                 Ok(semantic_doc) => {
                     tracing::info!(
                         "Semantic document created with {} blocks, {} tables, {:.1}% confidence",
@@ -2346,14 +2449,18 @@ impl Chonker5App {
     }
 
     /// Multi-modal fusion: Combine PDFium precision with ferrules spatial intelligence
-    async fn create_semantic_document(pdf_path: PathBuf) -> Result<SemanticDocument, String> {
+    async fn create_semantic_document(
+        pdf_path: PathBuf,
+        page_index: usize,
+    ) -> Result<SemanticDocument, String> {
         tracing::info!(
-            "Starting multi-modal semantic document creation for: {}",
-            pdf_path.display()
+            "Starting multi-modal semantic document creation for: {} (page {})",
+            pdf_path.display(),
+            page_index + 1
         );
 
         // Step 1: Get basic character matrix from PDFium (fast)
-        let character_matrix = Self::process_pdf_async(pdf_path.clone()).await?;
+        let character_matrix = Self::process_pdf_async(pdf_path.clone(), page_index).await?;
 
         // Step 2: Run ferrules vision analysis in parallel (if available)
         let vision_analysis = Self::run_ferrules_vision_analysis(pdf_path.clone()).await;
@@ -2547,10 +2654,17 @@ impl Chonker5App {
     }
 
     /// Async PDF processing that doesn't block the main thread
-    async fn process_pdf_async(pdf_path: PathBuf) -> Result<CharacterMatrix, String> {
+    async fn process_pdf_async(
+        pdf_path: PathBuf,
+        page_index: usize,
+    ) -> Result<CharacterMatrix, String> {
         // Run CPU-intensive PDF processing in blocking thread pool
         let result = tokio::task::spawn_blocking(move || {
-            tracing::info!("Starting async PDF processing: {}", pdf_path.display());
+            tracing::info!(
+                "Starting async PDF processing: {} (page {})",
+                pdf_path.display(),
+                page_index + 1
+            );
 
             // Use timeout to prevent infinite hanging
             let start_time = std::time::Instant::now();
@@ -2560,7 +2674,7 @@ impl Chonker5App {
             let rt = tokio::runtime::Handle::current();
 
             // Try simple text extraction first (much faster and more reliable)
-            match rt.block_on(Self::extract_simple_text_matrix(&pdf_path)) {
+            match rt.block_on(Self::extract_simple_text_matrix(&pdf_path, page_index)) {
                 Ok(matrix) => {
                     tracing::info!(
                         "Simple text extraction successful in {:?}",
@@ -2579,7 +2693,7 @@ impl Chonker5App {
                     // Fallback to PDFium (synchronous but in blocking thread)
                     let engine = CharacterMatrixEngine::new(); // Basic engine only to avoid async issues
                     engine
-                        .process_pdf(&pdf_path)
+                        .process_pdf_page(&pdf_path, Some(page_index))
                         .map_err(|e| format!("PDFium processing failed: {}", e))
                 }
             }
@@ -2593,14 +2707,17 @@ impl Chonker5App {
     }
 
     /// Simple text extraction using mutool (faster and more reliable)
-    async fn extract_simple_text_matrix(pdf_path: &PathBuf) -> Result<CharacterMatrix, String> {
+    async fn extract_simple_text_matrix(
+        pdf_path: &PathBuf,
+        page_index: usize,
+    ) -> Result<CharacterMatrix, String> {
         // Use mutool to extract text with coordinates
         let output = tokio::process::Command::new("mutool")
             .arg("draw")
             .arg("-F")
             .arg("text")
             .arg(pdf_path)
-            .arg("1") // First page only for now
+            .arg((page_index + 1).to_string()) // Convert 0-based to 1-based page number
             .output()
             .await
             .map_err(|e| format!("Failed to run mutool: {}", e))?;
@@ -3523,44 +3640,75 @@ impl eframe::App for Chonker5App {
         self.process_file_dialog_result(ctx);
 
         // Handle global keyboard shortcuts
-        ctx.input(|i| {
-            for event in &i.events {
-                if let egui::Event::Key {
-                    key,
-                    pressed: true,
-                    modifiers,
-                    ..
-                } = event
-                {
-                    if modifiers.command || modifiers.ctrl {
-                        match key {
-                            egui::Key::O => {
-                                // Open file
-                                self.open_file(ctx);
+        // Only process global keyboard shortcuts when matrix view is not focused
+        // This allows text editing to work properly in the matrix view
+        if self.focused_pane != FocusedPane::MatrixView {
+            ctx.input(|i| {
+                for event in &i.events {
+                    if let egui::Event::Key {
+                        key,
+                        pressed: true,
+                        modifiers,
+                        ..
+                    } = event
+                    {
+                        if modifiers.command || modifiers.ctrl {
+                            match key {
+                                egui::Key::O => {
+                                    // Open file
+                                    self.open_file(ctx);
+                                }
+                                egui::Key::S if self.matrix_result.matrix_dirty => {
+                                    // Save edited matrix
+                                    self.save_edited_matrix();
+                                }
+                                egui::Key::D => {
+                                    // Toggle dark mode
+                                    self.pdf_dark_mode = !self.pdf_dark_mode;
+                                    self.render_current_page(ctx);
+                                }
+                                egui::Key::B => {
+                                    // Toggle bounding boxes
+                                    self.show_bounding_boxes = !self.show_bounding_boxes;
+                                }
+                                egui::Key::G => {
+                                    // Goto page (not implemented yet)
+                                    // self.show_goto_dialog = !self.show_goto_dialog;
+                                }
+                                _ => {}
                             }
-                            egui::Key::S if self.matrix_result.matrix_dirty => {
-                                // Save edited matrix
-                                self.save_edited_matrix();
-                            }
-                            egui::Key::D => {
-                                // Toggle dark mode
-                                self.pdf_dark_mode = !self.pdf_dark_mode;
-                                self.render_current_page(ctx);
-                            }
-                            egui::Key::B => {
-                                // Toggle bounding boxes
-                                self.show_bounding_boxes = !self.show_bounding_boxes;
-                            }
-                            egui::Key::G => {
-                                // Goto page (not implemented yet)
-                                // self.show_goto_dialog = !self.show_goto_dialog;
-                            }
-                            _ => {}
                         }
                     }
                 }
-            }
-        });
+            });
+        } else {
+            // When matrix view is focused, handle file operations
+            ctx.input(|i| {
+                for event in &i.events {
+                    if let egui::Event::Key {
+                        key,
+                        pressed: true,
+                        modifiers,
+                        ..
+                    } = event
+                    {
+                        if modifiers.command || modifiers.ctrl {
+                            match key {
+                                egui::Key::O => {
+                                    // Open file - always available
+                                    self.open_file(ctx);
+                                }
+                                egui::Key::S if self.matrix_result.matrix_dirty => {
+                                    // Save edited matrix
+                                    self.save_edited_matrix();
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                }
+            });
+        }
 
         // Handle deferred rendering
         if self.needs_render {
@@ -3653,6 +3801,46 @@ impl eframe::App for Chonker5App {
                 self.vision_receiver = Some(receiver);
             }
         }
+
+        // Debug panel at bottom - ALWAYS VISIBLE
+        egui::TopBottomPanel::bottom("debug_panel")
+            .resizable(true)
+            .default_height(100.0)
+            .frame(egui::Frame::none().fill(TERM_BG).inner_margin(5.0))
+            .show(ctx, |ui| {
+                draw_terminal_box(ui, "🐛 DEBUG CONSOLE", true, |ui| {
+                    // Show last 5 log messages
+                    ui.label(RichText::new("Recent Logs:").color(TERM_DIM).monospace());
+                    let start_idx = if self.log_messages.len() > 5 {
+                        self.log_messages.len() - 5
+                    } else {
+                        0
+                    };
+
+                    for message in &self.log_messages[start_idx..] {
+                        ui.label(RichText::new(message).color(TERM_FG).monospace().size(11.0));
+                    }
+
+                    ui.separator();
+
+                    // Show current state
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new("State:").color(TERM_DIM).monospace());
+                        ui.label(
+                            RichText::new(format!(
+                                "Focus: {:?} | Selected: {:?} | EditMode: {} | Tab: {:?}",
+                                self.focused_pane,
+                                self.selected_cell,
+                                self.text_edit_mode,
+                                self.active_tab
+                            ))
+                            .color(TERM_YELLOW)
+                            .monospace()
+                            .size(11.0),
+                        );
+                    });
+                });
+            });
 
         // Main panel with terminal background
         egui::CentralPanel::default()
@@ -3913,12 +4101,22 @@ impl eframe::App for Chonker5App {
                                     // Detect interaction with this pane
                                     if ui.ui_contains_pointer() && ui.input(|i| i.pointer.any_click()) {
                                         self.focused_pane = FocusedPane::MatrixView;
+                                        self.log("🎯 Matrix view focused");
                                     }
 
                                     // Tab buttons
                                     ui.horizontal(|ui| {
                                         let matrix_label = if self.active_tab == ExtractionTab::Matrix {
-                                            RichText::new("[MATRIX]").color(TERM_HIGHLIGHT).monospace()
+                                            let mut label = "[MATRIX]".to_string();
+                                            // Add keyboard focus indicator
+                                            if self.focused_pane == FocusedPane::MatrixView && self.selected_cell.is_some() {
+                                                label.push_str(" ⌨️");  // Keyboard emoji to show ready for input
+                                            }
+                                            // Add text edit mode indicator
+                                            if self.text_edit_mode {
+                                                label.push_str(" ✏️");  // Pencil emoji to show edit mode active
+                                            }
+                                            RichText::new(label).color(TERM_HIGHLIGHT).monospace()
                                         } else {
                                             RichText::new(" Matrix ").color(TERM_DIM).monospace()
                                         };
@@ -3955,6 +4153,9 @@ impl eframe::App for Chonker5App {
                                     egui::ScrollArea::both()
                                         .auto_shrink([false; 2])
                                         .show(ui, |ui| {
+                                            // Track edits made during this frame
+                                            let mut frame_edits: Vec<(usize, usize, char, char)> = Vec::new();
+                                            
                                             match self.active_tab {
                                                 ExtractionTab::Matrix => {
                                                     if self.matrix_result.is_loading {
@@ -3980,43 +4181,97 @@ impl eframe::App for Chonker5App {
                                                         // Handle keyboard input ONCE, outside the matrix rendering
                                                         // Process keyboard input if matrix view has focus
                                                         let mut needs_copy = false;
-                                                        let mut needs_paste_at = None;
+                                                        let mut paste_log_msg = None;
+                                                        let mut enter_pressed = None;
+                                                        let mut new_selected_cell = self.selected_cell;
+                                                        let mut clear_selection = false;
+                                                        let mut edits_made: Vec<(usize, usize, char, char)> = Vec::new(); // x, y, old, new
 
-                                                        // Process keyboard events if matrix view has focus
+                                                        // Handle keyboard input for matrix view - NOW we have editable_matrix in scope!
                                                         if self.focused_pane == FocusedPane::MatrixView {
-                                                            // Process keyboard events
-                                                            ui.input(|i| {
+                                                            ctx.input(|i| {
+                                                                // Skip logging if no events
+                                                                if i.events.is_empty() {
+                                                                    return;
+                                                                }
+                                                                
+                                                                // Process all events in a single loop
                                                                 for event in &i.events {
-                                                                    if let egui::Event::Text(text) = event {
-                                                                        // Only process text input if we have a selected cell
-                                                                        if let Some((sel_x, sel_y)) = self.selected_cell {
-                                                                            if sel_y < editable_matrix.len() && sel_x < editable_matrix[sel_y].len() {
-                                                                                if let Some(new_char) = text.chars().next() {
-                                                                                    editable_matrix[sel_y][sel_x] = new_char;
-                                                                                    self.matrix_result.matrix_dirty = true;
-                                                                                    // Move to next cell
-                                                                                    if sel_x < editable_matrix[sel_y].len() - 1 {
-                                                                                        self.selected_cell = Some((sel_x + 1, sel_y));
+                                                                    match event {
+                                                                        egui::Event::Text(text) => {
+                                                                            println!("📝 Text event: '{}'", text);
+                                                                            if let Some((sel_x, sel_y)) = self.selected_cell {
+                                                                                if sel_y < editable_matrix.len() && sel_x < editable_matrix[sel_y].len() {
+                                                                                    // Direct character typing - NO DIALOG, just edit!
+                                                                                    if let Some(new_char) = text.chars().next() {
+                                                                                        if new_char.is_ascii_graphic() || new_char == ' ' {
+                                                                                            // Debug to console
+                                                                                            println!("🔤 TYPED '{}' at cell ({}, {})", new_char, sel_x, sel_y);
+                                                                                            
+                                                                                            // DIRECT EDIT - Update the character immediately
+                                                                                            let old_char = editable_matrix[sel_y][sel_x];
+                                                                                            editable_matrix[sel_y][sel_x] = new_char;
+                                                                                            self.matrix_result.matrix_dirty = true;
+                                                                                            println!("✏️ EDIT SUCCESS: Changed '{}' to '{}' at ({}, {})", old_char, new_char, sel_x, sel_y);
+                                                                                            
+                                                                                            // Track edit for logging after closure
+                                                                                            edits_made.push((sel_x, sel_y, old_char, new_char));
+                                                                                        }
                                                                                     }
                                                                                 }
                                                                             }
                                                                         }
-                                                                    } else if let egui::Event::Key { key, pressed: true, modifiers, .. } = event {
-                                                                        // Process keyboard navigation and editing
+                                                                        egui::Event::Paste(paste_text) => {
+                                                                        println!("📋 PASTE EVENT DETECTED: {} chars", paste_text.len());
+                                                                        if let Some((sel_x, sel_y)) = self.selected_cell {
+                                                                            println!("📋 PASTING at cell ({}, {}): '{}'", sel_x, sel_y, 
+                                                                                if paste_text.len() > 20 { 
+                                                                                    format!("{}...", &paste_text[..20]) 
+                                                                                } else { 
+                                                                                    paste_text.clone() 
+                                                                                }
+                                                                            );
+                                                                            
+                                                                            let lines: Vec<&str> = paste_text.lines().collect();
+                                                                            let mut chars_pasted = 0;
+                                                                            
+                                                                            for (line_idx, line) in lines.iter().enumerate() {
+                                                                                let y = sel_y + line_idx;
+                                                                                if y >= editable_matrix.len() {
+                                                                                    break;
+                                                                                }
+                                                                                for (char_idx, ch) in line.chars().enumerate() {
+                                                                                    let x = sel_x + char_idx;
+                                                                                    if x < editable_matrix[y].len() {
+                                                                                        let old_char = editable_matrix[y][x];
+                                                                                        editable_matrix[y][x] = ch;
+                                                                                        chars_pasted += 1;
+                                                                                        println!("📋 PASTE CHAR: '{}' → '{}' at ({}, {})", old_char, ch, x, y);
+                                                                                    }
+                                                                                }
+                                                                            }
+                                                                            
+                                                                            self.matrix_result.matrix_dirty = true;
+                                                                            println!("📋 PASTE SUCCESS: Pasted {} characters starting at ({}, {})", chars_pasted, sel_x, sel_y);
+                                                                            paste_log_msg = Some(format!("📋 Pasted {} characters from system clipboard", chars_pasted));
+                                                                        }
+                                                                    }
+                                                                        egui::Event::Key { key, pressed: true, modifiers, .. } => {
+                                                                        println!("⌨️ Key event: {:?}, Cmd: {}, Ctrl: {}", key, modifiers.command, modifiers.ctrl);
                                                                         if let Some((sel_x, sel_y)) = self.selected_cell {
                                                                             let matrix_height = editable_matrix.len();
                                                                             match key {
                                                                                 egui::Key::ArrowLeft if sel_x > 0 => {
-                                                                                    self.selected_cell = Some((sel_x - 1, sel_y));
+                                                                                    new_selected_cell = Some((sel_x - 1, sel_y));
                                                                                 }
                                                                                 egui::Key::ArrowRight if sel_y < editable_matrix.len() && sel_x < editable_matrix[sel_y].len() - 1 => {
-                                                                                    self.selected_cell = Some((sel_x + 1, sel_y));
+                                                                                    new_selected_cell = Some((sel_x + 1, sel_y));
                                                                                 }
                                                                                 egui::Key::ArrowUp if sel_y > 0 => {
-                                                                                    self.selected_cell = Some((sel_x, sel_y - 1));
+                                                                                    new_selected_cell = Some((sel_x, sel_y - 1));
                                                                                 }
                                                                                 egui::Key::ArrowDown if sel_y < matrix_height - 1 => {
-                                                                                    self.selected_cell = Some((sel_x, sel_y + 1));
+                                                                                    new_selected_cell = Some((sel_x, sel_y + 1));
                                                                                 }
                                                                                 egui::Key::Delete | egui::Key::Backspace => {
                                                                                     if sel_y < editable_matrix.len() && sel_x < editable_matrix[sel_y].len() {
@@ -4027,88 +4282,110 @@ impl eframe::App for Chonker5App {
                                                                                 egui::Key::Tab => {
                                                                                     if sel_y < editable_matrix.len() {
                                                                                         if sel_x < editable_matrix[sel_y].len() - 1 {
-                                                                                            self.selected_cell = Some((sel_x + 1, sel_y));
+                                                                                            new_selected_cell = Some((sel_x + 1, sel_y));
                                                                                         } else if sel_y < matrix_height - 1 {
-                                                                                            self.selected_cell = Some((0, sel_y + 1));
+                                                                                            new_selected_cell = Some((0, sel_y + 1));
                                                                                         }
                                                                                     }
                                                                                 }
+                                                                                egui::Key::Enter => {
+                                                                                    // Enter edit mode for the selected cell
+                                                                                    if sel_y < editable_matrix.len() && sel_x < editable_matrix[sel_y].len() {
+                                                                                        enter_pressed = Some((sel_x, sel_y, editable_matrix[sel_y][sel_x]));
+                                                                                    }
+                                                                                }
                                                                                 egui::Key::Escape => {
-                                                                                    self.selected_cell = None;
-                                                                                    self.selection_start = None;
-                                                                                    self.selection_end = None;
+                                                                                    clear_selection = true;
                                                                                 }
                                                                                 egui::Key::C if modifiers.command || modifiers.ctrl => {
-                                                                                    // Copy selection
+                                                                                    println!("🔤 COPY KEY PRESSED");
                                                                                     needs_copy = true;
                                                                                 }
                                                                                 egui::Key::V if modifiers.command || modifiers.ctrl => {
-                                                                                    // Paste at current position
-                                                                                    needs_paste_at = self.selected_cell;
+                                                                                    // Paste is handled by egui::Event::Paste above
+                                                                                    // This is just to prevent the key from being consumed elsewhere
                                                                                 }
                                                                                 _ => {}
                                                                             }
                                                                         } else {
-                                                                            // No selected cell, but check for escape key
                                                                             if key == &egui::Key::Escape {
-                                                                                self.selected_cell = None;
-                                                                                self.selection_start = None;
-                                                                                self.selection_end = None;
+                                                                                clear_selection = true;
                                                                             }
                                                                         }
+                                                                        }
+                                                                        _ => {}
                                                                     }
                                                                 }
                                                             });
+                                                            
+                                                            // Apply state changes after the closure
+                                                            self.selected_cell = new_selected_cell;
+                                                            
+                                                            if clear_selection {
+                                                                self.selected_cell = None;
+                                                                self.selection_start = None;
+                                                                self.selection_end = None;
+                                                            }
+                                                            
+                                                            if let Some((x, y, ch)) = enter_pressed {
+                                                                self.text_edit_mode = true;
+                                                                self.text_edit_position = Some((x, y));
+                                                                self.text_edit_content = ch.to_string();
+                                                            }
+                                                            
+                                                            // Request repaint when we've processed keyboard input
+                                                            ctx.request_repaint();
                                                         }
+                                                        
+                                                        // Pass edits to outer scope
+                                                        frame_edits.extend(edits_made);
 
-                                                        // Execute copy/paste operations outside of input closure
+                                                        // Execute copy operations outside of input closure
                                                         let mut copy_log_msg = None;
-                                                        let mut paste_log_msg = None;
 
                                                         if needs_copy {
+                                                            println!("🔤 EXECUTING COPY");
                                                             if let (Some(start), Some(end)) = (self.selection_start, self.selection_end) {
                                                                 let min_x = start.0.min(end.0);
                                                                 let max_x = start.0.max(end.0);
                                                                 let min_y = start.1.min(end.1);
                                                                 let max_y = start.1.max(end.1);
 
-                                                                self.clipboard.clear();
+                                                                let mut copy_text = String::new();
 
                                                                 for y in min_y..=max_y {
                                                                     if y < editable_matrix.len() {
                                                                         for x in min_x..=max_x {
                                                                             if x < editable_matrix[y].len() {
-                                                                                self.clipboard.push(editable_matrix[y][x]);
+                                                                                copy_text.push(editable_matrix[y][x]);
                                                                             }
                                                                         }
                                                                         if y < max_y {
-                                                                            self.clipboard.push('\n');
+                                                                            copy_text.push('\n');
                                                                         }
                                                                     }
                                                                 }
 
-                                                                copy_log_msg = Some(format!("📋 Copied {} characters to clipboard", self.clipboard.len()));
-                                                            }
-                                                        }
-                                                        if let Some((start_x, start_y)) = needs_paste_at {
-                                                            let lines: Vec<&str> = self.clipboard.lines().collect();
-
-                                                            for (line_idx, line) in lines.iter().enumerate() {
-                                                                let y = start_y + line_idx;
-                                                                if y >= editable_matrix.len() {
-                                                                    break;
+                                                                // Copy to system clipboard
+                                                                ui.ctx().copy_text(copy_text.clone());
+                                                                println!("📋 COPY SUCCESS: Copied '{}' ({} chars) to clipboard", 
+                                                                    if copy_text.len() > 20 { 
+                                                                        format!("{}...", &copy_text[..20]) 
+                                                                    } else { 
+                                                                        copy_text.clone() 
+                                                                    }, 
+                                                                    copy_text.len()
+                                                                );
+                                                                copy_log_msg = Some(format!("📋 Copied {} characters to system clipboard", copy_text.len()));
+                                                            } else if let Some((sel_x, sel_y)) = self.selected_cell {
+                                                                // If no selection, copy the single selected cell
+                                                                if sel_y < editable_matrix.len() && sel_x < editable_matrix[sel_y].len() {
+                                                                    let copy_text = editable_matrix[sel_y][sel_x].to_string();
+                                                                    ui.ctx().copy_text(copy_text.clone());
+                                                                    println!("📋 COPY SINGLE CHAR: Copied '{}' from ({}, {}) to clipboard", copy_text, sel_x, sel_y);
+                                                                    copy_log_msg = Some(format!("📋 Copied '{}' to system clipboard", copy_text));
                                                                 }
-
-                                                                for (char_idx, ch) in line.chars().enumerate() {
-                                                                    let x = start_x + char_idx;
-                                                                    if x < editable_matrix[y].len() {
-                                                                        editable_matrix[y][x] = ch;
-                                                                    }
-                                                                }
                                                             }
-
-                                                            self.matrix_result.matrix_dirty = true;
-                                                            paste_log_msg = Some(format!("📋 Pasted {} characters at ({}, {})", self.clipboard.len(), start_x, start_y));
                                                         }
 
                                                         // Extract values needed for the closure
@@ -4146,15 +4423,20 @@ impl eframe::App for Chonker5App {
 
                                                                 let (response, painter) = ui.allocate_painter(matrix_size, egui::Sense::click_and_drag());
                                                                 
-                                                                // Request keyboard focus if this pane is focused
-                                                                if self.focused_pane == FocusedPane::MatrixView {
+                                                                // Always request focus when matrix is being interacted with
+                                                                // This ensures keyboard events are properly captured
+                                                                if response.hovered() || response.clicked() || response.drag_started() || self.focused_pane == FocusedPane::MatrixView {
                                                                     response.request_focus();
                                                                 }
                                                                 
                                                                 // Set focus on click or drag start
                                                                 if response.clicked() || response.drag_started() {
                                                                     self.focused_pane = FocusedPane::MatrixView;
-                                                                    response.request_focus();
+                                                                }
+                                                                
+                                                                // Also set focus when hovering over matrix to enable immediate keyboard input
+                                                                if response.hovered() && ui.input(|i| i.pointer.any_click()) {
+                                                                    self.focused_pane = FocusedPane::MatrixView;
                                                                 }
                                                                 
                                                                 let rect = response.rect;
@@ -4203,13 +4485,37 @@ impl eframe::App for Chonker5App {
                                                                             );
                                                                             painter.rect_filled(cell_rect, 0.0, TERM_HIGHLIGHT.gamma_multiply(0.2));
                                                                         } else if selected_cell == Some((x, y)) {
-                                                                            // Single cell selection
+                                                                            // Single cell selection - make it more prominent for better user feedback
                                                                             let cell_rect = egui::Rect::from_min_size(
                                                                                 rect.min + egui::vec2(x as f32 * char_size, y as f32 * line_height),
                                                                                 egui::vec2(char_size, line_height)
                                                                             );
-                                                                            painter.rect_filled(cell_rect, 0.0, TERM_HIGHLIGHT.gamma_multiply(0.3));
-                                                                            painter.rect_stroke(cell_rect, 0.0, egui::Stroke::new(2.0, TERM_HIGHLIGHT));
+                                                                            // Use a more visible selection background
+                                                                            painter.rect_filled(cell_rect, 0.0, TERM_HIGHLIGHT.gamma_multiply(0.4));
+                                                                            // Add a pulsing border effect by modulating alpha based on time
+                                                                            let time = ui.ctx().input(|i| i.time) as f32;
+                                                                            let alpha = (time * 3.0).sin() * 0.3 + 0.7; // Pulse between 0.4 and 1.0
+                                                                            let border_color = Color32::from_rgba_unmultiplied(
+                                                                                TERM_HIGHLIGHT.r(),
+                                                                                TERM_HIGHLIGHT.g(), 
+                                                                                TERM_HIGHLIGHT.b(),
+                                                                                (255.0 * alpha) as u8
+                                                                            );
+                                                                            painter.rect_stroke(cell_rect, 0.0, egui::Stroke::new(2.0, border_color));
+                                                                            
+                                                                            // Add a blinking cursor effect when this cell is selected
+                                                                            let cursor_alpha = ((time * 2.0).sin().abs() * 255.0) as u8;
+                                                                            if cursor_alpha > 128 { // Only show cursor when alpha is high enough
+                                                                                let cursor_color = Color32::from_rgba_unmultiplied(255, 255, 255, cursor_alpha);
+                                                                                let cursor_x = cell_rect.min.x + char_size * 0.8; // Position cursor after character
+                                                                                painter.line_segment(
+                                                                                    [
+                                                                                        egui::pos2(cursor_x, cell_rect.min.y + 2.0),
+                                                                                        egui::pos2(cursor_x, cell_rect.max.y - 2.0),
+                                                                                    ],
+                                                                                    egui::Stroke::new(1.5, cursor_color)
+                                                                                );
+                                                                            }
                                                                         }
                                                                     }
                                                                 }
@@ -4288,6 +4594,8 @@ impl eframe::App for Chonker5App {
                                                                     self.selected_cell = Some((x, y));
                                                                     self.selection_start = None;
                                                                     self.selection_end = None;
+                                                                    println!("🖱️ CELL SELECTED: ({}, {})", x, y);
+                                                                    self.log(&format!("🖱️ Cell ({}, {}) selected", x, y));
                                                                 }
                                                                 DragAction::None => {}
                                                         }
@@ -4303,7 +4611,7 @@ impl eframe::App for Chonker5App {
                                                         // Help text
                                                         ui.separator();
                                                         ui.horizontal(|ui| {
-                                                            ui.label(RichText::new("Click to select | Drag to select area | Ctrl+C to copy | Ctrl+V to paste | Arrow keys | Esc to clear | [S] to save")
+                                                            ui.label(RichText::new("Click to select | Enter to edit | Arrow keys to navigate | Delete to clear | Ctrl+C to copy | Esc to clear | [S] to save")
                                                                 .color(TERM_DIM)
                                                                 .monospace()
                                                                 .size(10.0));
@@ -4342,6 +4650,11 @@ impl eframe::App for Chonker5App {
                                                 }
                                                 _ => {}
                                             }
+                                            
+                                            // Log any edits made during this frame (after editable_matrix borrow is done)
+                                            for (x, y, old_char, new_char) in frame_edits {
+                                                self.log(&format!("✏️ Edited cell ({}, {}): '{}' → '{}'", x, y, old_char, new_char));
+                                            }
                                         });
                                 });
                             }
@@ -4361,21 +4674,95 @@ impl eframe::App for Chonker5App {
                     });
                 }
 
-                // Collapsible log panel at bottom
-                ui.add_space(5.0);
-                egui::CollapsingHeader::new(RichText::new("▼ LOG").color(CHROME).monospace())
-                    .default_open(false)
-                    .show(ui, |ui| {
-                        egui::ScrollArea::vertical()
-                            .max_height(60.0)
-                            .auto_shrink([false; 2])
-                            .show(ui, |ui| {
-                                for message in &self.log_messages {
-                                    ui.label(RichText::new(message).color(TERM_FG).monospace().size(10.0));
-                                }
-                            });
-                    });
             });
+
+        // Text editing overlay - REMOVED! We now do direct inline editing
+        // Just click a cell and type to edit it!
+        /*
+        if self.text_edit_mode {
+            if let Some((x, y)) = self.text_edit_position {
+                self.log(&format!(
+                    "📝 Opening text edit dialog for cell ({}, {}) with content: '{}'",
+                    x, y, self.text_edit_content
+                ));
+            }
+            egui::Window::new("Edit Cell")
+                .collapsible(false)
+                .resizable(false)
+                .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
+                .show(ctx, |ui| {
+                    ui.label("Edit text content:");
+
+                    let text_edit_response = ui.add(
+                        egui::TextEdit::singleline(&mut self.text_edit_content)
+                            .desired_width(200.0)
+                            .font(egui::FontId::monospace(14.0)),
+                    );
+
+                    // Always request focus for the text edit
+                    text_edit_response.request_focus();
+
+                    // Handle enter key to apply changes
+                    if ui.ctx().input(|i| i.key_pressed(egui::Key::Enter)) {
+                        // Apply the edited text back to the matrix
+                        if let (Some((x, y)), Some(editable_matrix)) = (
+                            self.text_edit_position,
+                            &mut self.matrix_result.editable_matrix,
+                        ) {
+                            if y < editable_matrix.len() && x < editable_matrix[y].len() {
+                                // Take only the first character if multiple were entered
+                                let new_char = self.text_edit_content.chars().next().unwrap_or(' ');
+                                editable_matrix[y][x] = new_char;
+                                self.matrix_result.matrix_dirty = true;
+                            }
+                        }
+                        self.text_edit_mode = false;
+                        self.text_edit_content.clear();
+                        self.text_edit_position = None;
+                    }
+
+                    ui.horizontal(|ui| {
+                        if ui.button("✓ Apply").clicked() {
+                            // Apply the edited text back to the matrix
+                            if let (Some((x, y)), Some(editable_matrix)) = (
+                                self.text_edit_position,
+                                &mut self.matrix_result.editable_matrix,
+                            ) {
+                                if y < editable_matrix.len() && x < editable_matrix[y].len() {
+                                    // Take only the first character if multiple were entered
+                                    let new_char =
+                                        self.text_edit_content.chars().next().unwrap_or(' ');
+                                    editable_matrix[y][x] = new_char;
+                                    self.matrix_result.matrix_dirty = true;
+                                }
+                            }
+                            self.text_edit_mode = false;
+                            self.text_edit_content.clear();
+                            self.text_edit_position = None;
+                        }
+
+                        if ui.button("✗ Cancel").clicked() {
+                            self.text_edit_mode = false;
+                            self.text_edit_content.clear();
+                            self.text_edit_position = None;
+                        }
+                    });
+
+                    // Handle escape key to cancel
+                    if ui.ctx().input(|i| i.key_pressed(egui::Key::Escape)) {
+                        self.text_edit_mode = false;
+                        self.text_edit_content.clear();
+                        self.text_edit_position = None;
+                    }
+
+                    ui.label(
+                        egui::RichText::new("Press Enter to apply, Escape to cancel")
+                            .size(10.0)
+                            .color(egui::Color32::GRAY),
+                    );
+                });
+        }
+        */
     }
 }
 
