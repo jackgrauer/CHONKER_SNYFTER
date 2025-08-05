@@ -40,7 +40,20 @@
       "Bash(cargo build:*)",
       "Bash(./ferrules/target/release/ferrules:*)",
       "Bash(./ferrules/target/debug/ferrules:*)",
-      "WebFetch(domain:versotile.org)"
+      "WebFetch(domain:versotile.org)",
+      "Bash(~/verso-browser/monitor_build.sh)",
+      "Bash(/Users/jack/RustCal/run_rustcal.sh:*)",
+      "Bash(./target/release/versoview)",
+      "Bash(brew install:*)",
+      "Bash(pip3 install:*)",
+      "Bash(./launch_calcurse_tray.sh:*)",
+      "Bash(cp:*)",
+      "Bash(calcurse:*)",
+      "Bash(true)",
+      "Bash(mkdir:*)",
+      "Bash(brew uninstall:*)",
+      "Bash(~/rusti-cal/launch_tray.sh)",
+      "Bash(./tray/target/release/rusti-cal-tray)"
     ],
     "deny": []
   }

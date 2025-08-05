@@ -1377,16 +1377,21 @@ impl Chonker5App {
             let painter = ui.painter();
             let image_rect = image_response.rect;
 
-            // Map character coordinates to screen coordinates
-            let char_width = image_rect.width() / char_matrix.width as f32;
-            let char_height = image_rect.height() / char_matrix.height as f32;
+            // The character matrix is based on PDF points (1/72 inch)
+            // We need to scale from PDF coordinates to screen coordinates
+            let pdf_width_pts = char_matrix.width as f32 * char_matrix.char_width;
+            let pdf_height_pts = char_matrix.height as f32 * char_matrix.char_height;
+
+            // Calculate scale from PDF points to screen pixels
+            let scale_x = image_rect.width() / pdf_width_pts;
+            let scale_y = image_rect.height() / pdf_height_pts;
 
             // Draw subtle grid lines to show character positions
             let grid_color = TERM_DIM.gamma_multiply(0.2); // Very faint grid
 
             // Vertical lines every 10 characters
             for x in (0..char_matrix.width).step_by(10) {
-                let screen_x = image_rect.left() + (x as f32 * char_width);
+                let screen_x = image_rect.left() + (x as f32 * char_matrix.char_width * scale_x);
                 painter.line_segment(
                     [
                         egui::pos2(screen_x, image_rect.top()),
@@ -1398,7 +1403,7 @@ impl Chonker5App {
 
             // Horizontal lines every 10 characters
             for y in (0..char_matrix.height).step_by(10) {
-                let screen_y = image_rect.top() + (y as f32 * char_height);
+                let screen_y = image_rect.top() + (y as f32 * char_matrix.char_height * scale_y);
                 painter.line_segment(
                     [
                         egui::pos2(image_rect.left(), screen_y),
@@ -1411,11 +1416,14 @@ impl Chonker5App {
             // Highlight the selected cell if any
             if let Some((sel_x, sel_y)) = self.selected_cell {
                 if sel_y < char_matrix.height && sel_x < char_matrix.width {
-                    let x1 = image_rect.left() + (sel_x as f32 * char_width);
-                    let y1 = image_rect.top() + (sel_y as f32 * char_height);
+                    let x1 = image_rect.left() + (sel_x as f32 * char_matrix.char_width * scale_x);
+                    let y1 = image_rect.top() + (sel_y as f32 * char_matrix.char_height * scale_y);
                     let cell_rect = egui::Rect::from_min_size(
                         egui::pos2(x1, y1),
-                        egui::vec2(char_width, char_height),
+                        egui::vec2(
+                            char_matrix.char_width * scale_x,
+                            char_matrix.char_height * scale_y,
+                        ),
                     );
                     painter.rect_filled(cell_rect, 0.0, TERM_HIGHLIGHT.gamma_multiply(0.2));
                     painter.rect_stroke(cell_rect, 0.0, egui::Stroke::new(2.0, TERM_HIGHLIGHT));
@@ -1424,10 +1432,14 @@ impl Chonker5App {
 
             // Draw text regions from character matrix
             for region in char_matrix.text_regions.iter() {
-                let x1 = image_rect.left() + (region.bbox.x as f32 * char_width);
-                let y1 = image_rect.top() + (region.bbox.y as f32 * char_height);
-                let x2 = x1 + (region.bbox.width as f32 * char_width);
-                let y2 = y1 + (region.bbox.height as f32 * char_height);
+                // Convert character-based bounding box to screen coordinates
+                // The bbox is in character units, so multiply by char size and scale
+                let x1 =
+                    image_rect.left() + (region.bbox.x as f32 * char_matrix.char_width * scale_x);
+                let y1 =
+                    image_rect.top() + (region.bbox.y as f32 * char_matrix.char_height * scale_y);
+                let x2 = x1 + (region.bbox.width as f32 * char_matrix.char_width * scale_x);
+                let y2 = y1 + (region.bbox.height as f32 * char_matrix.char_height * scale_y);
 
                 let rect = egui::Rect::from_min_max(egui::pos2(x1, y1), egui::pos2(x2, y2));
 
@@ -1948,31 +1960,38 @@ impl eframe::App for Chonker5App {
                                                         let line_height = ui.text_style_height(&egui::TextStyle::Monospace);
 
                                                         // Handle keyboard input ONCE, outside the matrix rendering
-                                                        // Only process keyboard input if matrix view has focus
+                                                        // Process keyboard input if matrix view has focus
                                                         let mut needs_copy = false;
                                                         let mut needs_paste_at = None;
 
+                                                        // Process keyboard events if matrix view has focus
                                                         if self.focused_pane == FocusedPane::MatrixView {
-                                                            if let Some((sel_x, sel_y)) = self.selected_cell {
-                                                                let matrix_height = editable_matrix.len();
-                                                                if sel_y < matrix_height && sel_x < editable_matrix[sel_y].len() {
-                                                                    ui.input(|i| {
-                                                                    for event in &i.events {
-                                                                        if let egui::Event::Text(text) = event {
-                                                                            if let Some(new_char) = text.chars().next() {
-                                                                                editable_matrix[sel_y][sel_x] = new_char;
-                                                                                self.matrix_result.matrix_dirty = true;
-                                                                                // Move to next cell
-                                                                                if sel_x < editable_matrix[sel_y].len() - 1 {
-                                                                                    self.selected_cell = Some((sel_x + 1, sel_y));
+                                                            // Process keyboard events
+                                                            ui.input(|i| {
+                                                                for event in &i.events {
+                                                                    if let egui::Event::Text(text) = event {
+                                                                        // Only process text input if we have a selected cell
+                                                                        if let Some((sel_x, sel_y)) = self.selected_cell {
+                                                                            if sel_y < editable_matrix.len() && sel_x < editable_matrix[sel_y].len() {
+                                                                                if let Some(new_char) = text.chars().next() {
+                                                                                    editable_matrix[sel_y][sel_x] = new_char;
+                                                                                    self.matrix_result.matrix_dirty = true;
+                                                                                    // Move to next cell
+                                                                                    if sel_x < editable_matrix[sel_y].len() - 1 {
+                                                                                        self.selected_cell = Some((sel_x + 1, sel_y));
+                                                                                    }
                                                                                 }
                                                                             }
-                                                                        } else if let egui::Event::Key { key, pressed: true, modifiers, .. } = event {
+                                                                        }
+                                                                    } else if let egui::Event::Key { key, pressed: true, modifiers, .. } = event {
+                                                                        // Process keyboard navigation and editing
+                                                                        if let Some((sel_x, sel_y)) = self.selected_cell {
+                                                                            let matrix_height = editable_matrix.len();
                                                                             match key {
                                                                                 egui::Key::ArrowLeft if sel_x > 0 => {
                                                                                     self.selected_cell = Some((sel_x - 1, sel_y));
                                                                                 }
-                                                                                egui::Key::ArrowRight if sel_x < editable_matrix[sel_y].len() - 1 => {
+                                                                                egui::Key::ArrowRight if sel_y < editable_matrix.len() && sel_x < editable_matrix[sel_y].len() - 1 => {
                                                                                     self.selected_cell = Some((sel_x + 1, sel_y));
                                                                                 }
                                                                                 egui::Key::ArrowUp if sel_y > 0 => {
@@ -1982,14 +2001,18 @@ impl eframe::App for Chonker5App {
                                                                                     self.selected_cell = Some((sel_x, sel_y + 1));
                                                                                 }
                                                                                 egui::Key::Delete | egui::Key::Backspace => {
-                                                                                    editable_matrix[sel_y][sel_x] = ' ';
-                                                                                    self.matrix_result.matrix_dirty = true;
+                                                                                    if sel_y < editable_matrix.len() && sel_x < editable_matrix[sel_y].len() {
+                                                                                        editable_matrix[sel_y][sel_x] = ' ';
+                                                                                        self.matrix_result.matrix_dirty = true;
+                                                                                    }
                                                                                 }
                                                                                 egui::Key::Tab => {
-                                                                                    if sel_x < editable_matrix[sel_y].len() - 1 {
-                                                                                        self.selected_cell = Some((sel_x + 1, sel_y));
-                                                                                    } else if sel_y < matrix_height - 1 {
-                                                                                        self.selected_cell = Some((0, sel_y + 1));
+                                                                                    if sel_y < editable_matrix.len() {
+                                                                                        if sel_x < editable_matrix[sel_y].len() - 1 {
+                                                                                            self.selected_cell = Some((sel_x + 1, sel_y));
+                                                                                        } else if sel_y < matrix_height - 1 {
+                                                                                            self.selected_cell = Some((0, sel_y + 1));
+                                                                                        }
                                                                                     }
                                                                                 }
                                                                                 egui::Key::Escape => {
@@ -2007,11 +2030,17 @@ impl eframe::App for Chonker5App {
                                                                                 }
                                                                                 _ => {}
                                                                             }
+                                                                        } else {
+                                                                            // No selected cell, but check for escape key
+                                                                            if key == &egui::Key::Escape {
+                                                                                self.selected_cell = None;
+                                                                                self.selection_start = None;
+                                                                                self.selection_end = None;
+                                                                            }
                                                                         }
                                                                     }
-                                                                });
                                                                 }
-                                                            }
+                                                            });
                                                         }
 
                                                         // Execute copy/paste operations outside of input closure
@@ -2097,7 +2126,19 @@ impl eframe::App for Chonker5App {
                                                                     matrix_height as f32 * line_height
                                                                 );
 
-                                                                let (response, painter) = ui.allocate_painter(matrix_size, egui::Sense::click());
+                                                                let (response, painter) = ui.allocate_painter(matrix_size, egui::Sense::click_and_drag());
+                                                                
+                                                                // Request keyboard focus if this pane is focused
+                                                                if self.focused_pane == FocusedPane::MatrixView {
+                                                                    response.request_focus();
+                                                                }
+                                                                
+                                                                // Set focus on click or drag start
+                                                                if response.clicked() || response.drag_started() {
+                                                                    self.focused_pane = FocusedPane::MatrixView;
+                                                                    response.request_focus();
+                                                                }
+                                                                
                                                                 let rect = response.rect;
 
                                                                 // Draw all characters in a tight grid
