@@ -40,7 +40,7 @@ use image::{ImageBuffer, Rgb, RgbImage};
 use pdfium_render::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Arc;
 use tokio::sync::mpsc;
@@ -53,6 +53,8 @@ const TERM_HIGHLIGHT: Color32 = Color32::from_rgb(22, 160, 133); // Darker teal 
 const TERM_ERROR: Color32 = Color32::from_rgb(255, 80, 80); // Soft red
 const TERM_DIM: Color32 = Color32::from_rgb(80, 100, 100); // Muted teal-gray
 const TERM_YELLOW: Color32 = Color32::from_rgb(255, 200, 0); // Gold accent
+const TERM_GREEN: Color32 = Color32::from_rgb(46, 204, 113); // Emerald green
+const TERM_BLUE: Color32 = Color32::from_rgb(52, 152, 219); // Sky blue
 const CHROME: Color32 = Color32::from_rgb(82, 86, 89); // Chrome (#525659)
 
 // Box drawing characters (for future use)
@@ -95,6 +97,159 @@ pub struct CharacterMatrix {
     pub original_text: Vec<String>,
     pub char_width: f32,
     pub char_height: f32,
+}
+
+/// Enhanced semantic document structure from multi-modal fusion
+/// Fusion-specific bounding box with x0,y0,x1,y1 coordinates
+#[derive(Debug, Clone)]
+struct FusionBBox {
+    x0: f32,
+    y0: f32,
+    x1: f32,
+    y1: f32,
+}
+
+impl FusionBBox {
+    fn from_char_bbox(char_bbox: &CharBBox) -> Self {
+        Self {
+            x0: char_bbox.x as f32,
+            y0: char_bbox.y as f32,
+            x1: (char_bbox.x + char_bbox.width) as f32,
+            y1: (char_bbox.y + char_bbox.height) as f32,
+        }
+    }
+
+    fn from_ferrule_bbox(ferrule_bbox: &FerruleBBox) -> Self {
+        Self {
+            x0: ferrule_bbox.x0,
+            y0: ferrule_bbox.y0,
+            x1: ferrule_bbox.x1,
+            y1: ferrule_bbox.y1,
+        }
+    }
+
+    fn to_bbox(&self, label: String) -> BoundingBox {
+        BoundingBox {
+            x: self.x0,
+            y: self.y0,
+            width: self.x1 - self.x0,
+            height: self.y1 - self.y0,
+            label,
+            confidence: 1.0,
+            color: Color32::GREEN,
+        }
+    }
+
+    fn area(&self) -> f32 {
+        (self.x1 - self.x0) * (self.y1 - self.y0)
+    }
+
+    fn overlaps(&self, other: &FusionBBox) -> bool {
+        let x_overlap = self.x0.max(other.x0) < self.x1.min(other.x1);
+        let y_overlap = self.y0.max(other.y0) < self.y1.min(other.y1);
+        x_overlap && y_overlap
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SemanticDocument {
+    pub character_matrix: CharacterMatrix,
+    pub semantic_blocks: Vec<SemanticBlock>,
+    pub tables: Vec<TableStructure>,
+    pub reading_order: Vec<usize>, // Block indices in reading order
+    pub document_layout: DocumentLayoutInfo,
+    pub fusion_confidence: f32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SemanticBlock {
+    pub id: usize,
+    pub block_type: BlockType,
+    pub bbox: BoundingBox,
+    pub content: String,
+    pub confidence: f32,
+    pub pdfium_text_objects: Vec<PdfiumTextObject>,
+    pub grid_region: GridRegion,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum BlockType {
+    Title,
+    Heading,
+    Paragraph,
+    Table,
+    List,
+    Figure,
+    Caption,
+    Header,
+    Footer,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TableStructure {
+    pub id: usize,
+    pub bbox: BoundingBox,
+    pub rows: usize,
+    pub cols: usize,
+    pub cells: Vec<Vec<TableCell>>,
+    pub headers: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TableCell {
+    pub content: String,
+    pub bbox: BoundingBox,
+    pub cell_type: CellType,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum CellType {
+    Header,
+    Data,
+    Empty,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PdfiumTextObject {
+    pub text: String,
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
+    pub font_size: f32,
+    pub font_name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GridRegion {
+    pub start_x: usize,
+    pub start_y: usize,
+    pub end_x: usize,
+    pub end_y: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DocumentLayoutInfo {
+    pub page_width: f32,
+    pub page_height: f32,
+    pub columns: usize,
+    pub has_tables: bool,
+    pub has_figures: bool,
+}
+
+impl CharacterMatrix {
+    pub fn new(width: usize, height: usize) -> Self {
+        let matrix = vec![vec![' '; width]; height];
+        Self {
+            width,
+            height,
+            matrix,
+            text_regions: Vec::new(),
+            original_text: Vec::new(),
+            char_width: 7.2,
+            char_height: 12.0,
+        }
+    }
 }
 
 /// Represents a rectangular region within the character matrix that contains text.
@@ -174,6 +329,178 @@ impl PDFBBox {
     }
 }
 
+// ============================================================================
+// AI SENSOR INFUSION ARCHITECTURE
+// ============================================================================
+
+/// Ferrules document structure output
+#[derive(Debug, Clone, Deserialize, Serialize)]
+struct FerruleDocument {
+    doc_name: String,
+    pages: Vec<FerrulePage>,
+    blocks: Vec<FerruleBlock>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+struct FerrulePage {
+    id: usize,
+    width: f32,
+    height: f32,
+    need_ocr: bool,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+struct FerruleBlock {
+    id: usize,
+    kind: FerruleBlockKind,
+    pages_id: Vec<usize>,
+    bbox: FerruleBBox,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+struct FerruleBlockKind {
+    block_type: String,
+    #[serde(default)]
+    text: String,
+    #[serde(default)]
+    level: Option<usize>,
+    #[serde(default)]
+    items: Option<Vec<String>>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+struct FerruleBBox {
+    x0: f32,
+    y0: f32,
+    x1: f32,
+    y1: f32,
+}
+
+/// AI Vision Context from ferrules analysis
+#[derive(Debug, Clone)]
+struct VisionContext {
+    text_regions: Vec<VisionTextRegion>,
+    layout_structure: DocumentLayout,
+    reading_order: Vec<ReadingPath>,
+    semantic_hints: Vec<SemanticHint>,
+}
+
+#[derive(Debug, Clone)]
+struct VisionTextRegion {
+    bbox: FerruleBBox,
+    text: String,
+    block_type: String,
+    reading_index: usize,
+    confidence: f32,
+}
+
+#[derive(Debug, Clone)]
+struct DocumentLayout {
+    page_width: f32,
+    page_height: f32,
+    column_count: usize,
+    text_bounds: FerruleBBox,
+}
+
+#[derive(Debug, Clone)]
+struct ReadingPath {
+    region_id: usize,
+    sequence_order: usize,
+    flow_direction: FlowDirection,
+}
+
+#[derive(Debug, Clone)]
+enum FlowDirection {
+    LeftToRight,
+    TopToBottom,
+    Column,
+}
+
+#[derive(Debug, Clone)]
+struct SemanticHint {
+    region_id: usize,
+    semantic_type: String,
+    importance: f32,
+}
+
+/// Fused multi-modal data combining vision and PDF extraction
+#[derive(Debug, Clone)]
+struct FusedTextRegion {
+    vision_bbox: FerruleBBox,
+    pdf_text_objects: Vec<PreciseTextObject>,
+    semantic_type: String,
+    confidence: f32,
+    reading_order_index: usize,
+}
+
+#[derive(Debug, Clone)]
+struct FusedData {
+    regions: Vec<FusedTextRegion>,
+}
+
+/// AI-enhanced character grid with semantic understanding
+#[derive(Debug, Clone)]
+struct SmartCharacterGrid {
+    grid: CharacterMatrix,
+    semantic_regions: Vec<SemanticRegion>,
+    vision_metadata: VisionContext,
+    confidence_map: Vec<Vec<f32>>,
+}
+
+#[derive(Debug, Clone)]
+struct SemanticRegion {
+    grid_region: VisionTextRegion,
+    semantic_type: String,
+    content: String,
+    confidence: f32,
+}
+
+/// AI Sensor Stack for multi-modal document processing
+#[derive(Debug)]
+struct AISensorStack {
+    vision_sensor: VisionSensor,
+    extraction_sensor: ExtractionSensor,
+    fusion_sensor: FusionSensor,
+}
+
+#[derive(Debug)]
+struct VisionSensor {
+    ferrules_path: PathBuf,
+    temp_dir: PathBuf,
+}
+
+#[derive(Debug)]
+struct ExtractionSensor {
+    pdfium: Pdfium,
+    font_analyzer: FontAnalyzer,
+}
+
+#[derive(Debug)]
+struct FusionSensor {
+    spatial_matcher: SpatialMatcher,
+    confidence_scorer: ConfidenceScorer,
+}
+
+#[derive(Debug)]
+struct FontAnalyzer {
+    char_width_cache: HashMap<char, f32>,
+    avg_char_width: f32,
+    avg_char_height: f32,
+}
+
+#[derive(Debug)]
+struct SpatialMatcher {
+    overlap_threshold: f32,
+    text_similarity_threshold: f32,
+}
+
+#[derive(Debug)]
+struct ConfidenceScorer {
+    spatial_weight: f32,
+    text_weight: f32,
+    semantic_weight: f32,
+}
+
 /// Main processing engine for converting PDFs to character matrices.
 ///
 /// This engine handles the core workflow:
@@ -185,6 +512,7 @@ impl PDFBBox {
 pub struct CharacterMatrixEngine {
     pub char_width: f32,
     pub char_height: f32,
+    ai_sensor_stack: Option<AISensorStack>,
 }
 
 impl CharacterMatrixEngine {
@@ -192,7 +520,18 @@ impl CharacterMatrixEngine {
         Self {
             char_width: 6.0,   // Will be calculated dynamically
             char_height: 12.0, // Will be calculated dynamically
+            ai_sensor_stack: None,
         }
+    }
+
+    /// Create engine with AI sensor capabilities
+    pub fn with_ai_sensors() -> Result<Self> {
+        let ai_sensor_stack = AISensorStack::new()?;
+        Ok(Self {
+            char_width: 6.0,
+            char_height: 12.0,
+            ai_sensor_stack: Some(ai_sensor_stack),
+        })
     }
 
     // STEP 1: Extract precise text objects with coordinates (Enhanced Pdfium)
@@ -214,30 +553,55 @@ impl CharacterMatrixEngine {
             let text_page = page.text()?;
             let page_height = page.height().value;
 
-            // Extract text segments since character-level extraction is not available
+            // Extract text segments to get individual characters
             let text_segments = text_page.segments();
-            
+
             for segment in text_segments.iter() {
                 let bounds = segment.bounds();
                 let text = segment.text();
-                
-                // Only process non-whitespace segments
+
+                // Process each character in the segment individually
                 if !text.trim().is_empty() {
-                    // Convert PDF coordinates (bottom-left origin) to top-left origin
-                    let y_from_top = page_height - bounds.top().value;
-                    
-                    text_objects.push(PreciseTextObject {
-                        text: text.clone(),
-                        bbox: PDFBBox {
-                            x0: bounds.left().value,
-                            y0: y_from_top,
-                            x1: bounds.right().value,
-                            y1: y_from_top + (bounds.top().value - bounds.bottom().value),
-                        },
-                        font_size: 12.0, // Default font size
-                        font_name: "Segment".to_string(),
-                        page_index,
-                    });
+                    // Get average character width for this segment
+                    let segment_width = bounds.right().value - bounds.left().value;
+                    let char_count = text.chars().count() as f32;
+                    let avg_char_width = if char_count > 0.0 {
+                        segment_width / char_count
+                    } else {
+                        7.2 // Default fallback
+                    };
+
+                    // Extract font size from bounds height
+                    let font_size = (bounds.top().value - bounds.bottom().value) * 0.8;
+
+                    // Place each character individually
+                    let mut current_x = bounds.left().value;
+                    for ch in text.chars() {
+                        // Convert PDF coordinates (bottom-left origin) to top-left origin
+                        let y_from_top = page_height - bounds.top().value;
+
+                        // Calculate character width (use proportional spacing for spaces)
+                        let char_width = if ch == ' ' {
+                            avg_char_width * 0.5 // Spaces are typically narrower
+                        } else {
+                            avg_char_width
+                        };
+
+                        text_objects.push(PreciseTextObject {
+                            text: ch.to_string(),
+                            bbox: PDFBBox {
+                                x0: current_x,
+                                y0: y_from_top,
+                                x1: current_x + char_width,
+                                y1: y_from_top + (bounds.top().value - bounds.bottom().value),
+                            },
+                            font_size,
+                            font_name: "Char".to_string(),
+                            page_index,
+                        });
+
+                        current_x += char_width;
+                    }
                 }
             }
         }
@@ -737,42 +1101,41 @@ impl CharacterMatrixEngine {
     /// println!("Matrix size: {}x{}", matrix.width, matrix.height);
     /// ```
     pub fn process_pdf(&self, pdf_path: &PathBuf) -> Result<CharacterMatrix> {
-        // Get PDF page dimensions first
-        let pdfium = Pdfium::new(
-            Pdfium::bind_to_library(Pdfium::pdfium_platform_library_name_at_path("./lib"))
-                .or_else(|_| Pdfium::bind_to_system_library())?,
-        );
-
-        let document = pdfium.load_pdf_from_file(pdf_path, None)?;
-        let page = document
-            .pages()
-            .get(0)
-            .map_err(|_| anyhow::anyhow!("No pages in PDF"))?;
-
-        let page_width = page.width().value;
-        let page_height = page.height().value;
-
-        // Step 1: Extract precise text objects with coordinates
+        // Step 1: Extract precise text objects with coordinates (now extracts individual characters)
         let text_objects = self.extract_text_objects_with_precise_coords(pdf_path)?;
 
-        // Step 2: Calculate matrix size based on page dimensions
-        // Use a fixed character size for consistency
-        let char_width = 7.2; // Standard monospace character width in points
-        let char_height = 14.4; // Standard line height in points
-        let matrix_width = (page_width / char_width).ceil() as usize;
-        let matrix_height = (page_height / char_height).ceil() as usize;
+        if text_objects.is_empty() {
+            return Err(anyhow::anyhow!("No text found in PDF"));
+        }
 
-        // Step 3: Generate character matrix with proper positioning
+        // Step 2: Calculate matrix size based on actual content bounds (not page size)
+        let (matrix_width, matrix_height, char_width, char_height) =
+            self.calculate_optimal_matrix_size(&text_objects);
+
+        // Step 3: Find content bounds to offset coordinates
+        let min_x = text_objects
+            .iter()
+            .map(|t| t.bbox.x0)
+            .min_by(|a, b| a.partial_cmp(b).unwrap())
+            .unwrap_or(0.0);
+        let min_y = text_objects
+            .iter()
+            .map(|t| t.bbox.y0)
+            .min_by(|a, b| a.partial_cmp(b).unwrap())
+            .unwrap_or(0.0);
+
+        // Step 4: Generate character matrix with proper positioning
         let mut matrix = vec![vec![' '; matrix_width]; matrix_height];
         let mut text_regions = Vec::new();
 
-        // Place individual characters at their exact positions
+        // Place each character at its calculated position
         for text_obj in &text_objects {
-            // Since we now have individual characters, place them exactly
-            let char_x = (text_obj.bbox.x0 / char_width).round() as usize;
-            let char_y = (text_obj.bbox.y0 / char_height).round() as usize;
+            // Convert PDF coordinates to matrix coordinates, accounting for content offset
+            let char_x = ((text_obj.bbox.x0 - min_x) / char_width).round() as usize;
+            let char_y = ((text_obj.bbox.y0 - min_y) / char_height).round() as usize;
 
             if char_y < matrix_height && char_x < matrix_width {
+                // Place the character (now each text_obj is a single character)
                 if let Some(ch) = text_obj.text.chars().next() {
                     matrix[char_y][char_x] = ch;
 
@@ -792,10 +1155,10 @@ impl CharacterMatrixEngine {
             }
         }
 
-        // Step 4: Merge adjacent characters into words/regions for better visualization
+        // Step 5: Merge adjacent characters into words/regions for better visualization
         let merged_regions = self.merge_adjacent_regions(&text_regions);
 
-        // Step 5: Create final character matrix
+        // Step 6: Create final character matrix
         let original_text: Vec<String> = text_objects.iter().map(|obj| obj.text.clone()).collect();
 
         let final_matrix = CharacterMatrix {
@@ -809,6 +1172,22 @@ impl CharacterMatrixEngine {
         };
 
         Ok(final_matrix)
+    }
+
+    /// Process PDF with AI sensor infusion for enhanced accuracy
+    pub async fn process_pdf_with_ai(&self, pdf_path: &PathBuf) -> Result<CharacterMatrix> {
+        if let Some(ai_sensors) = &self.ai_sensor_stack {
+            tracing::info!("Processing PDF with AI sensor infusion: {:?}", pdf_path);
+
+            // Use AI-enhanced processing pipeline
+            let smart_grid = ai_sensors.process_pdf_with_ai(pdf_path.as_path()).await?;
+
+            // Convert SmartCharacterGrid to CharacterMatrix for compatibility
+            Ok(smart_grid.grid)
+        } else {
+            tracing::warn!("AI sensors not available, falling back to basic processing");
+            self.process_pdf(pdf_path)
+        }
     }
 
     pub fn process_pdf_with_ferrules(
@@ -873,7 +1252,577 @@ impl Default for CharacterMatrixEngine {
     }
 }
 
-// ============= END CHARACTER MATRIX ENGINE =============
+// ============================================================================
+// AI SENSOR STACK IMPLEMENTATION
+// ============================================================================
+
+impl AISensorStack {
+    pub fn new() -> Result<Self> {
+        let ferrules_path = PathBuf::from("./ferrules/target/release/ferrules");
+        let temp_dir = PathBuf::from("/tmp/chonker5_ai_sensors");
+        std::fs::create_dir_all(&temp_dir)?;
+
+        let pdfium = Pdfium::new(
+            Pdfium::bind_to_system_library()
+                .or_else(|_| Pdfium::bind_to_library("./lib/libpdfium.dylib"))
+                .or_else(|_| Pdfium::bind_to_library("/usr/local/lib/libpdfium.dylib"))
+                .map_err(|e| anyhow::anyhow!("Failed to bind pdfium: {}", e))?,
+        );
+
+        Ok(Self {
+            vision_sensor: VisionSensor {
+                ferrules_path,
+                temp_dir: temp_dir.clone(),
+            },
+            extraction_sensor: ExtractionSensor {
+                pdfium,
+                font_analyzer: FontAnalyzer::new(),
+            },
+            fusion_sensor: FusionSensor {
+                spatial_matcher: SpatialMatcher::new(),
+                confidence_scorer: ConfidenceScorer::new(),
+            },
+        })
+    }
+
+    /// Main AI-enhanced processing pipeline
+    pub async fn process_pdf_with_ai(&self, pdf_path: &Path) -> Result<SmartCharacterGrid> {
+        tracing::info!("Starting AI-enhanced PDF processing for: {:?}", pdf_path);
+
+        // Stage 1: Vision Analysis (Ferrules)
+        let vision_context = self.vision_sensor.analyze_document(pdf_path).await?;
+        tracing::info!(
+            "Vision analysis complete. Found {} text regions",
+            vision_context.text_regions.len()
+        );
+
+        // Stage 2: Guided Extraction (Enhanced PDFium)
+        let extracted_text = self
+            .extraction_sensor
+            .extract_with_guidance(pdf_path, &vision_context)?;
+        tracing::info!(
+            "Guided extraction complete. Found {} PDF text objects",
+            extracted_text.len()
+        );
+
+        // Stage 3: Spatial Fusion (Multi-Modal Correlation)
+        let fused_data = self
+            .fusion_sensor
+            .fuse_data(&vision_context, &extracted_text)?;
+        tracing::info!(
+            "Spatial fusion complete. Fused {} regions",
+            fused_data.regions.len()
+        );
+
+        // Stage 4: Grid Generation (Character-Level Mapping)
+        let smart_grid = self.generate_smart_character_grid(fused_data, vision_context)?;
+        tracing::info!(
+            "Smart character grid generated: {}x{}",
+            smart_grid.grid.width,
+            smart_grid.grid.height
+        );
+
+        Ok(smart_grid)
+    }
+
+    fn generate_smart_character_grid(
+        &self,
+        fused_data: FusedData,
+        vision_context: VisionContext,
+    ) -> Result<SmartCharacterGrid> {
+        // Calculate optimal grid dimensions based on vision analysis
+        let grid_dimensions = self.calculate_optimal_grid_dimensions(&vision_context);
+
+        // Create base character grid
+        let mut grid = CharacterMatrix::new(grid_dimensions.0, grid_dimensions.1);
+        let mut confidence_map = vec![vec![0.0; grid_dimensions.0]; grid_dimensions.1];
+        let mut semantic_regions = Vec::new();
+
+        // Place text using AI-guided positioning
+        for region in &fused_data.regions {
+            let grid_coords =
+                self.vision_to_grid_coordinates(&region.vision_bbox, &grid_dimensions);
+
+            // Extract text content from PDF objects
+            let text_content = region
+                .pdf_text_objects
+                .iter()
+                .map(|obj| obj.text.as_str())
+                .collect::<Vec<_>>()
+                .join("");
+
+            // Place characters with font intelligence
+            self.place_text_with_font_awareness(
+                &mut grid,
+                &mut confidence_map,
+                &region,
+                text_content.clone(),
+                grid_coords,
+            )?;
+
+            // Record semantic region
+            semantic_regions.push(SemanticRegion {
+                grid_region: VisionTextRegion {
+                    bbox: region.vision_bbox.clone(),
+                    text: text_content.clone(),
+                    block_type: region.semantic_type.clone(),
+                    reading_index: region.reading_order_index,
+                    confidence: region.confidence,
+                },
+                semantic_type: region.semantic_type.clone(),
+                content: text_content.clone(),
+                confidence: region.confidence,
+            });
+        }
+
+        Ok(SmartCharacterGrid {
+            grid,
+            semantic_regions,
+            vision_metadata: vision_context,
+            confidence_map,
+        })
+    }
+
+    fn calculate_optimal_grid_dimensions(&self, vision_context: &VisionContext) -> (usize, usize) {
+        let layout = &vision_context.layout_structure;
+
+        // Use AI-detected text bounds for optimal sizing
+        let text_width = layout.text_bounds.x1 - layout.text_bounds.x0;
+        let text_height = layout.text_bounds.y1 - layout.text_bounds.y0;
+
+        // Estimate character dimensions based on analyzed font metrics
+        let char_width = self.extraction_sensor.font_analyzer.avg_char_width;
+        let char_height = self.extraction_sensor.font_analyzer.avg_char_height;
+
+        let grid_width = (text_width / char_width).ceil() as usize;
+        let grid_height = (text_height / char_height).ceil() as usize;
+
+        (grid_width.max(80), grid_height.max(24)) // Minimum sensible grid size
+    }
+
+    fn vision_to_grid_coordinates(
+        &self,
+        vision_bbox: &FerruleBBox,
+        grid_dims: &(usize, usize),
+    ) -> (usize, usize) {
+        // Transform vision coordinates to grid coordinates
+        // This is a simplified transformation - could be enhanced with perspective correction
+        let char_width = self.extraction_sensor.font_analyzer.avg_char_width;
+        let char_height = self.extraction_sensor.font_analyzer.avg_char_height;
+
+        let grid_x = ((vision_bbox.x0 / char_width).floor() as usize).min(grid_dims.0 - 1);
+        let grid_y = ((vision_bbox.y0 / char_height).floor() as usize).min(grid_dims.1 - 1);
+
+        (grid_x, grid_y)
+    }
+
+    fn place_text_with_font_awareness(
+        &self,
+        grid: &mut CharacterMatrix,
+        confidence_map: &mut Vec<Vec<f32>>,
+        region: &FusedTextRegion,
+        text: String,
+        grid_coords: (usize, usize),
+    ) -> Result<()> {
+        let (start_col, start_row) = grid_coords;
+        let mut current_col = start_col;
+        let mut current_row = start_row;
+
+        for ch in text.chars() {
+            if current_col >= grid.width || current_row >= grid.height {
+                break;
+            }
+
+            // Handle newlines and word wrapping
+            if ch == '\n' {
+                current_row += 1;
+                current_col = start_col;
+                continue;
+            }
+
+            // Place character in grid
+            if current_row < grid.matrix.len() && current_col < grid.matrix[current_row].len() {
+                grid.matrix[current_row][current_col] = ch;
+                confidence_map[current_row][current_col] = region.confidence;
+            }
+
+            current_col += 1;
+
+            // Word wrap at grid boundary
+            if current_col >= grid.width {
+                current_row += 1;
+                current_col = start_col;
+            }
+        }
+
+        Ok(())
+    }
+}
+
+impl VisionSensor {
+    async fn analyze_document(&self, pdf_path: &Path) -> Result<VisionContext> {
+        tracing::info!("Running ferrules vision analysis on: {:?}", pdf_path);
+
+        // Run ferrules with AI acceleration
+        let output_dir = self.temp_dir.join("vision_output");
+        std::fs::create_dir_all(&output_dir)?;
+
+        let output = tokio::process::Command::new(&self.ferrules_path)
+            .arg(pdf_path)
+            .arg("--debug")
+            .arg("--coreml") // Enable Apple CoreML
+            .arg("--use-ane") // Apple Neural Engine acceleration
+            .arg("-o")
+            .arg(&output_dir)
+            .output()
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to run ferrules: {}", e))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(anyhow::anyhow!("Ferrules failed: {}", stderr));
+        }
+
+        // Find and parse ferrules output JSON
+        let json_files: Vec<_> = std::fs::read_dir(&output_dir)?
+            .filter_map(|entry| entry.ok())
+            .filter(|entry| {
+                entry
+                    .path()
+                    .extension()
+                    .and_then(|ext| ext.to_str())
+                    .map(|ext| ext == "json")
+                    .unwrap_or(false)
+            })
+            .collect();
+
+        if json_files.is_empty() {
+            return Err(anyhow::anyhow!("No ferrules output JSON found"));
+        }
+
+        let json_path = &json_files[0].path();
+        let json_content = std::fs::read_to_string(json_path)?;
+        let ferrule_doc: FerruleDocument = serde_json::from_str(&json_content)?;
+
+        self.parse_vision_context(ferrule_doc)
+    }
+
+    fn parse_vision_context(&self, ferrule_doc: FerruleDocument) -> Result<VisionContext> {
+        let mut text_regions = Vec::new();
+        let mut reading_order = Vec::new();
+        let mut semantic_hints = Vec::new();
+
+        // Parse ferrules blocks into text regions
+        for (index, block) in ferrule_doc.blocks.iter().enumerate() {
+            let text_region = VisionTextRegion {
+                bbox: block.bbox.clone(),
+                text: block.kind.text.clone(),
+                block_type: block.kind.block_type.clone(),
+                reading_index: index,
+                confidence: 0.95, // Ferrules provides high-confidence results
+            };
+            text_regions.push(text_region);
+
+            // Create reading path
+            reading_order.push(ReadingPath {
+                region_id: block.id,
+                sequence_order: index,
+                flow_direction: FlowDirection::LeftToRight, // Default flow
+            });
+
+            // Create semantic hint
+            let importance = match block.kind.block_type.as_str() {
+                "Title" => 1.0,
+                "TextBlock" => 0.8,
+                "ListBlock" => 0.7,
+                "Footer" => 0.3,
+                _ => 0.5,
+            };
+
+            semantic_hints.push(SemanticHint {
+                region_id: block.id,
+                semantic_type: block.kind.block_type.clone(),
+                importance,
+            });
+        }
+
+        // Calculate document layout
+        let page = ferrule_doc
+            .pages
+            .first()
+            .ok_or_else(|| anyhow::anyhow!("No pages found in ferrules output"))?;
+
+        let text_bounds = self.calculate_text_bounds(&text_regions);
+        let layout_structure = DocumentLayout {
+            page_width: page.width,
+            page_height: page.height,
+            column_count: 1, // Could be detected from layout analysis
+            text_bounds,
+        };
+
+        Ok(VisionContext {
+            text_regions,
+            layout_structure,
+            reading_order,
+            semantic_hints,
+        })
+    }
+
+    fn calculate_text_bounds(&self, text_regions: &[VisionTextRegion]) -> FerruleBBox {
+        if text_regions.is_empty() {
+            return FerruleBBox {
+                x0: 0.0,
+                y0: 0.0,
+                x1: 100.0,
+                y1: 100.0,
+            };
+        }
+
+        let min_x = text_regions
+            .iter()
+            .map(|r| r.bbox.x0)
+            .fold(f32::INFINITY, f32::min);
+        let min_y = text_regions
+            .iter()
+            .map(|r| r.bbox.y0)
+            .fold(f32::INFINITY, f32::min);
+        let max_x = text_regions
+            .iter()
+            .map(|r| r.bbox.x1)
+            .fold(f32::NEG_INFINITY, f32::max);
+        let max_y = text_regions
+            .iter()
+            .map(|r| r.bbox.y1)
+            .fold(f32::NEG_INFINITY, f32::max);
+
+        FerruleBBox {
+            x0: min_x,
+            y0: min_y,
+            x1: max_x,
+            y1: max_y,
+        }
+    }
+}
+
+impl ExtractionSensor {
+    fn extract_with_guidance(
+        &self,
+        pdf_path: &Path,
+        vision_context: &VisionContext,
+    ) -> Result<Vec<PreciseTextObject>> {
+        tracing::info!(
+            "Starting guided PDF extraction with {} vision regions",
+            vision_context.text_regions.len()
+        );
+
+        let document = self
+            .pdfium
+            .load_pdf_from_file(pdf_path, None)
+            .map_err(|e| anyhow::anyhow!("Failed to load PDF: {:?}", e))?;
+
+        let mut all_text_objects = Vec::new();
+
+        for page_index in 0..document.pages().len() {
+            let page = document.pages().get(page_index)?;
+            let page_height = page.height().value;
+
+            // Extract text objects with vision guidance
+            let text_page = page.text()?;
+            let text_segments = text_page.segments();
+
+            for segment in text_segments.iter() {
+                let bounds = segment.bounds();
+                let text = segment.text();
+                let font_size = bounds.top().value - bounds.bottom().value;
+
+                // Use vision context to validate and enhance extraction
+                if self.is_char_in_vision_regions(&bounds, vision_context, page_height) {
+                    // Extract each character from the segment text
+                    let segment_width = bounds.right().value - bounds.left().value;
+                    let char_count = text.chars().count() as f32;
+                    let avg_char_width = if char_count > 0.0 {
+                        segment_width / char_count
+                    } else {
+                        6.0
+                    };
+
+                    let mut current_x = bounds.left().value;
+                    for ch in text.chars() {
+                        all_text_objects.push(PreciseTextObject {
+                            text: ch.to_string(),
+                            bbox: PDFBBox {
+                                x0: current_x,
+                                y0: page_height - bounds.top().value,
+                                x1: current_x + avg_char_width,
+                                y1: page_height - bounds.bottom().value,
+                            },
+                            font_size,
+                            font_name: "extracted".to_string(),
+                            page_index: page_index as usize,
+                        });
+                        current_x += avg_char_width;
+                    }
+                }
+            }
+        }
+
+        tracing::info!(
+            "Guided extraction found {} text objects",
+            all_text_objects.len()
+        );
+        Ok(all_text_objects)
+    }
+
+    fn is_char_in_vision_regions(
+        &self,
+        char_bounds: &PdfRect,
+        vision_context: &VisionContext,
+        page_height: f32,
+    ) -> bool {
+        let char_x = char_bounds.left().value;
+        let char_y = page_height - char_bounds.top().value;
+
+        // Check if character overlaps with any vision-detected text region
+        vision_context.text_regions.iter().any(|region| {
+            char_x >= region.bbox.x0
+                && char_x <= region.bbox.x1
+                && char_y >= region.bbox.y0
+                && char_y <= region.bbox.y1
+        })
+    }
+}
+
+impl FusionSensor {
+    fn fuse_data(
+        &self,
+        vision_context: &VisionContext,
+        pdf_text: &[PreciseTextObject],
+    ) -> Result<FusedData> {
+        let mut fused_regions = Vec::new();
+
+        for (index, vision_region) in vision_context.text_regions.iter().enumerate() {
+            // Find PDF text objects that overlap with this vision region
+            let matching_pdf_objects = self
+                .spatial_matcher
+                .find_overlapping_text(&vision_region.bbox, pdf_text);
+
+            // Calculate confidence based on spatial and semantic matching
+            let confidence = self
+                .confidence_scorer
+                .calculate_fusion_confidence(vision_region, &matching_pdf_objects);
+
+            fused_regions.push(FusedTextRegion {
+                vision_bbox: vision_region.bbox.clone(),
+                pdf_text_objects: matching_pdf_objects,
+                semantic_type: vision_region.block_type.clone(),
+                confidence,
+                reading_order_index: index,
+            });
+        }
+
+        Ok(FusedData {
+            regions: fused_regions,
+        })
+    }
+}
+
+impl FontAnalyzer {
+    fn new() -> Self {
+        Self {
+            char_width_cache: HashMap::new(),
+            avg_char_width: 7.2,   // Default monospace character width
+            avg_char_height: 12.0, // Default character height
+        }
+    }
+}
+
+impl SpatialMatcher {
+    fn new() -> Self {
+        Self {
+            overlap_threshold: 0.1, // 10% overlap required
+            text_similarity_threshold: 0.8,
+        }
+    }
+
+    fn find_overlapping_text(
+        &self,
+        vision_bbox: &FerruleBBox,
+        pdf_objects: &[PreciseTextObject],
+    ) -> Vec<PreciseTextObject> {
+        pdf_objects
+            .iter()
+            .filter(|obj| self.bboxes_overlap(&obj.bbox, vision_bbox))
+            .cloned()
+            .collect()
+    }
+
+    fn bboxes_overlap(&self, pdf_bbox: &PDFBBox, vision_bbox: &FerruleBBox) -> bool {
+        let overlap_x =
+            (pdf_bbox.x1.min(vision_bbox.x1) - pdf_bbox.x0.max(vision_bbox.x0)).max(0.0);
+        let overlap_y =
+            (pdf_bbox.y1.min(vision_bbox.y1) - pdf_bbox.y0.max(vision_bbox.y0)).max(0.0);
+        let overlap_area = overlap_x * overlap_y;
+
+        let pdf_area = (pdf_bbox.x1 - pdf_bbox.x0) * (pdf_bbox.y1 - pdf_bbox.y0);
+        let vision_area = (vision_bbox.x1 - vision_bbox.x0) * (vision_bbox.y1 - vision_bbox.y0);
+        let min_area = pdf_area.min(vision_area);
+
+        min_area > 0.0 && (overlap_area / min_area) >= self.overlap_threshold
+    }
+}
+
+impl ConfidenceScorer {
+    fn new() -> Self {
+        Self {
+            spatial_weight: 0.5,
+            text_weight: 0.3,
+            semantic_weight: 0.2,
+        }
+    }
+
+    fn calculate_fusion_confidence(
+        &self,
+        vision_region: &VisionTextRegion,
+        pdf_objects: &[PreciseTextObject],
+    ) -> f32 {
+        if pdf_objects.is_empty() {
+            return 0.1; // Low confidence if no PDF text found
+        }
+
+        // Spatial confidence: based on overlap quality
+        let spatial_confidence = self.calculate_spatial_confidence(vision_region, pdf_objects);
+
+        // Text confidence: based on text content similarity (simplified)
+        let text_confidence = if !vision_region.text.is_empty() {
+            0.8
+        } else {
+            0.5
+        };
+
+        // Semantic confidence: based on vision region type
+        let semantic_confidence = match vision_region.block_type.as_str() {
+            "Title" => 0.95,
+            "TextBlock" => 0.9,
+            "ListBlock" => 0.85,
+            _ => 0.7,
+        };
+
+        self.spatial_weight * spatial_confidence
+            + self.text_weight * text_confidence
+            + self.semantic_weight * semantic_confidence
+    }
+
+    fn calculate_spatial_confidence(
+        &self,
+        _vision_region: &VisionTextRegion,
+        pdf_objects: &[PreciseTextObject],
+    ) -> f32 {
+        // Simplified spatial confidence calculation
+        (pdf_objects.len() as f32 / 10.0).min(1.0) // More PDF objects = higher confidence
+    }
+}
+
+// ============= END AI SENSOR STACK =============
 
 #[derive(Default)]
 struct ExtractionResult {
@@ -885,12 +1834,18 @@ struct ExtractionResult {
     editable_matrix: Option<Vec<Vec<char>>>,
     matrix_dirty: bool,
     original_matrix: Option<Vec<Vec<char>>>, // Keep track of original for comparison
+    // NEW: Semantic document for multi-modal fusion
+    semantic_document: Option<SemanticDocument>,
 }
 
 // Using spatial-semantic engine types instead of old ferrules types
 
-#[derive(Clone)]
+fn default_color() -> Color32 {
+    Color32::GREEN
+}
+
 #[allow(dead_code)] // Struct for future bounding box features
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct BoundingBox {
     x: f32,
     y: f32,
@@ -898,6 +1853,7 @@ struct BoundingBox {
     height: f32,
     label: String,
     confidence: f32,
+    #[serde(skip, default = "default_color")]
     color: Color32,
 }
 
@@ -928,7 +1884,11 @@ struct Chonker5App {
     runtime: Arc<tokio::runtime::Runtime>,
 
     // Channel for async results
-    vision_receiver: Option<mpsc::Receiver<Result<CharacterMatrix, String>>>,
+    vision_receiver: Option<mpsc::Receiver<Result<SemanticDocument, String>>>,
+
+    // File dialog state to prevent hanging
+    file_dialog_receiver: Option<std::sync::mpsc::Receiver<Option<PathBuf>>>,
+    file_dialog_pending: bool,
 
     // Log messages
     log_messages: Vec<String>,
@@ -960,6 +1920,7 @@ enum ExtractionTab {
     Pdf,
     Matrix,
     Debug,
+    Semantic,
 }
 
 #[derive(PartialEq, Clone, Copy)]
@@ -1018,6 +1979,8 @@ impl Chonker5App {
             ferrules_binary: None,
             runtime,
             vision_receiver: None,
+            file_dialog_receiver: None,
+            file_dialog_pending: false,
             log_messages: vec![
                 "🐹 CHONKER 5 Ready!".to_string(),
                 "📌 Character Matrix Engine: PDF → Char Matrix → Vision Boxes → Text Mapping"
@@ -1028,7 +1991,13 @@ impl Chonker5App {
             show_bounding_boxes: true,
             selected_page: 0,
             split_ratio: 0.5, // Start with 50/50 split
-            matrix_engine: CharacterMatrixEngine::new(),
+            matrix_engine: CharacterMatrixEngine::with_ai_sensors().unwrap_or_else(|e| {
+                tracing::warn!(
+                    "Failed to initialize AI sensors: {}, falling back to basic engine",
+                    e
+                );
+                CharacterMatrixEngine::new()
+            }),
             selected_cell: None,
             pdf_dark_mode: false,
             focused_pane: FocusedPane::PdfView,
@@ -1084,48 +2053,147 @@ impl Chonker5App {
     }
 
     fn open_file(&mut self, ctx: &egui::Context) {
-        if let Some(path) = rfd::FileDialog::new()
-            .add_filter("PDF files", &["pdf"])
-            .pick_file()
-        {
-            self.pdf_path = Some(path.clone());
-            self.current_page = 0;
-            self.pdf_texture = None;
+        // If file dialog is already pending, don't start another one
+        if self.file_dialog_pending {
+            self.log("📂 File dialog already in progress...");
+            return;
+        }
 
-            // Get PDF info
-            match self.get_pdf_info(&path) {
-                Ok(pages) => {
-                    self.total_pages = pages;
-                    self.log(&format!(
-                        "📄 Loaded PDF: {} ({} pages)",
-                        path.display(),
-                        pages
-                    ));
+        // Start async file dialog to prevent hanging
+        self.log("📂 Opening file dialog...");
+        self.file_dialog_pending = true;
 
-                    // Set default page range for large PDFs
-                    if pages > 20 {
-                        self.page_range = "1-10".to_string();
-                        self.log("📄 Large PDF detected - Default page range set to 1-10");
-                    } else {
-                        self.page_range.clear();
+        let ctx_clone = ctx.clone();
+        let (tx, rx) = std::sync::mpsc::channel();
+        self.file_dialog_receiver = Some(rx);
+
+        // Spawn file dialog in separate thread
+        std::thread::spawn(move || {
+            let result = rfd::FileDialog::new()
+                .add_filter("PDF files", &["pdf"])
+                .pick_file();
+
+            let _ = tx.send(result);
+            ctx_clone.request_repaint();
+        });
+    }
+
+    fn process_file_dialog_result(&mut self, ctx: &egui::Context) {
+        // Check for file dialog result without blocking
+        if let Some(receiver) = &self.file_dialog_receiver {
+            if let Ok(file_result) = receiver.try_recv() {
+                self.file_dialog_pending = false;
+                self.file_dialog_receiver = None;
+
+                match file_result {
+                    Some(path) => {
+                        self.log(&format!("📂 Selected file: {}", path.display()));
+
+                        // Validate file exists and is readable
+                        if !path.exists() {
+                            self.log("❌ File does not exist");
+                            return;
+                        }
+
+                        if !path.is_file() {
+                            self.log("❌ Selection is not a file");
+                            return;
+                        }
+
+                        // Check file extension
+                        if path.extension().and_then(|ext| ext.to_str()) != Some("pdf") {
+                            self.log("❌ File is not a PDF");
+                            return;
+                        }
+
+                        self.pdf_path = Some(path.clone());
+                        self.current_page = 0;
+                        self.pdf_texture = None;
+
+                        // Get PDF info with better error handling
+                        match self.get_pdf_info(&path) {
+                            Ok(pages) => {
+                                self.total_pages = pages;
+                                self.log(&format!(
+                                    "✅ Loaded PDF: {} ({} pages)",
+                                    path.display(),
+                                    pages
+                                ));
+
+                                // Set default page range for large PDFs
+                                if pages > 20 {
+                                    self.page_range = "1-10".to_string();
+                                    self.log(
+                                        "📄 Large PDF detected - Default page range set to 1-10",
+                                    );
+                                } else {
+                                    self.page_range.clear();
+                                }
+
+                                // Try to render the first page (non-blocking)
+                                if let Err(e) = self.safe_render_current_page(ctx) {
+                                    self.log(&format!("⚠️ Could not render page: {}", e));
+                                }
+
+                                // AUTOMATICALLY EXTRACT CHARACTER MATRIX - WITH SAFETY
+                                self.log("🚀 Starting character matrix extraction...");
+                                if let Err(e) = self.safe_extract_character_matrix(ctx) {
+                                    self.log(&format!("❌ Matrix extraction failed: {}", e));
+                                } else {
+                                    // Auto-switch to semantic view to show multi-modal fusion results
+                                    self.active_tab = ExtractionTab::Semantic;
+                                }
+                            }
+                            Err(e) => {
+                                self.log(&format!("❌ Failed to load PDF: {}", e));
+                                self.pdf_path = None; // Clear invalid path
+                            }
+                        }
                     }
-
-                    // Render the first page
-                    self.render_current_page(ctx);
-
-                    // AUTOMATICALLY EXTRACT CHARACTER MATRIX - ONE STEP PROCESS
-                    self.log("🚀 Auto-extracting character matrix...");
-                    self.extract_character_matrix(ctx);
-                    self.active_tab = ExtractionTab::Matrix;
-                }
-                Err(e) => {
-                    self.log(&format!("❌ Failed to load PDF: {}", e));
+                    None => {
+                        self.log("📂 File selection cancelled");
+                    }
                 }
             }
         }
     }
 
+    /// Safe wrapper for rendering current page
+    fn safe_render_current_page(&mut self, ctx: &egui::Context) -> Result<()> {
+        match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            self.render_current_page(ctx);
+        })) {
+            Ok(_) => Ok(()),
+            Err(_) => Err(anyhow::anyhow!("Page rendering panicked")),
+        }
+    }
+
+    /// Safe wrapper for character matrix extraction
+    fn safe_extract_character_matrix(&mut self, ctx: &egui::Context) -> Result<()> {
+        // Check prerequisites
+        if self.pdf_path.is_none() {
+            return Err(anyhow::anyhow!("No PDF loaded"));
+        }
+
+        // Check if channel already exists
+        if self.vision_receiver.is_some() {
+            return Err(anyhow::anyhow!("Extraction already in progress"));
+        }
+
+        match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            self.extract_character_matrix(ctx);
+        })) {
+            Ok(_) => Ok(()),
+            Err(_) => Err(anyhow::anyhow!("Matrix extraction panicked")),
+        }
+    }
+
     fn get_pdf_info(&self, path: &PathBuf) -> Result<usize> {
+        // Check if mutool is available first
+        if Command::new("mutool").arg("--version").output().is_err() {
+            return Err(anyhow::anyhow!("mutool not found - install mupdf-tools"));
+        }
+
         let output = Command::new("mutool").arg("info").arg(path).output()?;
 
         let info = String::from_utf8_lossy(&output.stdout);
@@ -1246,36 +2314,648 @@ impl Chonker5App {
         self.vision_receiver = Some(rx);
 
         // Check for ferrules binary
-        let ferrules_binary = self.ferrules_binary.clone();
+        let _ferrules_binary = self.ferrules_binary.clone();
 
-        // Spawn async task
+        // Process PDF with multi-modal fusion (PDFium + ferrules)
+        let ctx_clone = ctx.clone();
         runtime.spawn(async move {
-            let result = async {
-                let engine = CharacterMatrixEngine::new();
+            // Create semantic document with multi-modal fusion
+            let result = match Self::create_semantic_document(pdf_path).await {
+                Ok(semantic_doc) => {
+                    tracing::info!(
+                        "Semantic document created with {} blocks, {} tables, {:.1}% confidence",
+                        semantic_doc.semantic_blocks.len(),
+                        semantic_doc.tables.len(),
+                        semantic_doc.fusion_confidence * 100.0
+                    );
 
-                // Process PDF with enhanced approach
-                let character_matrix = if let Some(ferrules_path) = &ferrules_binary {
-                    // Use ferrules if available
-                    engine
-                        .process_pdf_with_ferrules(&pdf_path, ferrules_path)
-                        .map_err(|e| format!("Ferrules processing failed: {}", e))?
-                } else {
-                    // Fallback to enhanced processing without ferrules
-                    engine
-                        .process_pdf(&pdf_path)
-                        .map_err(|e| format!("Character matrix processing failed: {}", e))?
-                };
-
-                Ok::<_, String>(character_matrix)
-            }
-            .await;
+                    // Return full semantic document
+                    Ok(semantic_doc)
+                }
+                Err(e) => Err(e),
+            };
 
             // Send result through channel
-            let _ = tx.send(result).await;
+            if let Err(e) = tx.send(result).await {
+                tracing::error!("Failed to send matrix result: {}", e);
+            }
 
             // Update UI on main thread
-            ctx.request_repaint();
+            ctx_clone.request_repaint();
         });
+    }
+
+    /// Multi-modal fusion: Combine PDFium precision with ferrules spatial intelligence
+    async fn create_semantic_document(pdf_path: PathBuf) -> Result<SemanticDocument, String> {
+        tracing::info!(
+            "Starting multi-modal semantic document creation for: {}",
+            pdf_path.display()
+        );
+
+        // Step 1: Get basic character matrix from PDFium (fast)
+        let character_matrix = Self::process_pdf_async(pdf_path.clone()).await?;
+
+        // Step 2: Run ferrules vision analysis in parallel (if available)
+        let vision_analysis = Self::run_ferrules_vision_analysis(pdf_path.clone()).await;
+
+        // Step 3: Fuse PDFium text objects with ferrules spatial regions
+        match vision_analysis {
+            Ok(vision_context) => {
+                tracing::info!("Fusing PDFium + ferrules data");
+                Self::fuse_multimodal_data(character_matrix, vision_context).await
+            }
+            Err(e) => {
+                tracing::warn!(
+                    "Vision analysis failed: {}, using PDFium-only semantic structure",
+                    e
+                );
+                Self::create_fallback_semantic_document(character_matrix).await
+            }
+        }
+    }
+
+    /// Run ferrules vision analysis asynchronously
+    async fn run_ferrules_vision_analysis(pdf_path: PathBuf) -> Result<VisionContext, String> {
+        // Run ferrules command directly without AISensorStack to avoid Send trait issues
+        tracing::info!("Running ferrules vision analysis on: {:?}", pdf_path);
+
+        // Check if ferrules binary exists
+        let ferrules_path = std::env::current_dir().unwrap_or_default().join("ferrules");
+
+        if !ferrules_path.exists() {
+            tracing::warn!("Ferrules binary not found, using fallback");
+            return Ok(Self::create_fallback_vision_context());
+        }
+
+        // Run ferrules command asynchronously
+        let output = tokio::process::Command::new(&ferrules_path)
+            .arg(&pdf_path)
+            .arg("--json")
+            .output()
+            .await
+            .map_err(|e| format!("Failed to run ferrules: {}", e))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(format!("Ferrules failed: {}", stderr));
+        }
+
+        // Parse ferrules output
+        let output_str = String::from_utf8_lossy(&output.stdout);
+        Self::parse_ferrules_output(&output_str)
+            .ok_or_else(|| "Failed to parse ferrules output".to_string())
+    }
+
+    /// Create a fallback vision context when ferrules is not available
+    fn create_fallback_vision_context() -> VisionContext {
+        VisionContext {
+            text_regions: Vec::new(),
+            layout_structure: DocumentLayout {
+                page_width: 612.0,
+                page_height: 792.0,
+                column_count: 1,
+                text_bounds: FerruleBBox {
+                    x0: 0.0,
+                    y0: 0.0,
+                    x1: 612.0,
+                    y1: 792.0,
+                },
+            },
+            reading_order: Vec::new(),
+            semantic_hints: Vec::new(),
+        }
+    }
+
+    /// Parse ferrules JSON output into VisionContext
+    fn parse_ferrules_output(_output: &str) -> Option<VisionContext> {
+        // For now, return a simple parsed context
+        // TODO: Implement proper JSON parsing when ferrules output format is known
+        Some(VisionContext {
+            text_regions: Vec::new(),
+            layout_structure: DocumentLayout {
+                page_width: 612.0,
+                page_height: 792.0,
+                column_count: 1,
+                text_bounds: FerruleBBox {
+                    x0: 50.0,
+                    y0: 50.0,
+                    x1: 562.0,
+                    y1: 742.0,
+                },
+            },
+            reading_order: Vec::new(),
+            semantic_hints: Vec::new(),
+        })
+    }
+
+    /// Fuse PDFium text objects with ferrules spatial regions
+    async fn fuse_multimodal_data(
+        character_matrix: CharacterMatrix,
+        vision_context: VisionContext,
+    ) -> Result<SemanticDocument, String> {
+        tracing::info!(
+            "Fusing {} text regions with {} vision regions",
+            character_matrix.text_regions.len(),
+            vision_context.text_regions.len()
+        );
+
+        let mut semantic_blocks = Vec::new();
+        let mut tables = Vec::new();
+        let mut block_id = 0;
+
+        // Correlate vision regions with character matrix regions
+        for vision_region in &vision_context.text_regions {
+            // Convert bounding boxes to unified format for comparison
+            let vision_bbox = Self::ferrule_bbox_to_bbox(&vision_region.bbox);
+
+            // Find overlapping character matrix regions
+            let overlapping_text_regions: Vec<&TextRegion> = character_matrix
+                .text_regions
+                .iter()
+                .filter(|text_region| {
+                    let text_bbox = Self::char_bbox_to_bbox(&text_region.bbox);
+                    Self::regions_overlap(&vision_bbox, &text_bbox)
+                })
+                .collect();
+
+            if !overlapping_text_regions.is_empty() {
+                // Extract text content from overlapping regions
+                let content = overlapping_text_regions
+                    .iter()
+                    .map(|region| {
+                        Self::extract_text_from_grid_region(&character_matrix.matrix, region)
+                    })
+                    .collect::<Vec<_>>()
+                    .join(" ");
+
+                // Convert vision bbox to character grid coordinates
+                let grid_region = Self::bbox_to_grid_region(&vision_bbox, &character_matrix);
+
+                // Determine block type from vision analysis
+                let block_type = Self::classify_block_type(&content, &vision_bbox);
+
+                // Create semantic block
+                let semantic_block = SemanticBlock {
+                    id: block_id,
+                    block_type: block_type.clone(),
+                    bbox: vision_bbox.clone(),
+                    content: content.clone(),
+                    confidence: vision_region.confidence,
+                    pdfium_text_objects: Self::extract_pdfium_objects(&overlapping_text_regions),
+                    grid_region,
+                };
+
+                // If it's a table, create detailed table structure
+                if matches!(block_type, BlockType::Table) {
+                    if let Ok(table) =
+                        Self::analyze_table_structure(&semantic_block, &character_matrix).await
+                    {
+                        tables.push(table);
+                    }
+                }
+
+                semantic_blocks.push(semantic_block);
+                block_id += 1;
+            }
+        }
+
+        // Generate reading order based on spatial layout
+        let reading_order = Self::determine_reading_order(&semantic_blocks);
+
+        // Create document layout info
+        let document_layout = DocumentLayoutInfo {
+            page_width: character_matrix.char_width * character_matrix.width as f32,
+            page_height: character_matrix.char_height * character_matrix.height as f32,
+            columns: Self::detect_column_count(&semantic_blocks),
+            has_tables: !tables.is_empty(),
+            has_figures: semantic_blocks
+                .iter()
+                .any(|b| matches!(b.block_type, BlockType::Figure)),
+        };
+
+        let fusion_confidence =
+            Self::calculate_fusion_confidence(&semantic_blocks, &vision_context);
+
+        Ok(SemanticDocument {
+            character_matrix,
+            semantic_blocks,
+            tables,
+            reading_order,
+            document_layout,
+            fusion_confidence,
+        })
+    }
+
+    /// Async PDF processing that doesn't block the main thread
+    async fn process_pdf_async(pdf_path: PathBuf) -> Result<CharacterMatrix, String> {
+        // Run CPU-intensive PDF processing in blocking thread pool
+        let result = tokio::task::spawn_blocking(move || {
+            tracing::info!("Starting async PDF processing: {}", pdf_path.display());
+
+            // Use timeout to prevent infinite hanging
+            let start_time = std::time::Instant::now();
+            let timeout = std::time::Duration::from_secs(60); // 1 minute max
+
+            // Since we're in spawn_blocking, we need to use a runtime for async operations
+            let rt = tokio::runtime::Handle::current();
+
+            // Try simple text extraction first (much faster and more reliable)
+            match rt.block_on(Self::extract_simple_text_matrix(&pdf_path)) {
+                Ok(matrix) => {
+                    tracing::info!(
+                        "Simple text extraction successful in {:?}",
+                        start_time.elapsed()
+                    );
+                    Ok(matrix)
+                }
+                Err(simple_err) => {
+                    tracing::warn!("Simple extraction failed: {}, trying PDFium", simple_err);
+
+                    // Check timeout
+                    if start_time.elapsed() > timeout {
+                        return Err("PDF processing timeout - file too complex".to_string());
+                    }
+
+                    // Fallback to PDFium (synchronous but in blocking thread)
+                    let engine = CharacterMatrixEngine::new(); // Basic engine only to avoid async issues
+                    engine
+                        .process_pdf(&pdf_path)
+                        .map_err(|e| format!("PDFium processing failed: {}", e))
+                }
+            }
+        })
+        .await;
+
+        match result {
+            Ok(pdf_result) => pdf_result,
+            Err(join_err) => Err(format!("PDF processing task failed: {}", join_err)),
+        }
+    }
+
+    /// Simple text extraction using mutool (faster and more reliable)
+    async fn extract_simple_text_matrix(pdf_path: &PathBuf) -> Result<CharacterMatrix, String> {
+        // Use mutool to extract text with coordinates
+        let output = tokio::process::Command::new("mutool")
+            .arg("draw")
+            .arg("-F")
+            .arg("text")
+            .arg(pdf_path)
+            .arg("1") // First page only for now
+            .output()
+            .await
+            .map_err(|e| format!("Failed to run mutool: {}", e))?;
+
+        if !output.status.success() {
+            return Err("Mutool extraction failed".to_string());
+        }
+
+        let text = String::from_utf8_lossy(&output.stdout);
+
+        // Create simple character matrix from extracted text
+        let lines: Vec<&str> = text.lines().collect();
+        let max_width = lines.iter().map(|line| line.len()).max().unwrap_or(80);
+        let height = lines.len().max(25);
+
+        let mut matrix = vec![vec![' '; max_width]; height];
+
+        for (y, line) in lines.iter().enumerate() {
+            if y < height {
+                for (x, ch) in line.chars().enumerate() {
+                    if x < max_width {
+                        matrix[y][x] = ch;
+                    }
+                }
+            }
+        }
+
+        Ok(CharacterMatrix {
+            width: max_width,
+            height,
+            matrix,
+            text_regions: Vec::new(), // Simple extraction doesn't detect regions
+            original_text: lines.iter().map(|s| s.to_string()).collect(),
+            char_width: 8.0,
+            char_height: 12.0,
+        })
+    }
+
+    // ============= MULTI-MODAL FUSION HELPER FUNCTIONS =============
+
+    /// Convert FerruleBBox to unified BoundingBox
+    fn ferrule_bbox_to_bbox(ferrule_bbox: &FerruleBBox) -> BoundingBox {
+        BoundingBox {
+            x: ferrule_bbox.x0,
+            y: ferrule_bbox.y0,
+            width: ferrule_bbox.x1 - ferrule_bbox.x0,
+            height: ferrule_bbox.y1 - ferrule_bbox.y0,
+            label: "ferrules".to_string(),
+            confidence: 1.0,
+            color: Color32::GREEN,
+        }
+    }
+
+    /// Convert CharBBox to unified BoundingBox
+    fn char_bbox_to_bbox(char_bbox: &CharBBox) -> BoundingBox {
+        BoundingBox {
+            x: char_bbox.x as f32,
+            y: char_bbox.y as f32,
+            width: char_bbox.width as f32,
+            height: char_bbox.height as f32,
+            label: "pdfium".to_string(),
+            confidence: 1.0,
+            color: Color32::BLUE,
+        }
+    }
+
+    /// Check if two bounding boxes overlap spatially
+    fn regions_overlap(bbox1: &BoundingBox, bbox2: &BoundingBox) -> bool {
+        let bbox1_x1 = bbox1.x + bbox1.width;
+        let bbox1_y1 = bbox1.y + bbox1.height;
+        let bbox2_x1 = bbox2.x + bbox2.width;
+        let bbox2_y1 = bbox2.y + bbox2.height;
+
+        let x_overlap = bbox1.x.max(bbox2.x) < bbox1_x1.min(bbox2_x1);
+        let y_overlap = bbox1.y.max(bbox2.y) < bbox1_y1.min(bbox2_y1);
+        x_overlap && y_overlap
+    }
+
+    /// Extract text content from a character grid region
+    fn extract_text_from_grid_region(matrix: &[Vec<char>], region: &TextRegion) -> String {
+        let mut content = String::new();
+        // Convert CharBBox to unified BoundingBox for consistent access
+        let bbox = Self::char_bbox_to_bbox(&region.bbox);
+        let start_y = (bbox.y as usize).min(matrix.len().saturating_sub(1));
+        let end_y = ((bbox.y + bbox.height) as usize).min(matrix.len());
+
+        for y in start_y..end_y {
+            if y < matrix.len() {
+                let start_x = (bbox.x as usize).min(matrix[y].len().saturating_sub(1));
+                let end_x = ((bbox.x + bbox.width) as usize).min(matrix[y].len());
+
+                for x in start_x..end_x {
+                    if x < matrix[y].len() {
+                        content.push(matrix[y][x]);
+                    }
+                }
+                content.push('\n');
+            }
+        }
+        content.trim().to_string()
+    }
+
+    /// Convert PDF bounding box to character grid coordinates
+    fn bbox_to_grid_region(bbox: &BoundingBox, matrix: &CharacterMatrix) -> GridRegion {
+        let start_x = ((bbox.x / matrix.char_width) as usize).min(matrix.width.saturating_sub(1));
+        let start_y = ((bbox.y / matrix.char_height) as usize).min(matrix.height.saturating_sub(1));
+        let end_x = (((bbox.x + bbox.width) / matrix.char_width) as usize).min(matrix.width);
+        let end_y = (((bbox.y + bbox.height) / matrix.char_height) as usize).min(matrix.height);
+
+        GridRegion {
+            start_x,
+            start_y,
+            end_x,
+            end_y,
+        }
+    }
+
+    /// Classify block type based on content and spatial properties
+    fn classify_block_type(content: &str, bbox: &BoundingBox) -> BlockType {
+        let area = bbox.width * bbox.height;
+        let words = content.split_whitespace().count();
+
+        // Simple heuristics for block classification
+        if content.to_uppercase() == content && words <= 10 {
+            BlockType::Title
+        } else if content.ends_with(':') && words <= 5 {
+            BlockType::Heading
+        } else if content.contains('\t') || content.matches('|').count() > 2 {
+            BlockType::Table
+        } else if content.starts_with('-') || content.starts_with('•') {
+            BlockType::List
+        } else if area < 1000.0 && words <= 3 {
+            BlockType::Caption
+        } else if bbox.y < 50.0 {
+            BlockType::Header
+        } else if (bbox.y + bbox.height) > 700.0 {
+            BlockType::Footer
+        } else {
+            BlockType::Paragraph
+        }
+    }
+
+    /// Extract PDFium text objects from text regions
+    fn extract_pdfium_objects(text_regions: &[&TextRegion]) -> Vec<PdfiumTextObject> {
+        text_regions
+            .iter()
+            .map(|region| {
+                // Convert CharBBox to unified format for consistent access
+                let bbox = Self::char_bbox_to_bbox(&region.bbox);
+                PdfiumTextObject {
+                    text: region.text_content.clone(),
+                    x: bbox.x,
+                    y: bbox.y,
+                    width: bbox.width,
+                    height: bbox.height,
+                    font_size: 12.0, // Default, would need PDFium extraction for actual size
+                    font_name: "Unknown".to_string(),
+                }
+            })
+            .collect()
+    }
+
+    /// Analyze table structure from semantic block
+    async fn analyze_table_structure(
+        block: &SemanticBlock,
+        _matrix: &CharacterMatrix,
+    ) -> Result<TableStructure, String> {
+        // Simple table analysis - detect rows and columns
+        let content = &block.content;
+        let lines: Vec<&str> = content.lines().collect();
+        let rows = lines.len();
+
+        // Estimate columns by looking for consistent separators
+        let cols = lines
+            .iter()
+            .map(|line| line.matches('\t').count() + line.matches('|').count() + 1)
+            .max()
+            .unwrap_or(1);
+
+        let mut cells = Vec::new();
+        for (row_idx, line) in lines.iter().enumerate() {
+            let mut row_cells = Vec::new();
+            let cell_contents: Vec<&str> = if line.contains('\t') {
+                line.split('\t').collect()
+            } else if line.contains('|') {
+                line.split('|').collect()
+            } else {
+                vec![*line]
+            };
+
+            for (col_idx, cell_content) in cell_contents.iter().enumerate() {
+                let cell_type = if row_idx == 0 {
+                    CellType::Header
+                } else {
+                    CellType::Data
+                };
+                let cell_bbox = BoundingBox {
+                    x: block.bbox.x + (col_idx as f32 * block.bbox.width / cols as f32),
+                    y: block.bbox.y + (row_idx as f32 * block.bbox.height / rows as f32),
+                    width: block.bbox.width / cols as f32,
+                    height: block.bbox.height / rows as f32,
+                    label: format!("cell_{}_{}", row_idx, col_idx),
+                    confidence: 1.0,
+                    color: Color32::LIGHT_BLUE,
+                };
+
+                row_cells.push(TableCell {
+                    content: cell_content.trim().to_string(),
+                    bbox: cell_bbox,
+                    cell_type,
+                });
+            }
+            cells.push(row_cells);
+        }
+
+        let headers = if !cells.is_empty() {
+            cells[0].iter().map(|cell| cell.content.clone()).collect()
+        } else {
+            Vec::new()
+        };
+
+        Ok(TableStructure {
+            id: block.id,
+            bbox: block.bbox.clone(),
+            rows,
+            cols,
+            cells,
+            headers,
+        })
+    }
+
+    /// Determine reading order based on spatial layout
+    fn determine_reading_order(blocks: &[SemanticBlock]) -> Vec<usize> {
+        let mut indexed_blocks: Vec<(usize, &SemanticBlock)> = blocks.iter().enumerate().collect();
+
+        // Sort by Y position (top to bottom), then X position (left to right)
+        indexed_blocks.sort_by(|(_, a), (_, b)| {
+            let y_cmp = a
+                .bbox
+                .y
+                .partial_cmp(&b.bbox.y)
+                .unwrap_or(std::cmp::Ordering::Equal);
+            if y_cmp == std::cmp::Ordering::Equal {
+                a.bbox
+                    .x
+                    .partial_cmp(&b.bbox.x)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            } else {
+                y_cmp
+            }
+        });
+
+        indexed_blocks.into_iter().map(|(idx, _)| idx).collect()
+    }
+
+    /// Detect number of columns in document layout
+    fn detect_column_count(blocks: &[SemanticBlock]) -> usize {
+        if blocks.is_empty() {
+            return 1;
+        }
+
+        // Group blocks by approximate X positions
+        let mut x_positions: Vec<f32> = blocks.iter().map(|b| b.bbox.x).collect();
+        x_positions.sort_by(|a, b| a.partial_cmp(b).unwrap());
+
+        // Count distinct column positions (with tolerance)
+        let mut columns = 1;
+        let mut last_x = x_positions[0];
+        const COLUMN_TOLERANCE: f32 = 50.0;
+
+        for &x in &x_positions[1..] {
+            if (x - last_x).abs() > COLUMN_TOLERANCE {
+                columns += 1;
+                last_x = x;
+            }
+        }
+
+        columns.min(3) // Cap at 3 columns for sanity
+    }
+
+    /// Calculate fusion confidence based on alignment between vision and text data
+    fn calculate_fusion_confidence(
+        blocks: &[SemanticBlock],
+        vision_context: &VisionContext,
+    ) -> f32 {
+        if blocks.is_empty() || vision_context.text_regions.is_empty() {
+            return 0.0;
+        }
+
+        let matched_regions = blocks.len();
+        let total_vision_regions = vision_context.text_regions.len();
+        let coverage_ratio = matched_regions as f32 / total_vision_regions as f32;
+
+        let avg_block_confidence: f32 =
+            blocks.iter().map(|b| b.confidence).sum::<f32>() / blocks.len() as f32;
+
+        // Combine coverage and individual block confidence
+        (coverage_ratio * 0.6 + avg_block_confidence * 0.4).min(1.0)
+    }
+
+    /// Create fallback semantic document when ferrules analysis fails
+    async fn create_fallback_semantic_document(
+        character_matrix: CharacterMatrix,
+    ) -> Result<SemanticDocument, String> {
+        tracing::info!("Creating fallback semantic document from PDFium-only data");
+
+        // Convert text regions to semantic blocks with basic classification
+        let mut semantic_blocks = Vec::new();
+
+        for (id, region) in character_matrix.text_regions.iter().enumerate() {
+            let content = Self::extract_text_from_grid_region(&character_matrix.matrix, region);
+            let bbox = Self::char_bbox_to_bbox(&region.bbox);
+            let block_type = Self::classify_block_type(&content, &bbox);
+            let grid_region = Self::bbox_to_grid_region(&bbox, &character_matrix);
+
+            semantic_blocks.push(SemanticBlock {
+                id,
+                block_type,
+                bbox: bbox.clone(),
+                content,
+                confidence: 0.7, // Medium confidence for PDFium-only
+                pdfium_text_objects: vec![PdfiumTextObject {
+                    text: region.text_content.clone(),
+                    x: bbox.x,
+                    y: bbox.y,
+                    width: bbox.width,
+                    height: bbox.height,
+                    font_size: 12.0,
+                    font_name: "Unknown".to_string(),
+                }],
+                grid_region,
+            });
+        }
+
+        let reading_order = Self::determine_reading_order(&semantic_blocks);
+        let document_layout = DocumentLayoutInfo {
+            page_width: character_matrix.char_width * character_matrix.width as f32,
+            page_height: character_matrix.char_height * character_matrix.height as f32,
+            columns: Self::detect_column_count(&semantic_blocks),
+            has_tables: semantic_blocks
+                .iter()
+                .any(|b| matches!(b.block_type, BlockType::Table)),
+            has_figures: semantic_blocks
+                .iter()
+                .any(|b| matches!(b.block_type, BlockType::Figure)),
+        };
+
+        Ok(SemanticDocument {
+            character_matrix,
+            semantic_blocks,
+            tables: Vec::new(), // No table analysis without vision
+            reading_order,
+            document_layout,
+            fusion_confidence: 0.6, // Lower confidence for fallback
+        })
     }
 
     // Check if a cell is within the selection rectangle
@@ -1383,6 +3063,179 @@ impl Chonker5App {
                 }
             }
         }
+    }
+
+    fn render_semantic_document(&self, ui: &mut egui::Ui, semantic_doc: &SemanticDocument) {
+        // Create a rich visual display of the semantic document
+        ui.vertical(|ui| {
+            // Header with fusion confidence
+            ui.horizontal(|ui| {
+                ui.label(
+                    RichText::new("🧠 SEMANTIC DOCUMENT ANALYSIS")
+                        .color(TERM_HIGHLIGHT)
+                        .monospace()
+                        .size(14.0),
+                );
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.label(
+                        RichText::new(format!(
+                            "Fusion Confidence: {:.1}%",
+                            semantic_doc.fusion_confidence * 100.0
+                        ))
+                        .color(if semantic_doc.fusion_confidence > 0.8 {
+                            TERM_GREEN
+                        } else {
+                            TERM_YELLOW
+                        })
+                        .monospace(),
+                    );
+                });
+            });
+
+            ui.separator();
+
+            // Document statistics
+            ui.horizontal(|ui| {
+                ui.label(
+                    RichText::new(format!(
+                        "📊 {} semantic blocks",
+                        semantic_doc.semantic_blocks.len()
+                    ))
+                    .color(TERM_FG)
+                    .monospace(),
+                );
+                ui.label(RichText::new("│").color(CHROME).monospace());
+                ui.label(
+                    RichText::new(format!("📋 {} tables", semantic_doc.tables.len()))
+                        .color(TERM_FG)
+                        .monospace(),
+                );
+                ui.label(RichText::new("│").color(CHROME).monospace());
+                ui.label(
+                    RichText::new(format!(
+                        "📖 Reading order: {} items",
+                        semantic_doc.reading_order.len()
+                    ))
+                    .color(TERM_FG)
+                    .monospace(),
+                );
+            });
+
+            ui.add_space(10.0);
+
+            // Semantic blocks in reading order
+            ui.label(
+                RichText::new("📚 SEMANTIC BLOCKS (in reading order)")
+                    .color(TERM_YELLOW)
+                    .monospace(),
+            );
+            ui.separator();
+
+            egui::ScrollArea::vertical()
+                .auto_shrink([false; 2])
+                .show(ui, |ui| {
+                    for (idx, &block_id) in semantic_doc.reading_order.iter().enumerate() {
+                        if let Some(block) = semantic_doc
+                            .semantic_blocks
+                            .iter()
+                            .find(|b| b.id == block_id)
+                        {
+                            ui.group(|ui| {
+                                ui.horizontal(|ui| {
+                                    // Block number and type
+                                    ui.label(
+                                        RichText::new(format!("#{} ", idx + 1))
+                                            .color(TERM_DIM)
+                                            .monospace(),
+                                    );
+
+                                    let (type_str, type_color) = match &block.block_type {
+                                        BlockType::Title => ("Title", TERM_HIGHLIGHT),
+                                        BlockType::Heading => ("Heading", TERM_YELLOW),
+                                        BlockType::Table => ("Table", TERM_GREEN),
+                                        BlockType::Figure => ("Figure", TERM_BLUE),
+                                        BlockType::List => ("List", TERM_FG),
+                                        BlockType::Paragraph => ("Paragraph", TERM_FG),
+                                        BlockType::Caption => ("Caption", TERM_DIM),
+                                        BlockType::Footer => ("Footer", TERM_DIM),
+                                        BlockType::Header => ("Header", TERM_DIM),
+                                    };
+
+                                    ui.label(
+                                        RichText::new(format!("[{}]", type_str))
+                                            .color(type_color)
+                                            .monospace()
+                                            .strong(),
+                                    );
+
+                                    // Confidence indicator
+                                    let conf_color = if block.confidence > 0.8 {
+                                        TERM_GREEN
+                                    } else if block.confidence > 0.6 {
+                                        TERM_YELLOW
+                                    } else {
+                                        TERM_ERROR
+                                    };
+                                    ui.label(
+                                        RichText::new(format!(
+                                            "({:.0}%)",
+                                            block.confidence * 100.0
+                                        ))
+                                        .color(conf_color)
+                                        .monospace()
+                                        .size(10.0),
+                                    );
+                                });
+
+                                // Block content
+                                ui.label(RichText::new(&block.content).color(TERM_FG).monospace());
+                            });
+
+                            ui.add_space(5.0);
+                        }
+                    }
+
+                    // Tables section
+                    if !semantic_doc.tables.is_empty() {
+                        ui.add_space(10.0);
+                        ui.label(RichText::new("📋 TABLES").color(TERM_YELLOW).monospace());
+                        ui.separator();
+
+                        for (table_idx, table) in semantic_doc.tables.iter().enumerate() {
+                            ui.group(|ui| {
+                                ui.label(
+                                    RichText::new(format!(
+                                        "Table {} ({}x{})",
+                                        table_idx + 1,
+                                        table.rows,
+                                        table.cols
+                                    ))
+                                    .color(TERM_GREEN)
+                                    .monospace(),
+                                );
+
+                                // Render table grid
+                                egui::Grid::new(format!("table_{}", table_idx))
+                                    .striped(true)
+                                    .show(ui, |ui| {
+                                        for row in &table.cells {
+                                            for cell in row {
+                                                ui.label(
+                                                    RichText::new(&cell.content)
+                                                        .color(TERM_FG)
+                                                        .monospace(),
+                                                );
+                                            }
+                                            ui.end_row();
+                                        }
+                                    });
+                            });
+
+                            ui.add_space(5.0);
+                        }
+                    }
+                });
+        });
     }
 
     fn show_debug_info(&mut self) {
@@ -1560,7 +3413,7 @@ impl Chonker5App {
             // Draw text regions from character matrix
             for region in char_matrix.text_regions.iter() {
                 // Convert character-based bounding box to screen coordinates
-                // The bbox is in character units, so multiply by char size and scale
+                // The bbox is in character units relative to the content bounds, so multiply by char size and scale
                 let x1 =
                     image_rect.left() + (region.bbox.x as f32 * char_matrix.char_width * scale_x);
                 let y1 =
@@ -1570,28 +3423,31 @@ impl Chonker5App {
 
                 let rect = egui::Rect::from_min_max(egui::pos2(x1, y1), egui::pos2(x2, y2));
 
-                // Color based on confidence
-                let color = if region.confidence > 0.8 {
-                    TERM_HIGHLIGHT // High confidence - bright teal
-                } else if region.confidence > 0.5 {
-                    TERM_YELLOW // Medium confidence - yellow
-                } else {
-                    TERM_DIM // Low confidence - dim
-                };
+                // Only draw boxes that are actually visible on screen
+                if rect.intersects(image_rect) {
+                    // Color based on confidence
+                    let color = if region.confidence > 0.8 {
+                        TERM_HIGHLIGHT // High confidence - bright teal
+                    } else if region.confidence > 0.5 {
+                        TERM_YELLOW // Medium confidence - yellow
+                    } else {
+                        TERM_DIM // Low confidence - dim
+                    };
 
-                // Draw bounding box
-                painter.rect_stroke(rect, 0.0, egui::Stroke::new(2.0, color));
+                    // Draw bounding box
+                    painter.rect_stroke(rect, 0.0, egui::Stroke::new(2.0, color));
 
-                // Draw region ID if there's space
-                if rect.width() > 20.0 && rect.height() > 15.0 {
-                    let label_pos = rect.min + egui::vec2(2.0, 2.0);
-                    painter.text(
-                        label_pos,
-                        egui::Align2::LEFT_TOP,
-                        format!("R{}", region.region_id + 1),
-                        FontId::monospace(10.0),
-                        color,
-                    );
+                    // Draw region ID if there's space
+                    if rect.width() > 20.0 && rect.height() > 15.0 {
+                        let label_pos = rect.min + egui::vec2(2.0, 2.0);
+                        painter.text(
+                            label_pos,
+                            egui::Align2::LEFT_TOP,
+                            format!("R{}", region.region_id + 1),
+                            FontId::monospace(10.0),
+                            color,
+                        );
+                    }
                 }
             }
         }
@@ -1663,6 +3519,9 @@ fn draw_terminal_frame(
 
 impl eframe::App for Chonker5App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // Process any pending file dialog results
+        self.process_file_dialog_result(ctx);
+
         // Handle global keyboard shortcuts
         ctx.input(|i| {
             for event in &i.events {
@@ -1766,7 +3625,9 @@ impl eframe::App for Chonker5App {
         if let Some(mut receiver) = self.vision_receiver.take() {
             if let Ok(result) = receiver.try_recv() {
                 match result {
-                    Ok(character_matrix) => {
+                    Ok(semantic_doc) => {
+                        // Extract character matrix for compatibility
+                        let character_matrix = semantic_doc.character_matrix.clone();
                         self.matrix_result.content = self
                             .matrix_engine
                             .render_matrix_as_string(&character_matrix);
@@ -1774,6 +3635,8 @@ impl eframe::App for Chonker5App {
                         self.matrix_result.editable_matrix = Some(character_matrix.matrix.clone());
                         self.matrix_result.original_matrix = Some(character_matrix.matrix.clone());
                         self.matrix_result.character_matrix = Some(character_matrix);
+                        // Store the full semantic document
+                        self.matrix_result.semantic_document = Some(semantic_doc);
                         self.matrix_result.is_loading = false;
                         self.matrix_result.matrix_dirty = false;
                         self.log("✅ Enhanced character matrix extraction completed");
@@ -1881,7 +3744,8 @@ impl eframe::App for Chonker5App {
                     ui.add_enabled_ui(self.pdf_path.is_some(), |ui| {
                         if ui.button(RichText::new("[M]").color(TERM_FG).monospace().size(12.0)).clicked() {
                             self.extract_character_matrix(ctx);
-                            self.active_tab = ExtractionTab::Matrix;
+                            // Auto-switch to semantic view if multi-modal fusion is available
+                            self.active_tab = ExtractionTab::Semantic;
                         }
 
                         if ui.button(RichText::new("[G]").color(TERM_FG).monospace().size(12.0)).clicked() {
@@ -2072,6 +3936,17 @@ impl eframe::App for Chonker5App {
                                         if ui.button(debug_label).clicked() {
                                             self.active_tab = ExtractionTab::Debug;
                                         }
+
+                                        ui.label(RichText::new("│").color(CHROME).monospace());
+
+                                        let semantic_label = if self.active_tab == ExtractionTab::Semantic {
+                                            RichText::new("[SEMANTIC]").color(TERM_HIGHLIGHT).monospace()
+                                        } else {
+                                            RichText::new(" Semantic ").color(TERM_DIM).monospace()
+                                        };
+                                        if ui.button(semantic_label).clicked() {
+                                            self.active_tab = ExtractionTab::Semantic;
+                                        }
                                     });
 
                                     ui.separator();
@@ -2093,7 +3968,7 @@ impl eframe::App for Chonker5App {
                                                         ui.label(RichText::new(error).color(TERM_ERROR).monospace());
                                                     } else if let Some(editable_matrix) = &mut self.matrix_result.editable_matrix {
                                                         // EDITABLE CHARACTER MATRIX VIEW
-                                                        if let Some(char_matrix) = &self.matrix_result.character_matrix {
+                                                        if let Some(_char_matrix) = &self.matrix_result.character_matrix {
                                                             // Removed header feedback - going straight to the matrix
                                                         }
 
@@ -2299,26 +4174,25 @@ impl eframe::App for Chonker5App {
                                                                             false
                                                                         };
 
-                                                                        let color = if is_modified {
-                                                                            TERM_YELLOW
+                                                                        let (display_char, color) = if is_modified {
+                                                                            (ch.to_string(), TERM_YELLOW)
                                                                         } else if *ch == ' ' {
-                                                                            Color32::from_rgba_premultiplied(0, 0, 0, 0) // Transparent for spaces
+                                                                            // Show spaces as small dots for better visualization
+                                                                            ("·".to_string(), TERM_DIM.gamma_multiply(0.3))
                                                                         } else if *ch == '█' {
-                                                                            TERM_DIM
+                                                                            (ch.to_string(), TERM_DIM)
                                                                         } else {
-                                                                            TERM_FG
+                                                                            (ch.to_string(), TERM_FG)
                                                                         };
 
-                                                                        // Only draw non-space characters
-                                                                        if *ch != ' ' {
-                                                                            painter.text(
-                                                                                pos,
-                                                                                egui::Align2::CENTER_CENTER,
-                                                                                ch.to_string(),
-                                                                                font_id.clone(),
-                                                                                color,
-                                                                            );
-                                                                        }
+                                                                        // Draw character or space indicator
+                                                                        painter.text(
+                                                                            pos,
+                                                                            egui::Align2::CENTER_CENTER,
+                                                                            display_char,
+                                                                            font_id.clone(),
+                                                                            color,
+                                                                        );
 
                                                                         // Highlight selection or selected cell
                                                                         if is_cell_selected(x, y) {
@@ -2450,6 +4324,17 @@ impl eframe::App for Chonker5App {
                                                     } else {
                                                         ui.centered_and_justified(|ui| {
                                                             ui.label(RichText::new("No debug data available\n\nPress [G] to show debug info")
+                                                                .color(TERM_DIM)
+                                                                .monospace());
+                                                        });
+                                                    }
+                                                }
+                                                ExtractionTab::Semantic => {
+                                                    if let Some(semantic_doc) = &self.matrix_result.semantic_document {
+                                                        self.render_semantic_document(ui, semantic_doc);
+                                                    } else {
+                                                        ui.centered_and_justified(|ui| {
+                                                            ui.label(RichText::new("No semantic document available\n\nPress [M] to extract and analyze document structure")
                                                                 .color(TERM_DIM)
                                                                 .monospace());
                                                         });
