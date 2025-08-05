@@ -445,25 +445,110 @@ impl CharacterMatrixEngine {
 
     fn detect_text_regions_fallback(&self, matrix: &[Vec<char>]) -> Result<Vec<TextRegion>> {
         let mut regions = Vec::new();
-        let mut visited = vec![vec![false; matrix[0].len()]; matrix.len()];
         let mut region_id = 0;
 
+        // First pass: detect horizontal text lines
+        let mut text_lines = Vec::new();
         for y in 0..matrix.len() {
-            for x in 0..matrix[y].len() {
-                if matrix[y][x] != ' ' && !visited[y][x] {
-                    // Found start of a text region, flood fill to get its bounds
-                    let region = self.flood_fill_region(matrix, &mut visited, x, y)?;
+            let mut line_start = None;
+            let mut line_end = 0;
+            let mut has_content = false;
 
-                    if region.area() > 2 {
-                        regions.push(TextRegion {
-                            bbox: region,
-                            confidence: 0.8,
-                            text_content: String::new(),
-                            region_id,
-                        });
-                        region_id += 1;
+            for x in 0..matrix[y].len() {
+                if matrix[y][x] != ' ' {
+                    if line_start.is_none() {
+                        line_start = Some(x);
+                    }
+                    line_end = x;
+                    has_content = true;
+                } else if line_start.is_some() && x > line_end + 3 {
+                    // Gap of more than 3 spaces, consider it a break
+                    if has_content {
+                        text_lines.push((y, line_start.unwrap(), line_end));
+                    }
+                    line_start = None;
+                    has_content = false;
+                }
+            }
+
+            // Handle line that goes to the end
+            if has_content && line_start.is_some() {
+                text_lines.push((y, line_start.unwrap(), line_end));
+            }
+        }
+
+        // Second pass: merge adjacent lines into regions
+        let mut processed = vec![false; text_lines.len()];
+
+        for i in 0..text_lines.len() {
+            if processed[i] {
+                continue;
+            }
+
+            let (start_y, start_x, end_x) = text_lines[i];
+            let mut min_x = start_x;
+            let mut max_x = end_x;
+            let mut min_y = start_y;
+            let mut max_y = start_y;
+
+            processed[i] = true;
+
+            // Look for adjacent lines that should be part of the same region
+            for j in (i + 1)..text_lines.len() {
+                if processed[j] {
+                    continue;
+                }
+
+                let (line_y, line_start_x, line_end_x) = text_lines[j];
+
+                // Check if this line is adjacent (within 2 rows) and overlaps horizontally
+                if line_y <= max_y + 2 {
+                    // Check for horizontal overlap or proximity
+                    if (line_start_x <= max_x + 5 && line_end_x >= min_x - 5) {
+                        // This line is part of the current region
+                        min_x = min_x.min(line_start_x);
+                        max_x = max_x.max(line_end_x);
+                        max_y = line_y;
+                        processed[j] = true;
+                    }
+                } else {
+                    // Too far vertically, no need to check further lines
+                    break;
+                }
+            }
+
+            // Create region from the merged lines
+            let region = CharBBox {
+                x: min_x,
+                y: min_y,
+                width: max_x - min_x + 1,
+                height: max_y - min_y + 1,
+            };
+
+            if region.area() > 2 {
+                // Extract text content for this region
+                let mut text_content = String::new();
+                for y in min_y..=max_y {
+                    if y < matrix.len() {
+                        for x in min_x..=max_x.min(matrix[y].len() - 1) {
+                            let ch = matrix[y][x];
+                            if ch != ' ' {
+                                text_content.push(ch);
+                            }
+                        }
+                        if y < max_y {
+                            text_content.push(' ');
+                        }
                     }
                 }
+
+                regions.push(TextRegion {
+                    bbox: region,
+                    confidence: 0.85,
+                    text_content: text_content.trim().to_string(),
+                    region_id,
+                });
+                region_id += 1;
             }
         }
 
@@ -1513,8 +1598,56 @@ fn draw_terminal_box(
     });
 }
 
+// Helper to draw terminal-style box without title
+fn draw_terminal_frame(
+    ui: &mut egui::Ui,
+    is_focused: bool,
+    add_contents: impl FnOnce(&mut egui::Ui),
+) {
+    let stroke_color = if is_focused { TERM_HIGHLIGHT } else { CHROME };
+    let stroke_width = if is_focused { 2.0 } else { 1.0 };
+
+    let frame = egui::Frame::none()
+        .fill(TERM_BG)
+        .stroke(Stroke::new(stroke_width, stroke_color))
+        .inner_margin(egui::Margin::same(5.0))
+        .outer_margin(egui::Margin::same(1.0))
+        .rounding(Rounding::same(2.0));
+
+    frame.show(ui, |ui| {
+        add_contents(ui);
+    });
+}
+
 impl eframe::App for Chonker5App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // Handle global keyboard shortcuts
+        ctx.input(|i| {
+            for event in &i.events {
+                if let egui::Event::Key {
+                    key,
+                    pressed: true,
+                    modifiers,
+                    ..
+                } = event
+                {
+                    if modifiers.command || modifiers.ctrl {
+                        match key {
+                            egui::Key::O => {
+                                // Open file
+                                self.open_file(ctx);
+                            }
+                            egui::Key::S if self.matrix_result.matrix_dirty => {
+                                // Save edited matrix
+                                self.save_edited_matrix();
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            }
+        });
+
         // Handle deferred rendering
         if self.needs_render {
             self.needs_render = false;
@@ -1640,6 +1773,7 @@ impl eframe::App for Chonker5App {
                         if ui.button(RichText::new("←").color(TERM_FG).monospace().size(12.0)).clicked() {
                             self.current_page = self.current_page.saturating_sub(1);
                             self.render_current_page(ctx);
+                            self.extract_character_matrix(ctx);
                         }
                     });
 
@@ -1654,6 +1788,7 @@ impl eframe::App for Chonker5App {
                         if ui.button(RichText::new("→").color(TERM_FG).monospace().size(12.0)).clicked() {
                             self.current_page += 1;
                             self.render_current_page(ctx);
+                            self.extract_character_matrix(ctx);
                         }
                     });
 
@@ -1747,7 +1882,7 @@ impl eframe::App for Chonker5App {
                             egui::vec2(left_width, available_height),
                             egui::Layout::left_to_right(egui::Align::TOP),
                             |ui| {
-                                draw_terminal_box(ui, "PDF VIEW", self.focused_pane == FocusedPane::PdfView, |ui| {
+                                draw_terminal_frame(ui, self.focused_pane == FocusedPane::PdfView, |ui| {
                                     egui::ScrollArea::both()
                                         .auto_shrink([false; 2])
                                         .show(ui, |ui| {
@@ -1793,9 +1928,11 @@ impl eframe::App for Chonker5App {
                                                             if scroll_delta.y > 0.0 && current_page > 0 {
                                                                 self.current_page = current_page - 1;
                                                                 self.needs_render = true;
+                                                                self.extract_character_matrix(ctx);
                                                             } else if scroll_delta.y < 0.0 && current_page < total_pages - 1 {
                                                                 self.current_page = current_page + 1;
                                                                 self.needs_render = true;
+                                                                self.extract_character_matrix(ctx);
                                                             }
                                                         }
                                                     }
@@ -2204,8 +2341,8 @@ impl eframe::App for Chonker5App {
                                                                 if response.drag_started() {
                                                                     if let Some(pos) = response.interact_pointer_pos() {
                                                                         let rel_pos = pos - rect.min;
-                                                                        let x = (rel_pos.x / char_size) as usize;
-                                                                        let y = (rel_pos.y / line_height) as usize;
+                                                                        let x = (rel_pos.x / char_size).round() as usize;
+                                                                        let y = (rel_pos.y / line_height).round() as usize;
 
                                                                         if y < matrix_height && x < matrix_width {
                                                                             drag_action = DragAction::StartDrag(x, y);
@@ -2216,8 +2353,8 @@ impl eframe::App for Chonker5App {
                                                                 if is_dragging && response.dragged() {
                                                                     if let Some(pos) = response.interact_pointer_pos() {
                                                                         let rel_pos = pos - rect.min;
-                                                                        let x = ((rel_pos.x / char_size) as usize).min(matrix_width - 1);
-                                                                        let y = ((rel_pos.y / line_height) as usize).min(matrix_height - 1);
+                                                                        let x = ((rel_pos.x / char_size).round() as usize).min(matrix_width.saturating_sub(1));
+                                                                        let y = ((rel_pos.y / line_height).round() as usize).min(matrix_height.saturating_sub(1));
 
                                                                         drag_action = DragAction::UpdateDrag(x, y);
                                                                     }
@@ -2227,15 +2364,24 @@ impl eframe::App for Chonker5App {
                                                                     drag_action = DragAction::EndDrag;
                                                                 }
 
-                                                                // Single click (no drag)
-                                                                if response.clicked() && selection_start == selection_end {
+                                                                // Single click - check if it's a true single click (not a drag)
+                                                                if response.clicked() {
                                                                     if let Some(pos) = response.interact_pointer_pos() {
                                                                         let rel_pos = pos - rect.min;
-                                                                        let x = (rel_pos.x / char_size) as usize;
-                                                                        let y = (rel_pos.y / line_height) as usize;
+                                                                        let x = (rel_pos.x / char_size).round() as usize;
+                                                                        let y = (rel_pos.y / line_height).round() as usize;
 
                                                                         if y < matrix_height && x < matrix_width {
-                                                                            drag_action = DragAction::SingleClick(x, y);
+                                                                            // If we have a selection and clicked outside of it, clear selection
+                                                                            // Otherwise treat as single click
+                                                                            if selection_start.is_some() && selection_end.is_some() {
+                                                                                // Check if click is outside current selection
+                                                                                if !is_cell_selected(x, y) {
+                                                                                    drag_action = DragAction::SingleClick(x, y);
+                                                                                }
+                                                                            } else {
+                                                                                drag_action = DragAction::SingleClick(x, y);
+                                                                            }
                                                                         }
                                                                     }
                                                                 }
