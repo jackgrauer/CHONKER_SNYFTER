@@ -2360,7 +2360,7 @@ impl Chonker5App {
                 CharacterMatrixEngine::new()
             }),
             selected_cell: None,
-            pdf_dark_mode: false,
+            pdf_dark_mode: true,  // Default to dark mode
             focused_pane: FocusedPane::PdfView,
             selection_start: None,
             selection_end: None,
@@ -2497,6 +2497,9 @@ impl Chonker5App {
                         self.pdf_path = Some(path.clone());
                         self.current_page = 0;
                         self.pdf_texture = None;
+                        // Clear caches so both Matrix and Ferrules views refresh for new PDF
+                        self.matrix_result.character_matrix = None;
+                        self.ferrules_output_cache = None;
 
                         // Get PDF info with better error handling
                         match self.get_pdf_info(&path) {
@@ -2686,7 +2689,14 @@ impl Chonker5App {
 
         self.matrix_result.is_loading = true;
         self.matrix_result.error = None;
-        self.log("🔄 Processing PDF with both PDFium-only and Ferrules methods...");
+        
+        // Clear any existing receiver to prevent race conditions
+        self.vision_receiver = None;
+        
+        self.log(&format!(
+            "🔄 Processing PDF page {}...",
+            self.current_page + 1
+        ));
         self.log("📝 Step 1: PDFium-only → Left-justified accurate content");
         self.log("🎯 Step 2: Ferrules → Layout-preserving spatial positioning");
 
@@ -2696,9 +2706,10 @@ impl Chonker5App {
 
         // Simplified processing - just use the Ferrules method for now
         let ctx_clone = ctx.clone();
+        let current_page = self.current_page;
         runtime.spawn(async move {
             // Create semantic document with single method
-            let result = match Self::create_semantic_document(pdf_path, 0).await {
+            let result = match Self::create_semantic_document(pdf_path, current_page).await {
                 Ok(semantic_doc) => {
                     tracing::info!(
                         "Semantic document created with {} blocks, {} tables, {:.1}% confidence",
@@ -3892,7 +3903,7 @@ impl eframe::App for Chonker5App {
                                     self.save_edited_matrix();
                                 }
                                 egui::Key::D => {
-                                    // Toggle dark mode
+                                    // Toggle light/dark mode
                                     self.pdf_dark_mode = !self.pdf_dark_mode;
                                     self.render_current_page(ctx);
                                 }
@@ -4080,6 +4091,9 @@ impl eframe::App for Chonker5App {
                     ui.add_enabled_ui(self.pdf_path.is_some() && self.current_page > 0, |ui| {
                         if ui.button(RichText::new("←").color(TERM_FG).monospace().size(12.0)).clicked() {
                             self.current_page = self.current_page.saturating_sub(1);
+                            // Clear caches so both Matrix and Ferrules views refresh for new page
+                            self.matrix_result.character_matrix = None;
+                            self.ferrules_output_cache = None;
                             self.render_current_page(ctx);
                             self.extract_character_matrix(ctx);
                         }
@@ -4095,6 +4109,9 @@ impl eframe::App for Chonker5App {
                     ui.add_enabled_ui(self.pdf_path.is_some() && self.current_page < self.total_pages - 1, |ui| {
                         if ui.button(RichText::new("→").color(TERM_FG).monospace().size(12.0)).clicked() {
                             self.current_page += 1;
+                            // Clear caches so both Matrix and Ferrules views refresh for new page
+                            self.matrix_result.character_matrix = None;
+                            self.ferrules_output_cache = None;
                             self.render_current_page(ctx);
                             self.extract_character_matrix(ctx);
                         }
@@ -4152,7 +4169,7 @@ impl eframe::App for Chonker5App {
                         ui.label(RichText::new("│").color(CHROME).monospace());
                         let dark_text = if self.pdf_dark_mode { "[D]✓" } else { "[D]" };
                         if ui.button(RichText::new(dark_text).color(TERM_FG).monospace().size(12.0))
-                            .on_hover_text("Toggle dark mode for PDF")
+                            .on_hover_text("Toggle light/dark mode for PDF")
                             .clicked() {
                             self.pdf_dark_mode = !self.pdf_dark_mode;
                             self.render_current_page(ctx);
@@ -4233,10 +4250,16 @@ impl eframe::App for Chonker5App {
                                                         if scroll_delta.y.abs() > 10.0 {
                                                             if scroll_delta.y > 0.0 && current_page > 0 {
                                                                 self.current_page = current_page - 1;
+                                                                // Clear caches so both Matrix and Ferrules views refresh for new page
+                                                                self.matrix_result.character_matrix = None;
+                                                                self.ferrules_output_cache = None;
                                                                 self.needs_render = true;
                                                                 self.extract_character_matrix(ctx);
                                                             } else if scroll_delta.y < 0.0 && current_page < total_pages - 1 {
                                                                 self.current_page = current_page + 1;
+                                                                // Clear caches so both Matrix and Ferrules views refresh for new page
+                                                                self.matrix_result.character_matrix = None;
+                                                                self.ferrules_output_cache = None;
                                                                 self.needs_render = true;
                                                                 self.extract_character_matrix(ctx);
                                                             }
@@ -4857,16 +4880,30 @@ impl eframe::App for Chonker5App {
                                                     }
                                                 }
                                                 ExtractionTab::Ferrules => {
-                                                    // FERRULES TAB = Run terminal command ONCE and cache result
+                                                    // FERRULES TAB = Run terminal command and cache result per page
                                                     if let Some(pdf_path) = &self.pdf_path {
-                                                        // Check if we need to run the command (only run once)
+                                                        let pdf_path_clone = pdf_path.clone();
+                                                        let current_page = self.current_page;
+                                                        let total_pages = self.total_pages;
+                                                        
+                                                        // Check if we need to run the command
                                                         if self.ferrules_output_cache.is_none() {
-                                                            match self.matrix_engine.run_ferrules_integration_test(pdf_path) {
+                                                            self.log(&format!("🔄 Running Ferrules for page {}...", current_page + 1));
+                                                            match self.matrix_engine.run_ferrules_integration_test(&pdf_path_clone) {
                                                                 Ok(console_output) => {
-                                                                    self.ferrules_output_cache = Some(console_output);
+                                                                    // Add page number to output
+                                                                    let page_output = format!(
+                                                                        "📄 Page {}/{}\n{}", 
+                                                                        current_page + 1, 
+                                                                        total_pages,
+                                                                        console_output
+                                                                    );
+                                                                    self.ferrules_output_cache = Some(page_output);
+                                                                    self.log("✅ Ferrules analysis complete");
                                                                 }
                                                                 Err(e) => {
                                                                     self.ferrules_output_cache = Some(format!("❌ Terminal command failed: {}", e));
+                                                                    self.log(&format!("❌ Ferrules failed: {}", e));
                                                                 }
                                                             }
                                                         }
@@ -4881,6 +4918,14 @@ impl eframe::App for Chonker5App {
                                                                         .monospace()
                                                                         .size(9.0));
                                                                 });
+                                                        } else {
+                                                            // Show loading state
+                                                            ui.centered_and_justified(|ui| {
+                                                                ui.spinner();
+                                                                ui.label(RichText::new("\nPreparing Ferrules analysis...")
+                                                                    .color(TERM_FG)
+                                                                    .monospace());
+                                                            });
                                                         }
                                                     } else {
                                                         ui.centered_and_justified(|ui| {
