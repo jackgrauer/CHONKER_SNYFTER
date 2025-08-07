@@ -1323,8 +1323,6 @@ impl CharacterMatrixEngine {
             matrix,
             text_regions,
             original_text: text_objects.iter().map(|obj| obj.text.clone()).collect(),
-            char_width: 7.2,
-            char_height: 12.0,
         })
     }
 

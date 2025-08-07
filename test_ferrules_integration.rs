@@ -8,10 +8,18 @@ fn main() -> Result<()> {
     println!("🔍 Testing Ferrules Integration in Character Matrix Engine");
     println!("========================================================");
 
-    let test_pdf = Path::new("chonker_test.pdf");
+    // Get PDF path from command line argument or use default
+    let args: Vec<String> = std::env::args().collect();
+    let pdf_path_str = if args.len() > 1 {
+        &args[1]
+    } else {
+        "chonker_test.pdf"
+    };
+    
+    let test_pdf = Path::new(pdf_path_str);
 
     if !test_pdf.exists() {
-        println!("❌ chonker_test.pdf not found!");
+        println!("❌ PDF not found: {}", pdf_path_str);
         return Ok(());
     }
 

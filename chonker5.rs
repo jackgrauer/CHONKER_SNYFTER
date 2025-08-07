@@ -1396,6 +1396,7 @@ impl CharacterMatrixEngine {
         use std::process::Command;
 
         let output = Command::new("./target/release/test_ferrules_integration")
+            .arg(pdf_path.to_str().unwrap_or(""))  // Pass the PDF path as argument
             .env("RUST_LOG", "debug")
             .env("DYLD_LIBRARY_PATH", "./lib")
             .output()
