@@ -15,6 +15,7 @@ impl MatrixSelection {
         }
     }
 
+    #[allow(dead_code)]
     pub fn clear(&mut self) {
         self.start = None;
         self.end = None;

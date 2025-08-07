@@ -8,13 +8,6 @@ default-run = "chonker5"
 name = "chonker5"
 path = "chonker5.rs"
 
-[[bin]]
-name = "test_phase1_improvements"
-path = "test_phase1_improvements.rs"
-
-[[bin]]
-name = "test_ferrules_integration"
-path = "test_ferrules_integration.rs"
 
 [dependencies]
 eframe = "0.24"

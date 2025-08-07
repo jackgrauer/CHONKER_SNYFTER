@@ -1,3 +1,0 @@
-CHONKER 5 TEST DOCUMENT
-This is a minimal test file since reportlab is not available.
-For full testing, install reportlab: pip install reportlab
