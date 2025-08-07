@@ -2326,7 +2326,7 @@ impl Chonker5App {
         };
 
         let mut app = Self {
-            pdf_path: Some(PathBuf::from("chonker_test.pdf")),
+            pdf_path: None,
             current_page: 0,
             total_pages: 0,
             zoom_level: 1.0,
@@ -2360,7 +2360,7 @@ impl Chonker5App {
                 CharacterMatrixEngine::new()
             }),
             selected_cell: None,
-            pdf_dark_mode: true,  // Default to dark mode
+            pdf_dark_mode: true, // Default to dark mode
             focused_pane: FocusedPane::PdfView,
             selection_start: None,
             selection_end: None,
@@ -2374,29 +2374,6 @@ impl Chonker5App {
 
         // Initialize ferrules binary path
         app.init_ferrules_binary();
-
-        // Load and process chonker_test.pdf if it exists
-        if let Some(pdf_path) = &app.pdf_path.clone() {
-            if pdf_path.exists() {
-                app.log(&format!("📄 Auto-loading: {}", pdf_path.display()));
-                // Get PDF metadata
-                match app.get_pdf_info(&pdf_path) {
-                    Ok(pages) => {
-                        app.total_pages = pages;
-                        app.log(&format!("✅ PDF has {} pages", pages));
-                        // Set up for initial render
-                        app.needs_render = true;
-                    }
-                    Err(e) => {
-                        app.log(&format!("❌ Failed to load PDF: {}", e));
-                        app.pdf_path = None;
-                    }
-                }
-            } else {
-                app.log("⚠️ chonker_test.pdf not found");
-                app.pdf_path = None;
-            }
-        }
 
         app
     }
@@ -2689,10 +2666,10 @@ impl Chonker5App {
 
         self.matrix_result.is_loading = true;
         self.matrix_result.error = None;
-        
+
         // Clear any existing receiver to prevent race conditions
         self.vision_receiver = None;
-        
+
         self.log(&format!(
             "🔄 Processing PDF page {}...",
             self.current_page + 1
@@ -3860,20 +3837,6 @@ impl eframe::App for Chonker5App {
         // Handle first frame initialization
         if self.first_frame {
             self.first_frame = false;
-            if self.pdf_path.is_some() && self.needs_render {
-                // Render the PDF
-                if let Err(e) = self.safe_render_current_page(ctx) {
-                    self.log(&format!("⚠️ Could not render initial page: {}", e));
-                }
-                // Extract character matrix
-                self.log("🚀 Auto-processing character matrix...");
-                if let Err(e) = self.safe_extract_character_matrix(ctx) {
-                    self.log(&format!("❌ Matrix extraction failed: {}", e));
-                } else {
-                    // Switch to matrix view to show results
-                    self.active_tab = ExtractionTab::Matrix;
-                }
-            }
         }
 
         // Process any pending file dialog results
