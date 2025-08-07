@@ -102,58 +102,6 @@ pub struct CharacterMatrix {
     pub char_height: f32,
 }
 
-/// Enhanced semantic document structure from multi-modal fusion
-/// Fusion-specific bounding box with x0,y0,x1,y1 coordinates
-#[derive(Debug, Clone)]
-struct FusionBBox {
-    x0: f32,
-    y0: f32,
-    x1: f32,
-    y1: f32,
-}
-
-impl FusionBBox {
-    fn from_char_bbox(char_bbox: &CharBBox) -> Self {
-        Self {
-            x0: char_bbox.x as f32,
-            y0: char_bbox.y as f32,
-            x1: (char_bbox.x + char_bbox.width) as f32,
-            y1: (char_bbox.y + char_bbox.height) as f32,
-        }
-    }
-
-    fn from_ferrule_bbox(ferrule_bbox: &FerruleBBox) -> Self {
-        Self {
-            x0: ferrule_bbox.x0,
-            y0: ferrule_bbox.y0,
-            x1: ferrule_bbox.x1,
-            y1: ferrule_bbox.y1,
-        }
-    }
-
-    fn to_bbox(&self, label: String) -> BoundingBox {
-        BoundingBox {
-            x: self.x0,
-            y: self.y0,
-            width: self.x1 - self.x0,
-            height: self.y1 - self.y0,
-            label,
-            confidence: 1.0,
-            color: Color32::GREEN,
-        }
-    }
-
-    fn area(&self) -> f32 {
-        (self.x1 - self.x0) * (self.y1 - self.y0)
-    }
-
-    fn overlaps(&self, other: &FusionBBox) -> bool {
-        let x_overlap = self.x0.max(other.x0) < self.x1.min(other.x1);
-        let y_overlap = self.y0.max(other.y0) < self.y1.min(other.y1);
-        x_overlap && y_overlap
-    }
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SemanticDocument {
     pub character_matrix: CharacterMatrix,
@@ -379,131 +327,6 @@ struct FerruleBBox {
     y1: f32,
 }
 
-/// AI Vision Context from ferrules analysis
-#[derive(Debug, Clone)]
-struct VisionContext {
-    text_regions: Vec<VisionTextRegion>,
-    layout_structure: DocumentLayout,
-    reading_order: Vec<ReadingPath>,
-    semantic_hints: Vec<SemanticHint>,
-}
-
-#[derive(Debug, Clone)]
-struct VisionTextRegion {
-    bbox: FerruleBBox,
-    text: String,
-    block_type: String,
-    reading_index: usize,
-    confidence: f32,
-}
-
-#[derive(Debug, Clone)]
-struct DocumentLayout {
-    page_width: f32,
-    page_height: f32,
-    column_count: usize,
-    text_bounds: FerruleBBox,
-}
-
-#[derive(Debug, Clone)]
-struct ReadingPath {
-    region_id: usize,
-    sequence_order: usize,
-    flow_direction: FlowDirection,
-}
-
-#[derive(Debug, Clone)]
-enum FlowDirection {
-    LeftToRight,
-    TopToBottom,
-    Column,
-}
-
-#[derive(Debug, Clone)]
-struct SemanticHint {
-    region_id: usize,
-    semantic_type: String,
-    importance: f32,
-}
-
-/// Fused multi-modal data combining vision and PDF extraction
-#[derive(Debug, Clone)]
-struct FusedTextRegion {
-    vision_bbox: FerruleBBox,
-    pdf_text_objects: Vec<PreciseTextObject>,
-    semantic_type: String,
-    confidence: f32,
-    reading_order_index: usize,
-}
-
-#[derive(Debug, Clone)]
-struct FusedData {
-    regions: Vec<FusedTextRegion>,
-}
-
-/// AI-enhanced character grid with semantic understanding
-#[derive(Debug, Clone)]
-struct SmartCharacterGrid {
-    grid: CharacterMatrix,
-    semantic_regions: Vec<SemanticRegion>,
-    vision_metadata: VisionContext,
-    confidence_map: Vec<Vec<f32>>,
-}
-
-#[derive(Debug, Clone)]
-struct SemanticRegion {
-    grid_region: VisionTextRegion,
-    semantic_type: String,
-    content: String,
-    confidence: f32,
-}
-
-/// AI Sensor Stack for multi-modal document processing
-#[derive(Debug)]
-struct AISensorStack {
-    vision_sensor: VisionSensor,
-    extraction_sensor: ExtractionSensor,
-    fusion_sensor: FusionSensor,
-}
-
-#[derive(Debug)]
-struct VisionSensor {
-    ferrules_path: PathBuf,
-    temp_dir: PathBuf,
-}
-
-#[derive(Debug)]
-struct ExtractionSensor {
-    pdfium: Pdfium,
-    font_analyzer: FontAnalyzer,
-}
-
-#[derive(Debug)]
-struct FusionSensor {
-    spatial_matcher: SpatialMatcher,
-    confidence_scorer: ConfidenceScorer,
-}
-
-#[derive(Debug)]
-struct FontAnalyzer {
-    char_width_cache: HashMap<char, f32>,
-    avg_char_width: f32,
-    avg_char_height: f32,
-}
-
-#[derive(Debug)]
-struct SpatialMatcher {
-    overlap_threshold: f32,
-    text_similarity_threshold: f32,
-}
-
-#[derive(Debug)]
-struct ConfidenceScorer {
-    spatial_weight: f32,
-    text_weight: f32,
-    semantic_weight: f32,
-}
-
 /// Main processing engine for converting PDFs to character matrices.
 ///
 /// This engine handles the core workflow:
@@ -515,7 +338,6 @@ struct ConfidenceScorer {
 pub struct CharacterMatrixEngine {
     pub char_width: f32,
     pub char_height: f32,
-    ai_sensor_stack: Option<AISensorStack>,
 }
 
 impl CharacterMatrixEngine {
@@ -523,18 +345,7 @@ impl CharacterMatrixEngine {
         Self {
             char_width: 6.0,   // Will be calculated dynamically
             char_height: 12.0, // Will be calculated dynamically
-            ai_sensor_stack: None,
         }
-    }
-
-    /// Create engine with AI sensor capabilities
-    pub fn with_ai_sensors() -> Result<Self> {
-        let ai_sensor_stack = AISensorStack::new()?;
-        Ok(Self {
-            char_width: 6.0,
-            char_height: 12.0,
-            ai_sensor_stack: Some(ai_sensor_stack),
-        })
     }
 
     /// Create engine with optimally calculated character dimensions for a specific PDF
@@ -802,7 +613,8 @@ impl CharacterMatrixEngine {
         (matrix_width, matrix_height, char_width, char_height)
     }
 
-    // STEP 3: Generate optimized character matrix
+    // REMOVED: Unused method
+    #[allow(dead_code)]
     fn generate_optimal_character_matrix(
         &self,
         text_objects: &[PreciseTextObject],
@@ -828,7 +640,8 @@ impl CharacterMatrixEngine {
         Ok(matrix)
     }
 
-    // STEP 4: Enhanced vision processing with ferrules
+    // REMOVED: Unused method
+    #[allow(dead_code)]
     fn run_ferrules_on_matrix(
         &self,
         matrix: &[Vec<char>],
@@ -866,6 +679,8 @@ impl CharacterMatrixEngine {
         Ok(char_regions)
     }
 
+    // REMOVED: Unused method
+    #[allow(dead_code)]
     fn character_matrix_to_image_high_quality(
         &self,
         matrix: &[Vec<char>],
@@ -898,6 +713,8 @@ impl CharacterMatrixEngine {
         Ok(img)
     }
 
+    // REMOVED: Unused method
+    #[allow(dead_code)]
     fn convert_ferrules_to_char_regions(
         &self,
         _ferrules_result: &serde_json::Value,
@@ -908,6 +725,8 @@ impl CharacterMatrixEngine {
         self.detect_text_regions_fallback(matrix)
     }
 
+    // REMOVED: Unused method
+    #[allow(dead_code)]
     fn detect_text_regions_fallback(&self, matrix: &[Vec<char>]) -> Result<Vec<TextRegion>> {
         let mut regions = Vec::new();
         let mut region_id = 0;
@@ -1076,6 +895,8 @@ impl CharacterMatrixEngine {
         merged
     }
 
+    // REMOVED: Unused method
+    #[allow(dead_code)]
     fn flood_fill_region(
         &self,
         matrix: &[Vec<char>],
@@ -1131,7 +952,8 @@ impl CharacterMatrixEngine {
         })
     }
 
-    // STEP 5: Intelligent text mapping - Place text at exact positions
+    // REMOVED: Unused method
+    #[allow(dead_code)]
     fn map_text_objects_to_regions(
         &self,
         mut matrix: Vec<Vec<char>>,
@@ -1517,16 +1339,12 @@ impl CharacterMatrixEngine {
     /// This method uses only PDFium for text extraction, resulting in accurate content
     /// but without spatial layout preservation. Text appears left-justified.
     pub fn process_pdf_pdfium_only(&self, pdf_path: &PathBuf) -> Result<CharacterMatrix> {
-        println!("🚀 Processing PDF with PDFium-only extraction (no layout detection)...");
-
         // Step 1: Extract text objects with coordinates using PDFium
         let text_objects = self.extract_text_objects_with_precise_coords(pdf_path)?;
 
         if text_objects.is_empty() {
             return Err(anyhow::anyhow!("No text found in PDF"));
         }
-
-        println!("📝 Extracted {} text objects", text_objects.len());
 
         // Step 2: Calculate basic matrix size for left-justified layout
         let total_chars: usize = text_objects.iter().map(|obj| obj.text.len()).sum();
@@ -1535,8 +1353,6 @@ impl CharacterMatrixEngine {
 
         let matrix_width = estimated_width;
         let matrix_height = estimated_height;
-
-        println!("📊 Creating matrix: {}x{}", matrix_width, matrix_height);
 
         // Step 3: Create empty matrix
         let mut matrix = vec![vec![' '; matrix_width]; matrix_height];
@@ -1596,8 +1412,6 @@ impl CharacterMatrixEngine {
             });
         }
 
-        println!("✅ PDFium-only processing complete!");
-
         Ok(CharacterMatrix {
             width: matrix_width,
             height: matrix_height,
@@ -1620,6 +1434,8 @@ impl Default for CharacterMatrixEngine {
 // AI SENSOR STACK IMPLEMENTATION
 // ============================================================================
 
+#[allow(dead_code)]
+/*
 impl AISensorStack {
     pub fn new() -> Result<Self> {
         let ferrules_path = PathBuf::from("./ferrules/target/release/ferrules");
@@ -2185,6 +2001,7 @@ impl ConfidenceScorer {
         (pdf_objects.len() as f32 / 10.0).min(1.0) // More PDF objects = higher confidence
     }
 }
+*/
 
 // ============= END AI SENSOR STACK =============
 
@@ -2290,11 +2107,6 @@ struct Chonker5App {
     is_dragging: bool,                       // Currently dragging
     clipboard: String,                       // Internal clipboard for copy/paste
 
-    // Text editing state
-    text_edit_mode: bool,      // Whether we're currently editing text
-    text_edit_content: String, // Content being edited
-    text_edit_position: Option<(usize, usize)>, // Position where text editing started
-
     // First frame flag for initial loading
     first_frame: bool,
 }
@@ -2390,9 +2202,6 @@ impl Chonker5App {
             selection_end: None,
             is_dragging: false,
             clipboard: String::new(),
-            text_edit_mode: false,
-            text_edit_content: String::new(),
-            text_edit_position: None,
             first_frame: true,
         };
 
@@ -2810,8 +2619,11 @@ impl Chonker5App {
         }
     }
 
-    /// Parse ferrules JSON output into VisionContext
-    fn parse_ferrules_output(_output: &str) -> Option<VisionContext> {
+    // REMOVED: This method depends on removed VisionContext type
+    #[allow(dead_code)]
+    fn parse_ferrules_output(_output: &str) -> Option<()> {
+        None
+        /*
         // For now, return a simple parsed context
         // TODO: Implement proper JSON parsing when ferrules output format is known
         Some(VisionContext {
@@ -2830,13 +2642,17 @@ impl Chonker5App {
             reading_order: Vec::new(),
             semantic_hints: Vec::new(),
         })
+        */
     }
 
-    /// Fuse PDFium text objects with ferrules spatial regions
+    // REMOVED: This method depends on removed types
+    #[allow(dead_code)]
     async fn fuse_multimodal_data(
         character_matrix: CharacterMatrix,
-        vision_context: VisionContext,
+        _vision_context: (),
     ) -> Result<SemanticDocument, String> {
+        Err("Method disabled - depends on removed types".to_string())
+        /*
         tracing::info!(
             "Fusing {} text regions with {} vision regions",
             character_matrix.text_regions.len(),
@@ -2928,6 +2744,7 @@ impl Chonker5App {
             document_layout,
             fusion_confidence,
         })
+        */
     }
 
     /// Async PDF processing that doesn't block the main thread
@@ -4333,10 +4150,6 @@ impl eframe::App for Chonker5App {
                                             if self.focused_pane == FocusedPane::MatrixView && self.selected_cell.is_some() {
                                                 label.push_str(" ⌨️");  // Keyboard emoji to show ready for input
                                             }
-                                            // Add text edit mode indicator
-                                            if self.text_edit_mode {
-                                                label.push_str(" ✏️");  // Pencil emoji to show edit mode active
-                                            }
                                             RichText::new(label).color(TERM_HIGHLIGHT).monospace()
                                         } else {
                                             RichText::new(" Matrix ").color(TERM_DIM).monospace()
@@ -4418,22 +4231,18 @@ impl eframe::App for Chonker5App {
                                                                 ));
                                                                 
                                                                 if has_meaningful_event {
-                                                                    println!("📊 PROCESSING {} EVENTS, selected={:?}", i.events.len(), self.selected_cell);
+                                                                    // Processing events
                                                                 }
                                                                 
                                                                 // Process all events in a single loop
                                                                 for event in &i.events {
                                                                     match event {
                                                                         egui::Event::Text(text) => {
-                                                                            println!("📝 Text event: '{}', selected_cell={:?}", text, self.selected_cell);
                                                                             if let Some((sel_x, sel_y)) = self.selected_cell {
-                                                                                println!("📝 HAVE SELECTION: ({}, {})", sel_x, sel_y);
                                                                                 if sel_y < editable_matrix.len() && sel_x < editable_matrix[sel_y].len() {
-                                                                                    println!("📝 BOUNDS OK: matrix size = {}x{}", editable_matrix[0].len(), editable_matrix.len());
                                                                                     // Direct inline editing - just type!
                                                                                     if let Some(new_char) = text.chars().next() {
                                                                                         if new_char.is_ascii_graphic() || new_char == ' ' {
-                                                                                            println!("✏️ Direct edit: '{}' at ({}, {})", new_char, sel_x, sel_y);
                                                                                             
                                                                                             // Update the matrix directly
                                                                                             editable_matrix[sel_y][sel_x] = new_char;
@@ -4446,25 +4255,12 @@ impl eframe::App for Chonker5App {
                                                                                         }
                                                                                     }
                                                                                 } else {
-                                                                                    println!("📝 BOUNDS FAIL: sel=({}, {}), matrix={}x{}", 
-                                                                                        sel_x, sel_y, 
-                                                                                        if !editable_matrix.is_empty() { editable_matrix[0].len() } else { 0 }, 
-                                                                                        editable_matrix.len());
                                                                                 }
                                                                             } else {
-                                                                                println!("📝 NO SELECTION!");
                                                                             }
                                                                         }
                                                                         egui::Event::Paste(paste_text) => {
-                                                                        println!("📋 PASTE EVENT DETECTED: {} chars", paste_text.len());
                                                                         if let Some((sel_x, sel_y)) = self.selected_cell {
-                                                                            println!("📋 PASTING at cell ({}, {}): '{}'", sel_x, sel_y, 
-                                                                                if paste_text.len() > 20 { 
-                                                                                    format!("{}...", &paste_text[..20]) 
-                                                                                } else { 
-                                                                                    paste_text.clone() 
-                                                                                }
-                                                                            );
                                                                             
                                                                             let lines: Vec<&str> = paste_text.lines().collect();
                                                                             let mut chars_pasted = 0;
@@ -4480,18 +4276,15 @@ impl eframe::App for Chonker5App {
                                                                                         let old_char = editable_matrix[y][x];
                                                                                         editable_matrix[y][x] = ch;
                                                                                         chars_pasted += 1;
-                                                                                        println!("📋 PASTE CHAR: '{}' → '{}' at ({}, {})", old_char, ch, x, y);
                                                                                     }
                                                                                 }
                                                                             }
                                                                             
                                                                             self.matrix_result.matrix_dirty = true;
-                                                                            println!("📋 PASTE SUCCESS: Pasted {} characters starting at ({}, {})", chars_pasted, sel_x, sel_y);
                                                                             paste_log_msg = Some(format!("📋 Pasted {} characters from system clipboard", chars_pasted));
                                                                         }
                                                                     }
                                                                         egui::Event::Key { key, pressed: true, modifiers, .. } => {
-                                                                        println!("⌨️ Key event: {:?}, Cmd: {}, Ctrl: {}", key, modifiers.command, modifiers.ctrl);
                                                                         if let Some((sel_x, sel_y)) = self.selected_cell {
                                                                             let matrix_height = editable_matrix.len();
                                                                             match key {
@@ -4542,7 +4335,6 @@ impl eframe::App for Chonker5App {
                                                                                     clear_selection = true;
                                                                                 }
                                                                                 egui::Key::C if modifiers.command || modifiers.ctrl => {
-                                                                                    println!("🔤 COPY KEY PRESSED");
                                                                                     needs_copy = true;
                                                                                 }
                                                                                 egui::Key::V if modifiers.command || modifiers.ctrl => {
@@ -4572,9 +4364,7 @@ impl eframe::App for Chonker5App {
                                                             }
                                                             
                                                             if let Some((x, y, ch)) = enter_pressed {
-                                                                self.text_edit_mode = true;
-                                                                self.text_edit_position = Some((x, y));
-                                                                self.text_edit_content = ch.to_string();
+                                                                // Enter key pressed - could be used for inline editing
                                                             }
                                                             
                                                             // Request repaint when we've processed keyboard input
@@ -4587,7 +4377,6 @@ impl eframe::App for Chonker5App {
                                                         let mut copy_log_msg = None;
 
                                                         if needs_copy {
-                                                            println!("🔤 EXECUTING COPY");
                                                             if let (Some(start), Some(end)) = (self.selection_start, self.selection_end) {
                                                                 let min_x = start.0.min(end.0);
                                                                 let max_x = start.0.max(end.0);
@@ -4611,21 +4400,12 @@ impl eframe::App for Chonker5App {
 
                                                                 // Copy to system clipboard
                                                                 ui.ctx().copy_text(copy_text.clone());
-                                                                println!("📋 COPY SUCCESS: Copied '{}' ({} chars) to clipboard", 
-                                                                    if copy_text.len() > 20 { 
-                                                                        format!("{}...", &copy_text[..20]) 
-                                                                    } else { 
-                                                                        copy_text.clone() 
-                                                                    }, 
-                                                                    copy_text.len()
-                                                                );
                                                                 copy_log_msg = Some(format!("📋 Copied {} characters to system clipboard", copy_text.len()));
                                                             } else if let Some((sel_x, sel_y)) = self.selected_cell {
                                                                 // If no selection, copy the single selected cell
                                                                 if sel_y < editable_matrix.len() && sel_x < editable_matrix[sel_y].len() {
                                                                     let copy_text = editable_matrix[sel_y][sel_x].to_string();
                                                                     ui.ctx().copy_text(copy_text.clone());
-                                                                    println!("📋 COPY SINGLE CHAR: Copied '{}' from ({}, {}) to clipboard", copy_text, sel_x, sel_y);
                                                                     copy_log_msg = Some(format!("📋 Copied '{}' to system clipboard", copy_text));
                                                                 }
                                                             }
@@ -4672,10 +4452,6 @@ impl eframe::App for Chonker5App {
                                                                 
                                                                 let (response, painter) = ui.allocate_painter(actual_size, egui::Sense::click_and_drag());
                                                                 
-                                                                // Debug the response - only log clicks
-                                                                if response.clicked() {
-                                                                    println!("🎯 MATRIX CLICKED! has_focus={}", response.has_focus());
-                                                                }
                                                                 
                                                                 // Always request focus when matrix is being interacted with
                                                                 // This ensures keyboard events are properly captured
@@ -4782,9 +4558,7 @@ impl eframe::App for Chonker5App {
                                                                     if let (Some(start), Some(end)) = (selection_start, selection_end) {
                                                                         // If start and end are the same, it's a click not a drag
                                                                         if start == end {
-                                                                            println!("🖱️ CLICK DETECTED (start==end)!");
                                                                             drag_action = DragAction::SingleClick(start.0, start.1);
-                                                                            println!("🖱️ SETTING DRAG ACTION: SingleClick({}, {})", start.0, start.1);
                                                                         } else {
                                                                             drag_action = DragAction::EndDrag;
                                                                         }
@@ -4821,9 +4595,6 @@ impl eframe::App for Chonker5App {
                                                         };
 
                                                         // Handle the drag action returned from the closure
-                                                        if !matches!(scroll_output, DragAction::None) {
-                                                            println!("🎮 HANDLING DRAG ACTION: {:?}", scroll_output);
-                                                        }
                                                         match scroll_output {
                                                                 DragAction::StartDrag(x, y) => {
                                                                     self.selection_start = Some((x, y));
@@ -4841,7 +4612,6 @@ impl eframe::App for Chonker5App {
                                                                     self.selected_cell = Some((x, y));
                                                                     self.selection_start = None;
                                                                     self.selection_end = None;
-                                                                    println!("🖱️ CELL SELECTED: ({}, {})", x, y);
                                                                     self.log(&format!("🖱️ Cell ({}, {}) selected", x, y));
                                                                 }
                                                                 DragAction::None => {}
@@ -4974,93 +4744,6 @@ impl eframe::App for Chonker5App {
                 }
 
             });
-
-        // Text editing modal dialog - DISABLED, using inline editing now
-        /*
-        if self.text_edit_mode {
-            if let Some((x, y)) = self.text_edit_position {
-                self.log(&format!(
-                    "📝 Opening text edit dialog for cell ({}, {}) with content: '{}'",
-                    x, y, self.text_edit_content
-                ));
-            }
-            egui::Window::new("Edit Cell")
-                .collapsible(false)
-                .resizable(false)
-                .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
-                .show(ctx, |ui| {
-                    ui.label("Edit text content:");
-
-                    let text_edit_response = ui.add(
-                        egui::TextEdit::singleline(&mut self.text_edit_content)
-                            .desired_width(200.0)
-                            .font(egui::FontId::monospace(14.0)),
-                    );
-
-                    // Always request focus for the text edit
-                    text_edit_response.request_focus();
-
-                    // Handle enter key to apply changes
-                    if ui.ctx().input(|i| i.key_pressed(egui::Key::Enter)) {
-                        // Apply the edited text back to the matrix
-                        if let (Some((x, y)), Some(editable_matrix)) = (
-                            self.text_edit_position,
-                            &mut self.matrix_result.editable_matrix,
-                        ) {
-                            if y < editable_matrix.len() && x < editable_matrix[y].len() {
-                                // Take only the first character if multiple were entered
-                                let new_char = self.text_edit_content.chars().next().unwrap_or(' ');
-                                editable_matrix[y][x] = new_char;
-                                self.matrix_result.matrix_dirty = true;
-                            }
-                        }
-                        self.text_edit_mode = false;
-                        self.text_edit_content.clear();
-                        self.text_edit_position = None;
-                    }
-
-                    ui.horizontal(|ui| {
-                        if ui.button("✓ Apply").clicked() {
-                            // Apply the edited text back to the matrix
-                            if let (Some((x, y)), Some(editable_matrix)) = (
-                                self.text_edit_position,
-                                &mut self.matrix_result.editable_matrix,
-                            ) {
-                                if y < editable_matrix.len() && x < editable_matrix[y].len() {
-                                    // Take only the first character if multiple were entered
-                                    let new_char =
-                                        self.text_edit_content.chars().next().unwrap_or(' ');
-                                    editable_matrix[y][x] = new_char;
-                                    self.matrix_result.matrix_dirty = true;
-                                }
-                            }
-                            self.text_edit_mode = false;
-                            self.text_edit_content.clear();
-                            self.text_edit_position = None;
-                        }
-
-                        if ui.button("✗ Cancel").clicked() {
-                            self.text_edit_mode = false;
-                            self.text_edit_content.clear();
-                            self.text_edit_position = None;
-                        }
-                    });
-
-                    // Handle escape key to cancel
-                    if ui.ctx().input(|i| i.key_pressed(egui::Key::Escape)) {
-                        self.text_edit_mode = false;
-                        self.text_edit_content.clear();
-                        self.text_edit_position = None;
-                    }
-
-                    ui.label(
-                        egui::RichText::new("Press Enter to apply, Escape to cancel")
-                            .size(10.0)
-                            .color(egui::Color32::GRAY),
-                    );
-                });
-        }
-        */
     }
 }
 

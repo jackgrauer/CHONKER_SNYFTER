@@ -1,4 +1,4 @@
-use egui::{Color32, Pos2, Rect, Response, Sense, Vec2};
+use egui::{Color32, Rect, Response, Sense, Vec2};
 use std::time::Instant;
 
 #[derive(Clone, Debug)]

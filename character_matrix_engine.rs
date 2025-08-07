@@ -1,10 +1,9 @@
 use anyhow::Result;
-use image::{DynamicImage, ImageBuffer, Rgb, RgbImage};
+use image::{DynamicImage, GenericImageView, ImageBuffer, Rgb, RgbImage};
 use pdfium_render::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
-use tokio::runtime::Runtime;
 
 // Character matrix PDF representation system
 // 1. PDF → Smallest viable character matrix
@@ -754,7 +753,7 @@ impl CharacterMatrixEngine {
 
     fn detect_text_regions_with_vision(
         &self,
-        image: &RgbImage,
+        _image: &RgbImage,
         matrix: &[Vec<char>],
     ) -> Result<Vec<TextRegion>> {
         // Use Ferrules ML model if available, otherwise fall back to flood-fill
@@ -1109,8 +1108,8 @@ impl CharacterMatrixEngine {
         matrix_height: usize,
         text_objects: &[TextObject],
         layout_regions: &[LayoutRegion],
-        page_width: f32,
-        page_height: f32,
+        _page_width: f32,
+        _page_height: f32,
     ) -> Result<CharacterMatrix> {
         let mut matrix = vec![vec![' '; matrix_width]; matrix_height];
         let mut text_regions = Vec::new();
