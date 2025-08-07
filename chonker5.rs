@@ -45,6 +45,9 @@ use std::process::Command;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
+mod matrix_selection;
+use matrix_selection::MatrixGrid;
+
 // Teal and chrome color scheme
 const TERM_BG: Color32 = Color32::from_rgb(10, 15, 20); // Dark blue-black
 const TERM_FG: Color32 = Color32::from_rgb(26, 188, 156); // Teal (#1ABC9C)
@@ -1396,14 +1399,30 @@ impl CharacterMatrixEngine {
         use std::process::Command;
 
         let output = Command::new("./target/release/test_ferrules_integration")
-            .arg(pdf_path.to_str().unwrap_or(""))  // Pass the PDF path as argument
+            .arg(pdf_path.to_str().unwrap_or("")) // Pass the PDF path as argument
             .env("RUST_LOG", "debug")
             .env("DYLD_LIBRARY_PATH", "./lib")
             .output()
             .map_err(|e| anyhow::anyhow!("Failed to run terminal command: {}", e))?;
 
         if output.status.success() {
-            Ok(String::from_utf8_lossy(&output.stdout).to_string())
+            let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+
+            // Filter out all the verbose intro text - only keep lines that start with numbers (the matrix rows)
+            let filtered: String = stdout
+                .lines()
+                .skip_while(|line| !line.trim_start().starts_with(|c: char| c.is_ascii_digit()))
+                .filter(|line| {
+                    // Keep lines that start with row numbers (e.g., "  0 ", " 10 ", "100 ")
+                    line.trim_start()
+                        .chars()
+                        .next()
+                        .map_or(false, |c| c.is_ascii_digit())
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+
+            Ok(filtered)
         } else {
             Err(anyhow::anyhow!(
                 "Terminal command failed: {}",
@@ -2234,6 +2253,9 @@ struct Chonker5App {
     // Cached ferrules terminal output (to avoid running command every frame)
     ferrules_output_cache: Option<String>,
 
+    // Matrix grid for rectangular selection
+    ferrules_matrix_grid: Option<MatrixGrid>,
+
     // Async runtime
     runtime: Arc<tokio::runtime::Runtime>,
 
@@ -2339,6 +2361,7 @@ impl Chonker5App {
             active_tab: ExtractionTab::Pdf,
             ferrules_binary: None,
             ferrules_output_cache: None,
+            ferrules_matrix_grid: None,
             runtime,
             vision_receiver: None,
             file_dialog_receiver: None,
@@ -2478,6 +2501,7 @@ impl Chonker5App {
                         // Clear caches so both Matrix and Ferrules views refresh for new PDF
                         self.matrix_result.character_matrix = None;
                         self.ferrules_output_cache = None;
+                        self.ferrules_matrix_grid = None;
 
                         // Get PDF info with better error handling
                         match self.get_pdf_info(&path) {
@@ -4058,6 +4082,7 @@ impl eframe::App for Chonker5App {
                             // Clear caches so both Matrix and Ferrules views refresh for new page
                             self.matrix_result.character_matrix = None;
                             self.ferrules_output_cache = None;
+                        self.ferrules_matrix_grid = None;
                             self.render_current_page(ctx);
                             self.extract_character_matrix(ctx);
                         }
@@ -4076,6 +4101,7 @@ impl eframe::App for Chonker5App {
                             // Clear caches so both Matrix and Ferrules views refresh for new page
                             self.matrix_result.character_matrix = None;
                             self.ferrules_output_cache = None;
+                        self.ferrules_matrix_grid = None;
                             self.render_current_page(ctx);
                             self.extract_character_matrix(ctx);
                         }
@@ -4217,6 +4243,7 @@ impl eframe::App for Chonker5App {
                                                                 // Clear caches so both Matrix and Ferrules views refresh for new page
                                                                 self.matrix_result.character_matrix = None;
                                                                 self.ferrules_output_cache = None;
+                        self.ferrules_matrix_grid = None;
                                                                 self.needs_render = true;
                                                                 self.extract_character_matrix(ctx);
                                                             } else if scroll_delta.y < 0.0 && current_page < total_pages - 1 {
@@ -4224,6 +4251,7 @@ impl eframe::App for Chonker5App {
                                                                 // Clear caches so both Matrix and Ferrules views refresh for new page
                                                                 self.matrix_result.character_matrix = None;
                                                                 self.ferrules_output_cache = None;
+                        self.ferrules_matrix_grid = None;
                                                                 self.needs_render = true;
                                                                 self.extract_character_matrix(ctx);
                                                             }
@@ -4862,7 +4890,11 @@ impl eframe::App for Chonker5App {
                                                                         total_pages,
                                                                         console_output
                                                                     );
-                                                                    self.ferrules_output_cache = Some(page_output);
+                                                                    self.ferrules_output_cache = Some(page_output.clone());
+                                                                    
+                                                                    // Create the matrix grid for selection
+                                                                    self.ferrules_matrix_grid = Some(MatrixGrid::new(&console_output));
+                                                                    
                                                                     self.log("✅ Ferrules analysis complete");
                                                                 }
                                                                 Err(e) => {
@@ -4873,14 +4905,33 @@ impl eframe::App for Chonker5App {
                                                         }
                                                         
                                                         // Display cached result
-                                                        if let Some(output) = &self.ferrules_output_cache {
+                                                        if let Some(matrix_grid) = &mut self.ferrules_matrix_grid {
+                                                            // Add instructions
+                                                            ui.label(RichText::new("Click and drag to select rectangular regions. Ctrl+C to copy.")
+                                                                .color(TERM_DIM)
+                                                                .size(10.0));
+                                                            
+                                                            // Create a frame with dark background to contain the matrix
+                                                            egui::Frame::none()
+                                                                .fill(Color32::from_rgb(10, 15, 20))
+                                                                .show(ui, |ui| {
+                                                                    egui::ScrollArea::both()
+                                                                        .auto_shrink([false; 2])
+                                                                        .show(ui, |ui| {
+                                                                            matrix_grid.show(ui);
+                                                                        });
+                                                                });
+                                                        } else if let Some(output) = &self.ferrules_output_cache {
+                                                            // Fallback to regular text display
                                                             egui::ScrollArea::both()
                                                                 .auto_shrink([false; 2])
                                                                 .show(ui, |ui| {
-                                                                    ui.label(RichText::new(output)
-                                                                        .color(TERM_FG)
-                                                                        .monospace()
-                                                                        .size(9.0));
+                                                                    ui.add(
+                                                                        egui::TextEdit::multiline(&mut output.as_str())
+                                                                            .font(egui::TextStyle::Monospace)
+                                                                            .desired_width(f32::INFINITY)
+                                                                            .desired_rows(50)
+                                                                    );
                                                                 });
                                                         } else {
                                                             // Show loading state
