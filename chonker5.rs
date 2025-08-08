@@ -120,8 +120,11 @@ pub struct MatrixGrid {
     pub cursor_pos: Option<(usize, usize)>,
     pub last_blink: Instant,
     pub cursor_visible: bool,
-    pub clipboard: Vec<Vec<char>>, // Store rectangular clipboard
-    pub modified: bool,            // Track if matrix was modified
+    pub clipboard: Vec<Vec<char>>,   // Store rectangular clipboard
+    pub modified: bool,              // Track if matrix was modified
+    pub is_dragging_selection: bool, // Track if we're dragging a selection
+    pub drag_start_pos: Option<(usize, usize)>, // Where the drag started
+    pub drag_content: Vec<Vec<char>>, // Content being dragged
 }
 
 impl MatrixGrid {
@@ -146,6 +149,9 @@ impl MatrixGrid {
             cursor_visible: true,
             clipboard: Vec::new(),
             modified: false,
+            is_dragging_selection: false,
+            drag_start_pos: None,
+            drag_content: Vec::new(),
         }
     }
 
@@ -189,24 +195,117 @@ impl MatrixGrid {
             }
         }
 
-        // Handle selection
+        // Handle drag start
         if response.drag_started() {
             if let Some(pos) = response.hover_pos() {
                 let local_pos = pos - rect.min;
                 let row = (local_pos.y / self.char_size.y) as usize;
                 let col = (local_pos.x / self.char_size.x) as usize;
-                self.selection.start = Some((row, col));
-                self.selection.end = Some((row, col));
-                self.cursor_pos = None;
+
+                // Check if we're starting a drag on an existing selection
+                if self.selection.is_selected(row, col)
+                    && self.selection.start.is_some()
+                    && self.selection.end.is_some()
+                {
+                    // Start dragging the selection
+                    self.is_dragging_selection = true;
+                    self.drag_start_pos = Some((row, col));
+
+                    // Copy the selected content
+                    if let (Some(start), Some(end)) = (self.selection.start, self.selection.end) {
+                        let min_row = start.0.min(end.0).min(self.matrix.len().saturating_sub(1));
+                        let max_row = start.0.max(end.0).min(self.matrix.len().saturating_sub(1));
+                        let min_col = start.1.min(end.1);
+                        let max_col = start.1.max(end.1);
+
+                        self.drag_content.clear();
+                        for row in min_row..=max_row {
+                            if row < self.matrix.len() {
+                                let row_data = &self.matrix[row];
+                                let mut row_chars = Vec::new();
+                                let row_max_col = max_col.min(row_data.len().saturating_sub(1));
+
+                                for col in min_col..=row_max_col {
+                                    if col < row_data.len() {
+                                        row_chars.push(row_data[col]);
+                                    }
+                                }
+                                self.drag_content.push(row_chars);
+                            }
+                        }
+
+                        // Clear the original selection
+                        for row in min_row..=max_row {
+                            if row < self.matrix.len() {
+                                let row_data = &mut self.matrix[row];
+                                let row_max_col = max_col.min(row_data.len().saturating_sub(1));
+                                for col in min_col..=row_max_col {
+                                    if col < row_data.len() {
+                                        row_data[col] = ' ';
+                                    }
+                                }
+                            }
+                        }
+                        self.modified = true;
+                    }
+                } else {
+                    // Start a new selection
+                    self.selection.start = Some((row, col));
+                    self.selection.end = Some((row, col));
+                    self.cursor_pos = None;
+                    self.is_dragging_selection = false;
+                }
             }
         }
 
+        // Handle dragging
         if response.dragged() {
             if let Some(pos) = response.hover_pos() {
                 let local_pos = pos - rect.min;
                 let row = (local_pos.y / self.char_size.y) as usize;
                 let col = (local_pos.x / self.char_size.x) as usize;
-                self.selection.end = Some((row, col));
+
+                if self.is_dragging_selection {
+                    // Update visual feedback during drag
+                    // We'll show a preview at the current position
+                } else {
+                    // Continue selection
+                    self.selection.end = Some((row, col));
+                }
+            }
+        }
+
+        // Handle drag release
+        if response.drag_released() {
+            if self.is_dragging_selection {
+                if let Some(pos) = response.hover_pos() {
+                    let local_pos = pos - rect.min;
+                    let row = (local_pos.y / self.char_size.y) as usize;
+                    let col = (local_pos.x / self.char_size.x) as usize;
+
+                    // Drop the content at the new position
+                    for (i, drag_row) in self.drag_content.iter().enumerate() {
+                        let target_row = row + i;
+                        if target_row < self.matrix.len() {
+                            for (j, &ch) in drag_row.iter().enumerate() {
+                                let target_col = col + j;
+                                if target_col < self.matrix[target_row].len() {
+                                    self.matrix[target_row][target_col] = ch;
+                                }
+                            }
+                        }
+                    }
+                    self.modified = true;
+
+                    // Clear selection after drop
+                    self.selection.start = None;
+                    self.selection.end = None;
+                }
+
+                // Reset drag state
+                self.is_dragging_selection = false;
+                self.drag_start_pos = None;
+                self.drag_content.clear();
             }
         }
 
@@ -277,6 +376,55 @@ impl MatrixGrid {
                         font_id.clone(),
                         TERM_BG,
                     );
+                }
+            }
+        }
+
+        // Draw drag preview if we're dragging
+        if self.is_dragging_selection {
+            if let Some(hover_pos) = response.hover_pos() {
+                let local_pos = hover_pos - rect.min;
+                let preview_row = (local_pos.y / self.char_size.y) as usize;
+                let preview_col = (local_pos.x / self.char_size.x) as usize;
+
+                // Draw semi-transparent preview of dragged content
+                for (i, drag_row) in self.drag_content.iter().enumerate() {
+                    let target_row = preview_row + i;
+                    if target_row < self.matrix.len() {
+                        for (j, &ch) in drag_row.iter().enumerate() {
+                            let target_col = preview_col + j;
+                            if target_col < self.matrix.get(target_row).map_or(0, |r| r.len()) {
+                                let pos = rect.min
+                                    + Vec2::new(
+                                        target_col as f32 * self.char_size.x,
+                                        target_row as f32 * self.char_size.y,
+                                    );
+
+                                // Draw preview background
+                                let preview_rect = Rect::from_min_size(
+                                    pos - Vec2::new(0.0, self.char_size.y * 0.1),
+                                    Vec2::new(self.char_size.x, self.char_size.y * 1.2),
+                                );
+                                painter.rect_filled(
+                                    preview_rect,
+                                    2.0,
+                                    Color32::from_rgba_premultiplied(26, 188, 156, 60),
+                                );
+
+                                // Draw preview character
+                                painter.text(
+                                    pos + Vec2::new(
+                                        self.char_size.x * 0.45,
+                                        self.char_size.y * 0.5,
+                                    ),
+                                    egui::Align2::CENTER_CENTER,
+                                    ch.to_string(),
+                                    font_id.clone(),
+                                    Color32::from_rgba_premultiplied(255, 255, 255, 180),
+                                );
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -2199,7 +2347,7 @@ impl eframe::App for Chonker5App {
                                                             self.raw_text_matrix_grid = Some(MatrixGrid::new(&matrix_text));
                                                         }
                                                         
-                                                        ui.label(RichText::new("Click to place cursor. Click and drag to select. Type to edit. Ctrl+C/X/V for copy/cut/paste.")
+                                                        ui.label(RichText::new("Click to place cursor. Click and drag to select. Drag selection to move. Type to edit. Ctrl+C/X/V for copy/cut/paste.")
                                                             .color(TERM_DIM)
                                                             .size(10.0));
                                                         
@@ -2269,7 +2417,7 @@ impl eframe::App for Chonker5App {
                                                         }
 
                                                         if let Some(matrix_grid) = &mut self.ferrules_matrix_grid {
-                                                            ui.label(RichText::new("Click to place cursor. Click and drag to select. Type to edit. Ctrl+C/X/V for copy/cut/paste.")
+                                                            ui.label(RichText::new("Click to place cursor. Click and drag to select. Drag selection to move. Type to edit. Ctrl+C/X/V for copy/cut/paste.")
                                                                 .color(TERM_DIM)
                                                                 .size(10.0));
 
