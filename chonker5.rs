@@ -80,17 +80,25 @@ impl MatrixSelection {
 
     pub fn get_selected_text(&self, matrix: &[Vec<char>]) -> String {
         if let (Some(start), Some(end)) = (self.start, self.end) {
-            let min_row = start.0.min(end.0);
-            let max_row = start.0.max(end.0);
+            let min_row = start.0.min(end.0).min(matrix.len().saturating_sub(1));
+            let max_row = start.0.max(end.0).min(matrix.len().saturating_sub(1));
             let min_col = start.1.min(end.1);
             let max_col = start.1.max(end.1);
 
-            let mut result = String::new();
+            // Limit selection size to prevent performance issues
+            if (max_row - min_row + 1) * (max_col - min_col + 1) > 100000 {
+                return String::from("[Selection too large]");
+            }
+
+            let mut result =
+                String::with_capacity((max_row - min_row + 1) * (max_col - min_col + 2));
             for row in min_row..=max_row {
                 if row < matrix.len() {
-                    for col in min_col..=max_col {
-                        if col < matrix[row].len() {
-                            result.push(matrix[row][col]);
+                    let row_data = &matrix[row];
+                    let row_max_col = max_col.min(row_data.len().saturating_sub(1));
+                    for col in min_col..=row_max_col {
+                        if col < row_data.len() {
+                            result.push(row_data[col]);
                         }
                     }
                     if row < max_row {
@@ -112,6 +120,8 @@ pub struct MatrixGrid {
     pub cursor_pos: Option<(usize, usize)>,
     pub last_blink: Instant,
     pub cursor_visible: bool,
+    pub clipboard: Vec<Vec<char>>, // Store rectangular clipboard
+    pub modified: bool,            // Track if matrix was modified
 }
 
 impl MatrixGrid {
@@ -134,6 +144,8 @@ impl MatrixGrid {
             cursor_pos: None,
             last_blink: Instant::now(),
             cursor_visible: true,
+            clipboard: Vec::new(),
+            modified: false,
         }
     }
 
@@ -170,6 +182,9 @@ impl MatrixGrid {
                     self.cursor_pos = Some((row, col));
                     self.cursor_visible = true;
                     self.last_blink = Instant::now();
+                    // Clear selection when clicking to place cursor
+                    self.selection.start = None;
+                    self.selection.end = None;
                 }
             }
         }
@@ -266,13 +281,159 @@ impl MatrixGrid {
             }
         }
 
-        // Handle copy on Ctrl+C
-        if ui.input(|i| i.modifiers.command && i.key_pressed(egui::Key::C)) {
-            let selected_text = self.selection.get_selected_text(&self.matrix);
-            if !selected_text.is_empty() {
-                ui.output_mut(|o| o.copied_text = selected_text);
+        // Handle cut/copy/paste operations
+        ui.input(|i| {
+            if i.modifiers.command || i.modifiers.ctrl {
+                // Copy (Ctrl+C)
+                if i.key_pressed(egui::Key::C) {
+                    if let (Some(start), Some(end)) = (self.selection.start, self.selection.end) {
+                        let min_row = start.0.min(end.0).min(self.matrix.len().saturating_sub(1));
+                        let max_row = start.0.max(end.0).min(self.matrix.len().saturating_sub(1));
+                        let min_col = start.1.min(end.1);
+                        let max_col = start.1.max(end.1);
+
+                        // Limit clipboard size to prevent memory issues
+                        let selection_size = (max_row - min_row + 1) * (max_col - min_col + 1);
+                        if selection_size <= 100000 {
+                            // Copy the rectangular selection to clipboard
+                            self.clipboard.clear();
+                            self.clipboard.reserve(max_row - min_row + 1);
+
+                            for row in min_row..=max_row {
+                                if row < self.matrix.len() {
+                                    let row_data = &self.matrix[row];
+                                    let mut row_chars = Vec::with_capacity(max_col - min_col + 1);
+                                    let row_max_col = max_col.min(row_data.len().saturating_sub(1));
+
+                                    for col in min_col..=row_max_col {
+                                        if col < row_data.len() {
+                                            row_chars.push(row_data[col]);
+                                        }
+                                    }
+                                    self.clipboard.push(row_chars);
+                                }
+                            }
+
+                            // For small selections, also copy as text to system clipboard
+                            if selection_size < 10000 {
+                                let selected_text = self.selection.get_selected_text(&self.matrix);
+                                if !selected_text.is_empty()
+                                    && selected_text != "[Selection too large]"
+                                {
+                                    ui.output_mut(|o| o.copied_text = selected_text);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Cut (Ctrl+X)
+                if i.key_pressed(egui::Key::X) {
+                    if let (Some(start), Some(end)) = (self.selection.start, self.selection.end) {
+                        let min_row = start.0.min(end.0).min(self.matrix.len().saturating_sub(1));
+                        let max_row = start.0.max(end.0).min(self.matrix.len().saturating_sub(1));
+                        let min_col = start.1.min(end.1);
+                        let max_col = start.1.max(end.1);
+
+                        // Limit clipboard size to prevent memory issues
+                        let selection_size = (max_row - min_row + 1) * (max_col - min_col + 1);
+                        if selection_size <= 100000 {
+                            // Copy to clipboard first
+                            self.clipboard.clear();
+                            self.clipboard.reserve(max_row - min_row + 1);
+
+                            for row in min_row..=max_row {
+                                if row < self.matrix.len() {
+                                    let row_data = &self.matrix[row];
+                                    let mut row_chars = Vec::with_capacity(max_col - min_col + 1);
+                                    let row_max_col = max_col.min(row_data.len().saturating_sub(1));
+
+                                    for col in min_col..=row_max_col {
+                                        if col < row_data.len() {
+                                            row_chars.push(row_data[col]);
+                                        }
+                                    }
+                                    self.clipboard.push(row_chars);
+                                }
+                            }
+
+                            // Clear the selected area
+                            for row in min_row..=max_row {
+                                if row < self.matrix.len() {
+                                    let row_data = &mut self.matrix[row];
+                                    let row_max_col = max_col.min(row_data.len().saturating_sub(1));
+                                    for col in min_col..=row_max_col {
+                                        if col < row_data.len() {
+                                            row_data[col] = ' ';
+                                        }
+                                    }
+                                }
+                            }
+                            self.modified = true;
+
+                            // For small selections, also copy as text to system clipboard
+                            if selection_size < 10000 {
+                                // Note: We can't get selected text after clearing, so we'd need to build it from clipboard
+                                // For now, let's skip system clipboard for cut operation on large selections
+                            }
+                        }
+                    }
+                }
+
+                // Paste (Ctrl+V)
+                if i.key_pressed(egui::Key::V) {
+                    // Determine paste position - use cursor position or selection start
+                    let paste_pos = if let Some(cursor_pos) = self.cursor_pos {
+                        cursor_pos
+                    } else if let Some(start) = self.selection.start {
+                        start
+                    } else {
+                        (0, 0) // Default to top-left if no cursor or selection
+                    };
+
+                    if !self.clipboard.is_empty() {
+                        // Paste the rectangular clipboard
+                        for (i, clipboard_row) in self.clipboard.iter().enumerate() {
+                            let target_row = paste_pos.0 + i;
+                            if target_row < self.matrix.len() {
+                                for (j, &ch) in clipboard_row.iter().enumerate() {
+                                    let target_col = paste_pos.1 + j;
+                                    if target_col < self.matrix[target_row].len() {
+                                        self.matrix[target_row][target_col] = ch;
+                                    }
+                                }
+                            }
+                        }
+
+                        // Clear selection after paste
+                        self.selection.start = None;
+                        self.selection.end = None;
+                        self.modified = true;
+                    }
+                }
             }
-        }
+
+            // Handle character input for editing
+            if let Some((cursor_row, cursor_col)) = self.cursor_pos {
+                for event in &i.events {
+                    if let egui::Event::Text(text) = event {
+                        for ch in text.chars() {
+                            if cursor_row < self.matrix.len()
+                                && cursor_col < self.matrix[cursor_row].len()
+                            {
+                                self.matrix[cursor_row][cursor_col] = ch;
+                                self.modified = true;
+                                // Move cursor right
+                                if cursor_col + 1 < self.matrix[cursor_row].len() {
+                                    self.cursor_pos = Some((cursor_row, cursor_col + 1));
+                                }
+                                break; // Only process first character
+                            }
+                        }
+                    }
+                }
+            }
+        });
 
         response
     }
@@ -922,6 +1083,9 @@ struct Chonker5App {
     ferrules_output_cache: Option<String>,
     ferrules_matrix_grid: Option<MatrixGrid>,
 
+    // Raw text matrix grid
+    raw_text_matrix_grid: Option<MatrixGrid>,
+
     // Async runtime
     runtime: Arc<tokio::runtime::Runtime>,
     vision_receiver: Option<mpsc::Receiver<Result<CharacterMatrix, String>>>,
@@ -1004,6 +1168,7 @@ impl Chonker5App {
             ferrules_binary: None,
             ferrules_output_cache: None,
             ferrules_matrix_grid: None,
+            raw_text_matrix_grid: None,
             runtime,
             vision_receiver: None,
             file_dialog_receiver: None,
@@ -1121,6 +1286,7 @@ impl Chonker5App {
                         self.matrix_result.character_matrix = None;
                         self.ferrules_output_cache = None;
                         self.ferrules_matrix_grid = None;
+                        self.raw_text_matrix_grid = None;
 
                         match self.get_pdf_info(&path) {
                             Ok(pages) => {
@@ -2010,42 +2176,61 @@ impl eframe::App for Chonker5App {
                                                     } else if let Some(error) = &self.matrix_result.error {
                                                         ui.label(RichText::new(error).color(TERM_ERROR).monospace());
                                                     } else if let Some(character_matrix) = &self.matrix_result.character_matrix {
-                                                        // Display the character matrix with line numbers
-                                                        ui.label(RichText::new(format!("Character Matrix ({}x{}) - Page {}", 
-                                                            character_matrix.width, 
-                                                            character_matrix.height,
-                                                            self.current_page + 1))
-                                                            .color(TERM_FG)
-                                                            .monospace()
-                                                            .size(12.0));
-                                                        
-                                                        ui.separator();
-                                                        
-                                                        // Create the matrix display with line numbers
-                                                        let mut matrix_text = String::new();
-                                                        for (row_idx, row) in character_matrix.matrix.iter().enumerate() {
-                                                            matrix_text.push_str(&format!("{:3} ", row_idx));
-                                                            for &ch in row {
-                                                                matrix_text.push(if ch == ' ' { '·' } else { ch });
-                                                            }
-                                                            matrix_text.push('\n');
+                                                        // Create or update the matrix grid for Raw Text
+                                                        if self.matrix_result.editable_matrix.is_none() {
+                                                            // Initialize the editable matrix from character matrix
+                                                            self.matrix_result.editable_matrix = Some(character_matrix.matrix.clone());
                                                         }
                                                         
-                                                        // Display in a scrollable text area
-                                                        egui::ScrollArea::both()
-                                                            .auto_shrink([false; 2])
+                                                        // Format the matrix with line numbers for MatrixGrid
+                                                        let mut matrix_text = String::new();
+                                                        if let Some(editable_matrix) = &self.matrix_result.editable_matrix {
+                                                            for (row_idx, row) in editable_matrix.iter().enumerate() {
+                                                                matrix_text.push_str(&format!("{:3} ", row_idx));
+                                                                for &ch in row {
+                                                                    matrix_text.push(ch);
+                                                                }
+                                                                matrix_text.push('\n');
+                                                            }
+                                                        }
+                                                        
+                                                        // Create or update MatrixGrid
+                                                        if self.raw_text_matrix_grid.is_none() {
+                                                            self.raw_text_matrix_grid = Some(MatrixGrid::new(&matrix_text));
+                                                        }
+                                                        
+                                                        ui.label(RichText::new("Click to place cursor. Click and drag to select. Type to edit. Ctrl+C/X/V for copy/cut/paste.")
+                                                            .color(TERM_DIM)
+                                                            .size(10.0));
+                                                        
+                                                        egui::Frame::none()
+                                                            .fill(Color32::from_rgb(10, 15, 20))
                                                             .show(ui, |ui| {
-                                                                ui.add(
-                                                                    egui::TextEdit::multiline(&mut matrix_text.as_str())
-                                                                        .font(egui::TextStyle::Monospace)
-                                                                        .desired_width(f32::INFINITY)
-                                                                        .desired_rows(30)
-                                                                );
+                                                                egui::ScrollArea::both()
+                                                                    .auto_shrink([false; 2])
+                                                                    .show(ui, |ui| {
+                                                                        // Use the stored matrix grid
+                                                                        if let Some(grid) = &mut self.raw_text_matrix_grid {
+                                                                            let response = grid.show(ui);
+                                                                            
+                                                                            // Sync any changes made by MatrixGrid back to the editable matrix
+                                                                            if grid.modified {
+                                                                                if let Some(editable) = &mut self.matrix_result.editable_matrix {
+                                                                                    *editable = grid.matrix.clone();
+                                                                                    self.matrix_result.matrix_dirty = true;
+                                                                                }
+                                                                                grid.modified = false; // Reset the flag
+                                                                            }
+                                                                        }
+                                                                    });
                                                             });
                                                         
                                                         // Show statistics
                                                         ui.separator();
-                                                        ui.label(RichText::new(format!("Text Regions: {} | Original Text Objects: {}", 
+                                                        ui.label(RichText::new(format!("Character Matrix ({}x{}) - Page {} | Text Regions: {} | Objects: {}", 
+                                                            character_matrix.width, 
+                                                            character_matrix.height,
+                                                            self.current_page + 1,
                                                             character_matrix.text_regions.len(),
                                                             character_matrix.original_text.len()))
                                                             .color(TERM_DIM)
@@ -2084,7 +2269,7 @@ impl eframe::App for Chonker5App {
                                                         }
 
                                                         if let Some(matrix_grid) = &mut self.ferrules_matrix_grid {
-                                                            ui.label(RichText::new("Click and drag to select. Ctrl+C to copy.")
+                                                            ui.label(RichText::new("Click to place cursor. Click and drag to select. Type to edit. Ctrl+C/X/V for copy/cut/paste.")
                                                                 .color(TERM_DIM)
                                                                 .size(10.0));
 
