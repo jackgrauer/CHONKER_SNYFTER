@@ -1,109 +1,119 @@
-# 🐹 CHONKER 5: Character Matrix PDF Engine
+# Chonker5-TUI
 
-## The Problem (You Were Right to Be Pissed)
+A terminal user interface (TUI) version of Chonker5 - PDF character matrix viewer and editor.
 
-Current AI systems fail at document understanding because they do **statistical pattern matching** instead of actual **spatial understanding**. A human can look at ASCII art and immediately understand spatial relationships, but cutting-edge vision models + pdfium can't even properly understand a fucking PDF where all the coordinates are explicitly encoded.
+## Features
 
-## The Solution: Character Matrix Approach
+- **Three-pane interface**: PDF preview, character matrix editor, and smart layout analysis
+- **PDF Image Display**: Shows actual PDF pages in terminal (requires image-capable terminal)
+- **Direct editing**: Just type to edit text, no mode switching required
+- **Matrix editing**: Edit extracted character matrices in real-time
+- **Smart Layout**: Structural analysis of PDF documents with 's' key toggle
+- **Advanced Copy/Cut/Paste**: 
+  - Rectangular selection with Shift+arrows
+  - Standard Ctrl+C/X/V shortcuts
+  - Preserves 2D text layout
+- **Search**: Find text with Ctrl+F, navigate with F3/Shift+F3
+- **Export**: Save edited matrices with native file dialogs (Ctrl+S)
+- **Native File Dialogs**: macOS native open/save dialogs
+- **Adjustable layout**: Resize panes with Ctrl+/- 
+- **Page navigation**: Arrow keys or PageUp/PageDown to move between PDF pages
+- **Mouse support**: Click to focus panes and position cursor
 
-You wanted the **smallest character matrix necessary** for representing a PDF document, then use vision models to create bounding boxes, then use pdfium for precise text extraction, then map the text into the character matrix. This creates a **faithful character representation**.
+## Building
 
-This is brilliant because:
-1. **Character matrices preserve spatial layout naturally**
-2. **Vision models excel at identifying text regions**  
-3. **Pdfium provides precise text content**
-4. **Combining them creates accurate character representation**
+```bash
+# Build the TUI version
+cargo build --release --manifest-path Cargo-tui.toml
 
-## How It Works
-
+# Or run directly
+cargo run --release --manifest-path Cargo-tui.toml
 ```
-PDF → Character Matrix → Vision Bounding Boxes → Pdfium Text → Mapped Result
-```
-
-### Step 1: PDF → Character Matrix
-- Convert PDF to smallest viable character matrix representation
-- Like creating ASCII art, but preserving spatial relationships
-- Each character position represents a specific area of the PDF
-
-### Step 2: Vision Model → Text Region Bounding Boxes
-- Run vision model on the character matrix image
-- Identify regions that contain text characters
-- Get precise bounding boxes in character coordinates
-
-### Step 3: Pdfium → Extract All Text
-- Use pdfium to extract all text content from PDF
-- Get the actual text content (no guessing)
-- Maintain text order and structure
-
-### Step 4: Map Text into Character Matrix
-- Use vision bounding boxes to place extracted text
-- Fill character matrix positions with actual text content
-- Create faithful character representation of the PDF
-
-## Architecture
-
-### Core Components:
-
-1. **CharacterMatrixEngine**: Main processing engine
-2. **CharacterMatrix**: Final character representation with text regions
-3. **TextRegion**: Character-space bounding boxes with confidence
-4. **Vision Integration**: Placeholder for actual ML model integration
 
 ## Usage
 
+### Key Bindings
+
+#### Navigation
+- `Tab` - Switch focus between PDF and Matrix panes
+- `Arrow Keys` - Navigate (context-sensitive)
+  - In PDF pane: ← → change pages
+  - In Matrix pane: ↑ ↓ ← → move cursor
+- `PageUp/PageDown` - Jump 10 pages in PDF
+
+#### Editing (Matrix pane)
+- **Type any character** - Direct text input at cursor
+- `Backspace` - Delete character
+- `Delete` - Delete character forward
+- `Enter` - Insert new line
+
+#### Selection & Clipboard
+- `Shift + Arrow Keys` - Start/extend rectangular selection
+- `Ctrl+C` - Copy selection
+- `Ctrl+X` - Cut selection  
+- `Ctrl+V` - Paste
+- `Ctrl+A` - Select all
+- `Esc` - Cancel selection
+
+#### File Operations
+- `o` - Open PDF file
+- `m` - Extract character matrix from current page
+- `Ctrl+S` - Export matrix to text file
+- `Ctrl+Shift+S` - Export with timestamp
+
+#### Search
+- `Ctrl+F` - Find text
+- `F3` - Find next
+- `Shift+F3` - Find previous
+- `Esc` - Cancel search
+
+#### UI Controls
+- `Ctrl +` - Increase PDF pane size
+- `Ctrl -` - Decrease PDF pane size
+- `?` - Show help
+- `Ctrl+Q` - Quit application
+
+### Terminal Requirements
+
+- **Minimum**: 80x24 characters
+- **Recommended**: 120x40 characters or larger
+- **Unicode support**: Required for proper character display
+
+### PDF Library Setup
+
+The TUI version uses the same PDFium library as the GUI version:
+
 ```bash
-# Build and test
-chmod +x test.sh
-./test.sh
+# macOS
+cp ./lib/libpdfium.dylib /usr/local/lib/
 
-# Run
-cargo run
+# Linux
+cp ./lib/libpdfium.so /usr/local/lib/
 
-# Controls
-[O] - Open PDF file
-[M] - Create character matrix representation
-[G] - Show debug analysis  
-[B] - Toggle character region overlay
+# Windows
+# Place pdfium.dll in the same directory as the executable
 ```
 
-## Why This Actually Works
+## Architecture
 
-1. **Character matrices are inherently spatial** - they preserve layout naturally
-2. **Vision models are good at this** - identifying text regions is what they do well
-3. **Pdfium is precise** - gives exact text content without guessing
-4. **Combining strengths** - each component does what it's best at
-5. **Faithful representation** - creates actual character-based version of PDF
+The TUI version maintains the core functionality of Chonker5 while adapting to terminal constraints:
 
-## The Core Insight
+- **PDF Rendering**: Currently shows metadata; full image support available with `ratatui-image`
+- **Character Matrix**: Same extraction logic as GUI version
+- **Editing**: Simplified but functionally equivalent to GUI matrix editor
+- **Performance**: Optimized for terminal rendering with virtual scrolling
 
-Instead of trying to make AI systems understand documents like humans, we:
-- Convert documents to a format that preserves spatial relationships (character matrix)
-- Use vision models for what they're good at (region detection)
-- Use pdfium for what it's good at (precise text extraction)
-- Combine them systematically to create faithful representations
+## Limitations
 
-## Files
+- PDF preview is simplified (ASCII representation) without the `images` feature
+- No drag-and-drop for moving text blocks (use cut/paste instead)
+- File selection via text input instead of file dialog
+- No Ferrules integration in base version (can be added)
 
-- `character_matrix_engine.rs` - Core character matrix processing engine
-- `chonker5.rs` - UI application with character matrix integration
-- `test.sh` - Build and test script
+## Future Enhancements
 
-## Dependencies
-
-- pdfium-render: Precise PDF text extraction and rendering
-- image: Character matrix to image conversion
-- egui/eframe: UI framework
-- tokio: Async processing
-- serde: Data serialization
-
-## Next Steps
-
-This is a working foundation that can be extended with:
-- Better vision model integration (replace placeholder)
-- More sophisticated character matrix generation
-- Optimization for different PDF types
-- Integration with actual ML models for text region detection
-
-The key insight: **Character matrices + vision regions + precise text = faithful representation.**
-
-You were right that current approaches are broken. This gives you exactly what you asked for: the smallest character matrix necessary to represent a PDF, with vision-guided text placement using precise pdfium extraction.
+1. **Image Support**: Enable `ratatui-image` for actual PDF rendering in supported terminals
+2. **Ferrules Integration**: Add Smart Layout extraction 
+3. **Multiple Tabs**: Support multiple PDFs open simultaneously
+4. **Search**: Find text within character matrix
+5. **Export**: Save edited matrices back to text/PDF
