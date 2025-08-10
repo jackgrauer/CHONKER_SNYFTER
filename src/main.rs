@@ -1379,10 +1379,10 @@ Layout Analysis:
         if area.width < 10 || area.height < 5 {
             return;
         }
-        
+
         // Prevent overflow: ensure area coordinates + dimensions don't exceed u16 max (65535)
-        if area.x.saturating_add(area.width) >= 65535 
-            || area.y.saturating_add(area.height) >= 65535 {
+        if area.x.saturating_add(area.width) >= 65535 || area.y.saturating_add(area.height) >= 65535
+        {
             return;
         }
 
