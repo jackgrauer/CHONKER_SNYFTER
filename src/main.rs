@@ -373,11 +373,11 @@ impl ChonkerTUI {
                     let base_height = ((term_size.1 as f32 - 7.0) * 14.0) as i32;
 
                     // Clamp render dimensions to prevent overflow
-                    let target_width = ((base_width as f32 * self.zoom_level * 4.0) as i32)
-                        .clamp(100, 8000);
-                    let target_height = ((base_height as f32 * self.zoom_level * 4.0) as i32)
-                        .clamp(100, 8000);
-                    
+                    let target_width =
+                        ((base_width as f32 * self.zoom_level * 4.0) as i32).clamp(100, 8000);
+                    let target_height =
+                        ((base_height as f32 * self.zoom_level * 4.0) as i32).clamp(100, 8000);
+
                     let render_config = PdfRenderConfig::new()
                         .set_target_width(target_width)
                         .set_maximum_height(target_height);
@@ -456,8 +456,8 @@ Layout Analysis:
         if let Some(pdf_path) = &self.pdf_path.clone() {
             // Use fixed dimensions to extract the whole page, not just viewport
             // This ensures we get all text regardless of zoom level
-            let mw = 200;  // Wide enough for most PDFs
-            let mh = 100;  // Tall enough for most pages
+            let mw = 200; // Wide enough for most PDFs
+            let mh = 100; // Tall enough for most pages
 
             // CREATE PDFIUM AND EXTRACT, PROCESS ALL IN ONE EXPRESSION
             let result = {
@@ -930,7 +930,7 @@ Layout Analysis:
                         _ => {}
                     }
                 }
-                
+
                 // Handle Ctrl key combinations
                 if key.modifiers.contains(KeyModifiers::CONTROL)
                     || key.modifiers.contains(KeyModifiers::SUPER)
@@ -985,40 +985,6 @@ Layout Analysis:
                                 "Line numbers: {}",
                                 if self.show_line_numbers { "ON" } else { "OFF" }
                             );
-                        }
-                        KeyCode::Char('+') | KeyCode::Char('=') => {
-                            // Zoom in PDF
-                            if self.pdf_path.is_some() {
-                                self.zoom_level = (self.zoom_level * 1.2).min(3.0);
-                                self.pdf_image = None; // Force re-render with new zoom
-                                self.status_message =
-                                    format!("Zoom: {:.0}%", self.zoom_level * 100.0);
-                            }
-                        }
-                        KeyCode::Char('-') | KeyCode::Char('_') => {
-                            // Zoom out PDF
-                            if self.pdf_path.is_some() {
-                                self.zoom_level = (self.zoom_level / 1.2).max(0.05);  // Lower minimum to 5%
-                                self.pdf_image = None; // Force re-render with new zoom
-                                self.status_message =
-                                    format!("Zoom: {:.0}%", self.zoom_level * 100.0);
-                            }
-                        }
-                        KeyCode::Char('0') => {
-                            // Reset zoom to default
-                            if self.pdf_path.is_some() {
-                                self.zoom_level = 0.15;
-                                self.pdf_image = None; // Force re-render with new zoom
-                                self.status_message = "Zoom reset to 15%".to_string();
-                            }
-                        }
-                        KeyCode::Char('[') => {
-                            // Adjust split ratio left
-                            self.split_ratio = self.split_ratio.saturating_sub(5).max(20);  // Minimum 20% to prevent too narrow
-                        }
-                        KeyCode::Char(']') => {
-                            // Adjust split ratio right
-                            self.split_ratio = (self.split_ratio + 5).min(80);  // Maximum 80% to prevent too wide
                         }
                         _ => {}
                     }
@@ -1221,6 +1187,38 @@ Layout Analysis:
                             "Line numbers disabled".to_string()
                         };
                     }
+                    // Zoom controls - work without modifiers
+                    KeyCode::Char('+') | KeyCode::Char('=') 
+                        if key.modifiers.is_empty() && self.pdf_path.is_some() => {
+                        // Zoom in PDF
+                        self.zoom_level = (self.zoom_level * 1.2).min(3.0);
+                        self.pdf_image = None; // Force re-render with new zoom
+                        self.status_message = format!("Zoom: {:.0}%", self.zoom_level * 100.0);
+                    }
+                    KeyCode::Char('-') | KeyCode::Char('_') 
+                        if key.modifiers.is_empty() && self.pdf_path.is_some() => {
+                        // Zoom out PDF
+                        self.zoom_level = (self.zoom_level / 1.2).max(0.05);
+                        self.pdf_image = None; // Force re-render with new zoom
+                        self.status_message = format!("Zoom: {:.0}%", self.zoom_level * 100.0);
+                    }
+                    KeyCode::Char('0') 
+                        if key.modifiers.is_empty() && self.pdf_path.is_some() => {
+                        // Reset zoom to default
+                        self.zoom_level = 0.15;
+                        self.pdf_image = None; // Force re-render with new zoom
+                        self.status_message = "Zoom reset to 15%".to_string();
+                    }
+                    KeyCode::Char('[') if key.modifiers.is_empty() => {
+                        // Adjust split ratio left
+                        self.split_ratio = self.split_ratio.saturating_sub(5).max(20);
+                        self.status_message = format!("Split: {}%", self.split_ratio);
+                    }
+                    KeyCode::Char(']') if key.modifiers.is_empty() => {
+                        // Adjust split ratio right
+                        self.split_ratio = (self.split_ratio + 5).min(80);
+                        self.status_message = format!("Split: {}%", self.split_ratio);
+                    }
                     KeyCode::Char(c)
                         if self.text_view_mode == TextViewMode::RawMatrix
                             && !key.modifiers.contains(KeyModifiers::CONTROL) =>
@@ -1326,10 +1324,10 @@ Layout Analysis:
         let buf_area = buf.area();
         let buf_width = buf_area.width;
         let buf_height = buf_area.height;
-        
+
         let max_row = area.y.saturating_add(area.height).min(buf_height);
         let max_col = area.x.saturating_add(area.width).min(buf_width);
-        
+
         for row in area.y..max_row {
             for col in area.x..max_col {
                 if col < buf_width && row < buf_height {
