@@ -574,35 +574,36 @@ Layout Analysis:
             })
             .collect::<String>()
     }
-    
+
     fn is_rectangular_block(&self, text: &str) -> bool {
         // Check if clipboard content is a rectangular block (uniform line lengths)
         let lines: Vec<&str> = text.lines().collect();
         if lines.len() <= 1 {
             return false;
         }
-        
+
         // Check if all lines have similar length (allowing small variations)
         let first_len = lines[0].len();
         let all_similar = lines.iter().all(|line| {
             let len = line.len();
-            (len as i32 - first_len as i32).abs() <= 2  // Allow 2 char difference
+            (len as i32 - first_len as i32).abs() <= 2 // Allow 2 char difference
         });
-        
+
         // Also check if lines have consistent leading spaces (columnar data)
         if all_similar {
             // Check for consistent indentation suggesting column data
-            let leading_spaces: Vec<usize> = lines.iter()
+            let leading_spaces: Vec<usize> = lines
+                .iter()
                 .map(|line| line.chars().take_while(|c| *c == ' ').count())
                 .collect();
-            
+
             // If all lines have same leading spaces, it's likely a rectangular block
             if !leading_spaces.is_empty() {
                 let first_spaces = leading_spaces[0];
                 return leading_spaces.iter().all(|&spaces| spaces == first_spaces);
             }
         }
-        
+
         all_similar
     }
 
@@ -712,7 +713,7 @@ Layout Analysis:
 
             // Check if this is a rectangular block first (before borrowing matrix)
             let is_rect_block = self.is_rectangular_block(&sanitized_text);
-            
+
             // Use system clipboard content - paste as a block
             if let Some(matrix) = &mut self.editable_matrix {
                 let (start_row, start_col) = self.cursor;
@@ -720,15 +721,16 @@ Layout Analysis:
 
                 // If empty text, treat as single space
                 let lines = if lines.is_empty() { vec![" "] } else { lines };
-                
+
                 // If rectangular block, preserve the column structure
                 if is_rect_block && !lines.is_empty() {
                     // Find the minimum leading spaces (leftmost column position)
-                    let min_leading = lines.iter()
+                    let min_leading = lines
+                        .iter()
                         .map(|line| line.chars().take_while(|c| *c == ' ').count())
                         .min()
                         .unwrap_or(0);
-                    
+
                     // Paste preserving relative column positions
                     for (row_offset, line) in lines.iter().enumerate() {
                         let target_row = start_row + row_offset;
@@ -740,14 +742,14 @@ Layout Analysis:
                             };
                             matrix.resize(target_row + 1, vec![' '; width]);
                         }
-                        
+
                         // Skip the minimum leading spaces, then paste from cursor
                         let trimmed_line = if min_leading < line.len() {
                             &line[min_leading..]
                         } else {
                             ""
                         };
-                        
+
                         for (col_offset, ch) in trimmed_line.chars().enumerate() {
                             let target_col = start_col + col_offset;
                             if target_row < matrix.len() {
@@ -968,10 +970,36 @@ Layout Analysis:
                             );
                         }
                         KeyCode::Char('+') | KeyCode::Char('=') => {
-                            self.split_ratio = (self.split_ratio + 5).min(90);
+                            // Zoom in PDF
+                            if self.pdf_path.is_some() {
+                                self.zoom_level = (self.zoom_level * 1.2).min(3.0);
+                                self.pdf_image = None; // Force re-render with new zoom
+                                self.status_message = format!("Zoom: {:.0}%", self.zoom_level * 100.0);
+                            }
                         }
-                        KeyCode::Char('-') => {
+                        KeyCode::Char('-') | KeyCode::Char('_') => {
+                            // Zoom out PDF
+                            if self.pdf_path.is_some() {
+                                self.zoom_level = (self.zoom_level / 1.2).max(0.1);
+                                self.pdf_image = None; // Force re-render with new zoom
+                                self.status_message = format!("Zoom: {:.0}%", self.zoom_level * 100.0);
+                            }
+                        }
+                        KeyCode::Char('0') => {
+                            // Reset zoom to default
+                            if self.pdf_path.is_some() {
+                                self.zoom_level = 0.15;
+                                self.pdf_image = None; // Force re-render with new zoom
+                                self.status_message = "Zoom reset to 15%".to_string();
+                            }
+                        }
+                        KeyCode::Char('[') => {
+                            // Adjust split ratio left
                             self.split_ratio = self.split_ratio.saturating_sub(5).max(10);
+                        }
+                        KeyCode::Char(']') => {
+                            // Adjust split ratio right
+                            self.split_ratio = (self.split_ratio + 5).min(90);
                         }
                         _ => {}
                     }
@@ -1368,22 +1396,20 @@ Layout Analysis:
 
         // Try to render PDF as image if available
         if let Some(pdf_image) = &self.pdf_image {
-            // Create or update the image protocol if needed
-            if self.image_protocol.is_none() {
-                if let Some(ref mut picker) = self.image_picker {
-                    // Create a new protocol for this image
-                    let protocol = picker.new_resize_protocol(pdf_image.clone());
-                    self.image_protocol = Some(protocol);
-                }
-            }
-
-            // Render the image using the protocol
-            if let Some(ref mut protocol) = self.image_protocol {
+            // Always recreate the protocol after zoom changes to ensure correct rendering
+            // The old protocol holds a reference to the old image size
+            if let Some(ref mut picker) = self.image_picker {
+                // Create a fresh protocol for the current zoomed image
+                let mut protocol = picker.new_resize_protocol(pdf_image.clone());
+                
                 // Create the image widget
                 let image_widget = StatefulImage::new(None);
-
-                // Render the image widget with the protocol
-                image_widget.render(inner, buf, protocol);
+                
+                // Render the image widget with the fresh protocol
+                image_widget.render(inner, buf, &mut protocol);
+                
+                // Don't store the protocol as we'll recreate it each frame
+                // This prevents stale image references after zoom
             } else {
                 // Fallback to text if no protocol available
                 let info_text = format!(
