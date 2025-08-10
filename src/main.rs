@@ -357,7 +357,8 @@ impl ChonkerTUI {
 
     fn render_current_page(&mut self) -> Result<()> {
         // Skip image rendering if zoom is outside safe range to prevent crashes
-        if self.zoom_level < 0.8 || self.zoom_level > 1.2 {
+        // Use epsilon comparison for floating point
+        if self.zoom_level < 0.79 || self.zoom_level > 1.21 {
             self.pdf_render_cache = Some(format!(
                 "Page {}/{}\nZoom: {:.0}%\n\n[Image disabled - zoom out of range]\nZoom must be between 80% and 120%",
                 self.current_page + 1,
@@ -386,10 +387,13 @@ impl ChonkerTUI {
 
                     // Clamp render dimensions to prevent overflow and crashes
                     // Very conservative limits to avoid any index out of bounds
-                    let target_width =
-                        ((base_width as f32 * self.zoom_level * 2.0) as i32).clamp(500, 1500);
-                    let target_height =
-                        ((base_height as f32 * self.zoom_level * 2.0) as i32).clamp(500, 1500);
+                    // Calculate target dimensions with safety margins
+                    let raw_width = (base_width as f32 * self.zoom_level * 2.0) as i32;
+                    let raw_height = (base_height as f32 * self.zoom_level * 2.0) as i32;
+
+                    // Ensure minimum dimensions to prevent rendering issues
+                    let target_width = raw_width.clamp(500, 1500);
+                    let target_height = raw_height.clamp(500, 1500);
 
                     let render_config = PdfRenderConfig::new()
                         .set_target_width(target_width)
@@ -1003,8 +1007,14 @@ Layout Analysis:
                         KeyCode::Char('+') | KeyCode::Char('=') if self.pdf_path.is_some() => {
                             // Zoom in PDF - max 120% to prevent issues
                             let new_zoom = (self.zoom_level * 1.05).min(1.2);
-                            if new_zoom != self.zoom_level {
-                                self.zoom_level = new_zoom;
+                            // Add epsilon comparison to handle floating point precision issues
+                            if (new_zoom - self.zoom_level).abs() > 0.001 && new_zoom <= 1.2 {
+                                // Round to prevent floating point drift above 1.2
+                                self.zoom_level = (new_zoom * 100.0).round() / 100.0;
+                                // Ensure we never go above 1.2 due to rounding
+                                if self.zoom_level > 1.2 {
+                                    self.zoom_level = 1.2;
+                                }
                                 self.pdf_image = None; // Clear old image
                                                        // Re-render the page with new zoom level
                                 if let Err(e) = self.render_current_page() {
@@ -1022,8 +1032,14 @@ Layout Analysis:
                         KeyCode::Char('-') | KeyCode::Char('_') if self.pdf_path.is_some() => {
                             // Zoom out PDF - minimum 80% to prevent crashes
                             let new_zoom = (self.zoom_level / 1.05).max(0.8);
-                            if new_zoom != self.zoom_level {
-                                self.zoom_level = new_zoom;
+                            // Add epsilon comparison to handle floating point precision issues
+                            if (new_zoom - self.zoom_level).abs() > 0.001 && new_zoom >= 0.8 {
+                                // Round to prevent floating point drift below 0.8
+                                self.zoom_level = (new_zoom * 100.0).round() / 100.0;
+                                // Ensure we never go below 0.8 due to rounding
+                                if self.zoom_level < 0.8 {
+                                    self.zoom_level = 0.8;
+                                }
                                 self.pdf_image = None; // Clear old image
                                                        // Re-render the page with new zoom level
                                 if let Err(e) = self.render_current_page() {
@@ -1359,34 +1375,47 @@ Layout Analysis:
     }
 
     fn render(&mut self, area: Rect, buf: &mut Buffer) {
-        // Safety check: Don't render if area is too small
+        // Safety check: Don't render if area is too small or invalid
         if area.width < 10 || area.height < 5 {
             return;
         }
         
+        // Prevent overflow: ensure area coordinates + dimensions don't exceed u16 max (65535)
+        if area.x.saturating_add(area.width) >= 65535 
+            || area.y.saturating_add(area.height) >= 65535 {
+            return;
+        }
+
         let colors = self.theme.colors();
 
         // Fill background with theme color - with bounds checking
         let buf_area = buf.area();
         let buf_width = buf_area.width;
         let buf_height = buf_area.height;
-        
+
         // Another safety check for buffer dimensions
         if buf_width == 0 || buf_height == 0 {
             return;
         }
 
-        let max_row = area.y.saturating_add(area.height).min(buf_height);
-        let max_col = area.x.saturating_add(area.width).min(buf_width);
+        // Calculate safe bounds - prevent any possibility of overflow
+        // Use saturating arithmetic and ensure we stay within buffer bounds
+        let start_row = area.y.min(buf_height.saturating_sub(1));
+        let start_col = area.x.min(buf_width.saturating_sub(1));
+        let end_row = area.y.saturating_add(area.height).min(buf_height);
+        let end_col = area.x.saturating_add(area.width).min(buf_width);
 
-        // Ensure we never go out of bounds
-        if area.y < buf_height && area.x < buf_width {
-            for row in area.y..max_row {
-                for col in area.x..max_col {
-                    // The ranges are already clamped but double-check
-                    if col < buf_width && row < buf_height {
-                        buf[(col, row)].set_style(Style::default().bg(colors.bg));
-                    }
+        // Additional safety: ensure end is always > start
+        if end_row <= start_row || end_col <= start_col {
+            return;
+        }
+
+        // Fill background - now guaranteed to be within bounds
+        for row in start_row..end_row {
+            for col in start_col..end_col {
+                // Double-check bounds before accessing
+                if col < buf_width && row < buf_height {
+                    buf[(col, row)].set_style(Style::default().bg(colors.bg));
                 }
             }
         }
@@ -1473,7 +1502,7 @@ Layout Analysis:
 
         let inner = pdf_block.inner(area);
         pdf_block.render(area, buf);
-        
+
         // Safety check: Don't render if inner area is too small
         if inner.width < 2 || inner.height < 2 {
             return;
@@ -1485,21 +1514,19 @@ Layout Analysis:
             let img_width = pdf_image.width();
             let img_height = pdf_image.height();
 
-            if img_width >= 50 && img_height >= 50 {
+            // More conservative minimum size check
+            if img_width >= 100 && img_height >= 100 && inner.width > 4 && inner.height > 4 {
                 // Always recreate the protocol after zoom changes to ensure correct rendering
                 // The old protocol holds a reference to the old image size
                 if let Some(ref mut picker) = self.image_picker {
-                    // Extra safety: ensure inner area is valid for image rendering
-                    if inner.width > 0 && inner.height > 0 {
-                        // Create a fresh protocol for the current zoomed image
-                        let mut protocol = picker.new_resize_protocol(pdf_image.clone());
+                    // Create a fresh protocol for the current zoomed image
+                    let mut protocol = picker.new_resize_protocol(pdf_image.clone());
 
-                        // Create the image widget
-                        let image_widget = StatefulImage::new(None);
+                    // Create the image widget
+                    let image_widget = StatefulImage::new(None);
 
-                        // Render the image widget with the fresh protocol
-                        image_widget.render(inner, buf, &mut protocol);
-                    }
+                    // Render the image widget with the fresh protocol
+                    image_widget.render(inner, buf, &mut protocol);
 
                     // Don't store the protocol as we'll recreate it each frame
                     // This prevents stale image references after zoom
@@ -1624,7 +1651,7 @@ Layout Analysis:
                         if let Some(ch) = char_iter.next() {
                             // Check bounds before writing to buffer
                             if current_x < buf_width && y < buf_height {
-                                let _ = &mut buf[(current_x, y)].set_char(ch).set_style(style);
+                                buf[(current_x, y)].set_char(ch).set_style(style);
                             }
                             current_x += 1;
                         }
