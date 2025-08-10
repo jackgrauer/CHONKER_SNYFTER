@@ -1494,9 +1494,9 @@ Layout Analysis:
         header_block.render(area, buf);
 
         let commands = vec![
-            "Ctrl+O: Open PDF | Ctrl+E: Extract Text | Tab: Toggle View | Ctrl+/-: Zoom",
-            "Ctrl+C: Copy | Ctrl+V: Paste | Ctrl+X: Cut | Ctrl+S: Save",
-            "↑↓←→: Navigate | Shift+↑↓←→: Select | T: Theme (SmartLayout) | L: Line Numbers",
+            "Ctrl+O: Open PDF File | Ctrl+E: Extract PDF to Text Matrix | Tab: Raw/Smart View",
+            "Ctrl+C: Copy Selection | Ctrl+V: Paste Text | Ctrl+X: Cut | Ctrl+S: Save Matrix",
+            "Ctrl+/-: Zoom PDF | ↑↓←→: Move Cursor | Shift+Arrows: Select Text | Ctrl+H: Help",
         ];
 
         for (i, cmd) in commands.iter().enumerate() {
@@ -1774,43 +1774,46 @@ Layout Analysis:
         let help_text = r#"
 ╭─────────────── Chonker5 TUI Help ───────────────╮
 │                                                  │
-│ Navigation:                                      │
-│   Tab           Switch between panes            │
-│   Arrow Keys    Navigate (PDF pages or cursor)  │
-│   PageUp/Down   Jump 10 pages (PDF pane)        │
+│ PDF Operations:                                 │
+│   Ctrl+O        Open PDF file dialog            │
+│   Ctrl+E        Extract PDF text to matrix      │
+│   Ctrl+/-       Zoom PDF in/out (90%-120%)      │
+│   Ctrl+0        Reset PDF zoom to 100%          │
+│   Arrow Keys    Navigate pages (Smart View)     │
+│   PageUp/Down   Jump 10 pages forward/back      │
 │                                                  │
-│ File Operations:                                │
-│   Ctrl+O        Open PDF file                   │
-│   Ctrl+M        Extract character matrix        │
-│   Ctrl+E        Export matrix to file           │
-│   Ctrl+Q        Quit application                │
+│ View Controls:                                  │
+│   Tab           Toggle Raw Matrix/Smart Layout  │
+│   [ ]           Adjust pane split ratio         │
+│   T             Toggle theme (Smart View only)  │
+│   L             Toggle line numbers (Raw only)  │
 │                                                  │
-│ Editing (Matrix Pane):                          │
-│   Type          Insert characters directly      │
-│   Backspace     Delete character and move left  │
-│   Delete        Delete character at cursor      │
+│ Text Editing (Raw Matrix Mode):                 │
+│   Arrow Keys    Move cursor in matrix           │
+│   Type          Insert characters at cursor     │
+│   Backspace     Delete left                     │
+│   Delete        Delete at cursor                │
 │   Enter         Move to next line               │
 │                                                  │
 │ Selection & Clipboard:                          │
-│   Shift+Arrows  Select text                     │
+│   Shift+Arrows  Select text area                │
 │   Mouse Drag    Select with mouse               │
-│   Ctrl+C        Copy selection                  │
-│   Ctrl+X        Cut selection                   │
-│   Ctrl+V        Paste clipboard                 │
+│   Ctrl+C        Copy selected text              │
+│   Ctrl+X        Cut selected text               │
+│   Ctrl+V        Paste from clipboard            │
 │   Esc           Clear selection                 │
 │                                                  │
-│ Search:                                          │
-│   Ctrl+F        Search in matrix                │
-│   F3            Next search result              │
-│   F2            Previous search result          │
+│ File & Search:                                  │
+│   Ctrl+S        Save matrix to file             │
+│   Ctrl+F        Search in text                  │
+│   F3            Find next match                 │
+│   F2            Find previous match             │
 │                                                  │
-│ Display:                                         │
-│   Ctrl+L        Toggle line numbers             │
-│   Ctrl +/-      Adjust split ratio              │
-│   Ctrl+H        Toggle this help                │
+│ Application:                                    │
+│   Ctrl+H        Show/hide this help             │
+│   Ctrl+Q        Quit application                │
 │                                                  │
-│ Mouse Support:                                   │
-│   Click         Set cursor position             │
+│ NOTE: Use Ctrl, not Cmd in WezTerm!            │
 │   Shift+Click   Start selection                 │
 │   Drag          Select text region              │
 │                                                  │
