@@ -948,9 +948,29 @@ Layout Analysis:
                     }
                 }
 
-                // Handle Ctrl key combinations
+                // Handle Cmd/Super key combinations separately (for compatibility)
+                if key.modifiers.contains(KeyModifiers::SUPER)
+                    && !key.modifiers.contains(KeyModifiers::CONTROL)
+                {
+                    match key.code {
+                        // Prevent WezTerm from intercepting these
+                        KeyCode::Char('m')
+                        | KeyCode::Char('o')
+                        | KeyCode::Char('+')
+                        | KeyCode::Char('-')
+                        | KeyCode::Char('=') => {
+                            // Ignore these - they conflict with WezTerm
+                            self.status_message =
+                                "Use Ctrl instead of Cmd for shortcuts in WezTerm".to_string();
+                            return Ok(false);
+                        }
+                        _ => {}
+                    }
+                }
+
+                // Handle Ctrl key combinations (use Ctrl instead of Cmd for better compatibility)
                 if key.modifiers.contains(KeyModifiers::CONTROL)
-                    || key.modifiers.contains(KeyModifiers::SUPER)
+                    && !key.modifiers.contains(KeyModifiers::SUPER)
                 {
                     match key.code {
                         KeyCode::Char('q') => return Ok(true),
@@ -1003,7 +1023,7 @@ Layout Analysis:
                                 if self.show_line_numbers { "ON" } else { "OFF" }
                             );
                         }
-                        // Zoom controls with Ctrl modifier
+                        // Zoom controls with Ctrl modifier (avoid Cmd which WezTerm intercepts)
                         KeyCode::Char('+') | KeyCode::Char('=') if self.pdf_path.is_some() => {
                             // Zoom in PDF - max 120% to prevent issues
                             let new_zoom = (self.zoom_level * 1.05).min(1.2);
@@ -1064,6 +1084,12 @@ Layout Analysis:
                             } else {
                                 self.status_message = "Zoom reset to 100%".to_string();
                             }
+                        }
+                        // Disable Cmd+M which minimizes in WezTerm
+                        KeyCode::Char('m') => {
+                            // Do nothing - prevent minimizing
+                            self.status_message = "Use Ctrl+M for minimize prevention".to_string();
+                            return Ok(false);
                         }
                         KeyCode::Char('[') => {
                             // Adjust split ratio left
@@ -1468,8 +1494,8 @@ Layout Analysis:
         header_block.render(area, buf);
 
         let commands = vec![
-            "Cmd+O: Open PDF | Cmd+E: Extract Text | Tab: Toggle View | +/-: Zoom",
-            "Cmd+C: Copy | Cmd+V: Paste | Cmd+X: Cut | Cmd+S: Save",
+            "Ctrl+O: Open PDF | Ctrl+E: Extract Text | Tab: Toggle View | Ctrl+/-: Zoom",
+            "Ctrl+C: Copy | Ctrl+V: Paste | Ctrl+X: Cut | Ctrl+S: Save",
             "↑↓←→: Navigate | Shift+↑↓←→: Select | T: Theme (SmartLayout) | L: Line Numbers",
         ];
 
