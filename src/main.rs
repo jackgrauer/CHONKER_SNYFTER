@@ -372,9 +372,15 @@ impl ChonkerTUI {
                     let base_width = ((term_size.0 as f32 * 0.5) * 7.0) as i32;
                     let base_height = ((term_size.1 as f32 - 7.0) * 14.0) as i32;
 
+                    // Clamp render dimensions to prevent overflow
+                    let target_width = ((base_width as f32 * self.zoom_level * 4.0) as i32)
+                        .clamp(100, 8000);
+                    let target_height = ((base_height as f32 * self.zoom_level * 4.0) as i32)
+                        .clamp(100, 8000);
+                    
                     let render_config = PdfRenderConfig::new()
-                        .set_target_width((base_width as f32 * self.zoom_level * 4.0) as i32)
-                        .set_maximum_height((base_height as f32 * self.zoom_level * 4.0) as i32);
+                        .set_target_width(target_width)
+                        .set_maximum_height(target_height);
 
                     let bitmap = page.render_with_config(&render_config)?;
 
@@ -448,11 +454,10 @@ Layout Analysis:
 
     fn extract_matrix(&mut self) -> Result<()> {
         if let Some(pdf_path) = &self.pdf_path.clone() {
-            // GET TERMINAL DIMENSIONS FIRST
-            let term_size = crossterm::terminal::size()?;
-            let mw =
-                (term_size.0 as usize * (100 - self.split_ratio as usize) / 100).saturating_sub(4);
-            let mh = (term_size.1 as usize).saturating_sub(10);
+            // Use fixed dimensions to extract the whole page, not just viewport
+            // This ensures we get all text regardless of zoom level
+            let mw = 200;  // Wide enough for most PDFs
+            let mh = 100;  // Tall enough for most pages
 
             // CREATE PDFIUM AND EXTRACT, PROCESS ALL IN ONE EXPRESSION
             let result = {
@@ -914,6 +919,18 @@ Layout Analysis:
 
         match event {
             Event::Key(key) => {
+                // Block problematic Cmd/Super key combinations that can interfere with terminal
+                if key.modifiers.contains(KeyModifiers::SUPER) {
+                    match key.code {
+                        KeyCode::Char('t') | KeyCode::Char('n') | KeyCode::Char('w') => {
+                            // Block Cmd+T (new tab), Cmd+N (new window), Cmd+W (close)
+                            self.status_message = "Terminal shortcuts disabled in app".to_string();
+                            return Ok(false);
+                        }
+                        _ => {}
+                    }
+                }
+                
                 // Handle Ctrl key combinations
                 if key.modifiers.contains(KeyModifiers::CONTROL)
                     || key.modifiers.contains(KeyModifiers::SUPER)
@@ -974,15 +991,17 @@ Layout Analysis:
                             if self.pdf_path.is_some() {
                                 self.zoom_level = (self.zoom_level * 1.2).min(3.0);
                                 self.pdf_image = None; // Force re-render with new zoom
-                                self.status_message = format!("Zoom: {:.0}%", self.zoom_level * 100.0);
+                                self.status_message =
+                                    format!("Zoom: {:.0}%", self.zoom_level * 100.0);
                             }
                         }
                         KeyCode::Char('-') | KeyCode::Char('_') => {
                             // Zoom out PDF
                             if self.pdf_path.is_some() {
-                                self.zoom_level = (self.zoom_level / 1.2).max(0.1);
+                                self.zoom_level = (self.zoom_level / 1.2).max(0.05);  // Lower minimum to 5%
                                 self.pdf_image = None; // Force re-render with new zoom
-                                self.status_message = format!("Zoom: {:.0}%", self.zoom_level * 100.0);
+                                self.status_message =
+                                    format!("Zoom: {:.0}%", self.zoom_level * 100.0);
                             }
                         }
                         KeyCode::Char('0') => {
@@ -995,11 +1014,11 @@ Layout Analysis:
                         }
                         KeyCode::Char('[') => {
                             // Adjust split ratio left
-                            self.split_ratio = self.split_ratio.saturating_sub(5).max(10);
+                            self.split_ratio = self.split_ratio.saturating_sub(5).max(20);  // Minimum 20% to prevent too narrow
                         }
                         KeyCode::Char(']') => {
                             // Adjust split ratio right
-                            self.split_ratio = (self.split_ratio + 5).min(90);
+                            self.split_ratio = (self.split_ratio + 5).min(80);  // Maximum 80% to prevent too wide
                         }
                         _ => {}
                     }
@@ -1173,8 +1192,7 @@ Layout Analysis:
                         }
                     }
                     KeyCode::Char('t')
-                        if !key.modifiers.contains(KeyModifiers::CONTROL)
-                            && !key.modifiers.contains(KeyModifiers::SUPER)
+                        if key.modifiers.is_empty()  // Only plain 't' key, no modifiers
                             && self.text_view_mode != TextViewMode::RawMatrix =>
                     {
                         // Toggle theme with 't' key (only when not editing matrix)
@@ -1304,10 +1322,19 @@ Layout Analysis:
     fn render(&mut self, area: Rect, buf: &mut Buffer) {
         let colors = self.theme.colors();
 
-        // Fill background with theme color
-        for row in area.y..area.y + area.height {
-            for col in area.x..area.x + area.width {
-                buf[(col, row)].set_style(Style::default().bg(colors.bg));
+        // Fill background with theme color - with bounds checking
+        let buf_area = buf.area();
+        let buf_width = buf_area.width;
+        let buf_height = buf_area.height;
+        
+        let max_row = area.y.saturating_add(area.height).min(buf_height);
+        let max_col = area.x.saturating_add(area.width).min(buf_width);
+        
+        for row in area.y..max_row {
+            for col in area.x..max_col {
+                if col < buf_width && row < buf_height {
+                    buf[(col, row)].set_style(Style::default().bg(colors.bg));
+                }
             }
         }
 
@@ -1401,13 +1428,13 @@ Layout Analysis:
             if let Some(ref mut picker) = self.image_picker {
                 // Create a fresh protocol for the current zoomed image
                 let mut protocol = picker.new_resize_protocol(pdf_image.clone());
-                
+
                 // Create the image widget
                 let image_widget = StatefulImage::new(None);
-                
+
                 // Render the image widget with the fresh protocol
                 image_widget.render(inner, buf, &mut protocol);
-                
+
                 // Don't store the protocol as we'll recreate it each frame
                 // This prevents stale image references after zoom
             } else {
