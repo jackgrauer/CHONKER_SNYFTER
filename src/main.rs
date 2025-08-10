@@ -986,6 +986,35 @@ Layout Analysis:
                                 if self.show_line_numbers { "ON" } else { "OFF" }
                             );
                         }
+                        // Zoom controls with Ctrl modifier
+                        KeyCode::Char('+') | KeyCode::Char('=') if self.pdf_path.is_some() => {
+                            // Zoom in PDF
+                            self.zoom_level = (self.zoom_level * 1.2).min(3.0);
+                            self.pdf_image = None; // Force re-render with new zoom
+                            self.status_message = format!("Zoom: {:.0}%", self.zoom_level * 100.0);
+                        }
+                        KeyCode::Char('-') | KeyCode::Char('_') if self.pdf_path.is_some() => {
+                            // Zoom out PDF
+                            self.zoom_level = (self.zoom_level / 1.2).max(0.05);
+                            self.pdf_image = None; // Force re-render with new zoom
+                            self.status_message = format!("Zoom: {:.0}%", self.zoom_level * 100.0);
+                        }
+                        KeyCode::Char('0') if self.pdf_path.is_some() => {
+                            // Reset zoom to default
+                            self.zoom_level = 0.15;
+                            self.pdf_image = None; // Force re-render with new zoom
+                            self.status_message = "Zoom reset to 15%".to_string();
+                        }
+                        KeyCode::Char('[') => {
+                            // Adjust split ratio left
+                            self.split_ratio = self.split_ratio.saturating_sub(5).max(20);
+                            self.status_message = format!("Split: {}%", self.split_ratio);
+                        }
+                        KeyCode::Char(']') => {
+                            // Adjust split ratio right
+                            self.split_ratio = (self.split_ratio + 5).min(80);
+                            self.status_message = format!("Split: {}%", self.split_ratio);
+                        }
                         _ => {}
                     }
                     return Ok(false);
@@ -1186,38 +1215,6 @@ Layout Analysis:
                         } else {
                             "Line numbers disabled".to_string()
                         };
-                    }
-                    // Zoom controls - work without modifiers
-                    KeyCode::Char('+') | KeyCode::Char('=') 
-                        if key.modifiers.is_empty() && self.pdf_path.is_some() => {
-                        // Zoom in PDF
-                        self.zoom_level = (self.zoom_level * 1.2).min(3.0);
-                        self.pdf_image = None; // Force re-render with new zoom
-                        self.status_message = format!("Zoom: {:.0}%", self.zoom_level * 100.0);
-                    }
-                    KeyCode::Char('-') | KeyCode::Char('_') 
-                        if key.modifiers.is_empty() && self.pdf_path.is_some() => {
-                        // Zoom out PDF
-                        self.zoom_level = (self.zoom_level / 1.2).max(0.05);
-                        self.pdf_image = None; // Force re-render with new zoom
-                        self.status_message = format!("Zoom: {:.0}%", self.zoom_level * 100.0);
-                    }
-                    KeyCode::Char('0') 
-                        if key.modifiers.is_empty() && self.pdf_path.is_some() => {
-                        // Reset zoom to default
-                        self.zoom_level = 0.15;
-                        self.pdf_image = None; // Force re-render with new zoom
-                        self.status_message = "Zoom reset to 15%".to_string();
-                    }
-                    KeyCode::Char('[') if key.modifiers.is_empty() => {
-                        // Adjust split ratio left
-                        self.split_ratio = self.split_ratio.saturating_sub(5).max(20);
-                        self.status_message = format!("Split: {}%", self.split_ratio);
-                    }
-                    KeyCode::Char(']') if key.modifiers.is_empty() => {
-                        // Adjust split ratio right
-                        self.split_ratio = (self.split_ratio + 5).min(80);
-                        self.status_message = format!("Split: {}%", self.split_ratio);
                     }
                     KeyCode::Char(c)
                         if self.text_view_mode == TextViewMode::RawMatrix
