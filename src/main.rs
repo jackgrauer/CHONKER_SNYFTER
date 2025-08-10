@@ -874,8 +874,8 @@ Layout Analysis:
     }
 
     fn handle_event(&mut self, event: Event) -> Result<bool> {
-        // Update cursor blink (faster at 300ms)
-        if self.last_blink_time.elapsed() > Duration::from_millis(300) {
+        // Update cursor blink at normal rate (500ms)
+        if self.last_blink_time.elapsed() > Duration::from_millis(500) {
             self.cursor_blink_state = !self.cursor_blink_state;
             self.last_blink_time = Instant::now();
         }
@@ -1306,6 +1306,10 @@ Layout Analysis:
                         if self.text_view_mode == TextViewMode::RawMatrix
                             && !key.modifiers.contains(KeyModifiers::CONTROL) =>
                     {
+                        // Reset cursor to visible when typing
+                        self.cursor_blink_state = true;
+                        self.last_blink_time = Instant::now();
+                        
                         // Type characters directly in matrix pane
                         if let Some(matrix) = &mut self.editable_matrix {
                             if self.cursor.0 < matrix.len() {
