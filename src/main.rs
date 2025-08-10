@@ -257,7 +257,7 @@ impl ChonkerTUI {
             pdf_path: None,
             current_page: 0,
             total_pages: 0,
-            zoom_level: 0.15, // Start very zoomed out to fit full page
+            zoom_level: 1.0, // Start at 100% zoom for safety
             pdf_render_cache: None,
             pdf_image: None,
             image_picker: Some(picker),
@@ -356,10 +356,10 @@ impl ChonkerTUI {
     }
 
     fn render_current_page(&mut self) -> Result<()> {
-        // Skip image rendering if zoom is too low to prevent crashes
-        if self.zoom_level < 0.3 {
+        // Skip image rendering if zoom is outside safe range to prevent crashes
+        if self.zoom_level < 0.8 || self.zoom_level > 1.2 {
             self.pdf_render_cache = Some(format!(
-                "Page {}/{}\nZoom: {:.0}%\n\n[Image disabled at low zoom]\nZoom in with Ctrl+ to view image",
+                "Page {}/{}\nZoom: {:.0}%\n\n[Image disabled - zoom out of range]\nZoom must be between 80% and 120%",
                 self.current_page + 1,
                 self.total_pages,
                 self.zoom_level * 100.0
@@ -367,7 +367,7 @@ impl ChonkerTUI {
             self.pdf_image = None;
             return Ok(());
         }
-        
+
         if let Some(pdf_path) = &self.pdf_path.clone() {
             self.cache_misses += 1;
 
@@ -384,11 +384,12 @@ impl ChonkerTUI {
                     let base_width = ((term_size.0 as f32 * 0.5) * 7.0) as i32;
                     let base_height = ((term_size.1 as f32 - 7.0) * 14.0) as i32;
 
-                    // Clamp render dimensions to prevent overflow and very small sizes
+                    // Clamp render dimensions to prevent overflow and crashes
+                    // Very conservative limits to avoid any index out of bounds
                     let target_width =
-                        ((base_width as f32 * self.zoom_level * 4.0) as i32).clamp(200, 4000);
+                        ((base_width as f32 * self.zoom_level * 2.0) as i32).clamp(500, 1500);
                     let target_height =
-                        ((base_height as f32 * self.zoom_level * 4.0) as i32).clamp(200, 4000);
+                        ((base_height as f32 * self.zoom_level * 2.0) as i32).clamp(500, 1500);
 
                     let render_config = PdfRenderConfig::new()
                         .set_target_width(target_width)
@@ -1000,28 +1001,53 @@ Layout Analysis:
                         }
                         // Zoom controls with Ctrl modifier
                         KeyCode::Char('+') | KeyCode::Char('=') if self.pdf_path.is_some() => {
-                            // Zoom in PDF
-                            self.zoom_level = (self.zoom_level * 1.2).min(3.0);
-                            self.pdf_image = None; // Force re-render with new zoom
-                            self.status_message = format!("Zoom: {:.0}%", self.zoom_level * 100.0);
+                            // Zoom in PDF - max 120% to prevent issues
+                            let new_zoom = (self.zoom_level * 1.05).min(1.2);
+                            if new_zoom != self.zoom_level {
+                                self.zoom_level = new_zoom;
+                                self.pdf_image = None; // Clear old image
+                                                       // Re-render the page with new zoom level
+                                if let Err(e) = self.render_current_page() {
+                                    self.status_message = format!("Zoom failed: {}", e);
+                                    self.zoom_level = 1.0; // Reset to safe default
+                                    let _ = self.render_current_page(); // Try to render at safe zoom
+                                } else {
+                                    self.status_message =
+                                        format!("Zoom: {:.0}%", self.zoom_level * 100.0);
+                                }
+                            } else {
+                                self.status_message = "Maximum zoom reached (120%)".to_string();
+                            }
                         }
                         KeyCode::Char('-') | KeyCode::Char('_') if self.pdf_path.is_some() => {
-                            // Zoom out PDF - prevent going too small
-                            self.zoom_level = (self.zoom_level / 1.2).max(0.2); // Minimum 20% to prevent crashes
-                            // Don't render image if too small to prevent crashes
-                            if self.zoom_level < 0.3 {
-                                self.pdf_image = None; // Clear image, show text only
-                                self.status_message = format!("Zoom: {:.0}% (text only)", self.zoom_level * 100.0);
+                            // Zoom out PDF - minimum 80% to prevent crashes
+                            let new_zoom = (self.zoom_level / 1.05).max(0.8);
+                            if new_zoom != self.zoom_level {
+                                self.zoom_level = new_zoom;
+                                self.pdf_image = None; // Clear old image
+                                                       // Re-render the page with new zoom level
+                                if let Err(e) = self.render_current_page() {
+                                    self.status_message = format!("Zoom failed: {}", e);
+                                    self.zoom_level = 1.0; // Reset to safe default
+                                    let _ = self.render_current_page(); // Try to render at safe zoom
+                                } else {
+                                    self.status_message =
+                                        format!("Zoom: {:.0}%", self.zoom_level * 100.0);
+                                }
                             } else {
-                                self.pdf_image = None; // Force re-render with new zoom
-                                self.status_message = format!("Zoom: {:.0}%", self.zoom_level * 100.0);
+                                self.status_message = "Minimum zoom reached (80%)".to_string();
                             }
                         }
                         KeyCode::Char('0') if self.pdf_path.is_some() => {
-                            // Reset zoom to default
-                            self.zoom_level = 0.15;
-                            self.pdf_image = None; // Force re-render with new zoom
-                            self.status_message = "Zoom reset to 15%".to_string();
+                            // Reset zoom to safe default
+                            self.zoom_level = 1.0; // 100% zoom
+                            self.pdf_image = None; // Clear old image
+                                                   // Re-render the page with new zoom level
+                            if let Err(e) = self.render_current_page() {
+                                self.status_message = format!("Zoom reset failed: {}", e);
+                            } else {
+                                self.status_message = "Zoom reset to 100%".to_string();
+                            }
                         }
                         KeyCode::Char('[') => {
                             // Adjust split ratio left
