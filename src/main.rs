@@ -257,7 +257,7 @@ impl ChonkerTUI {
             pdf_path: None,
             current_page: 0,
             total_pages: 0,
-            zoom_level: 0.3, // Start very zoomed out to show normal text size
+            zoom_level: 0.15, // Start very zoomed out to fit full page
             pdf_render_cache: None,
             pdf_image: None,
             image_picker: Some(picker),
@@ -310,9 +310,14 @@ impl ChonkerTUI {
 
                         // Render first page as image for display
                         let page = document.pages().get(0).unwrap();
+                        // Get terminal size for initial render
+                        let term_size = crossterm::terminal::size().unwrap_or((80, 24));
+                        let target_width = ((term_size.0 as f32 * 0.5) * 7.0) as i32; // Half terminal width * char width
+                        let target_height = ((term_size.1 as f32 - 7.0) * 14.0) as i32; // Terminal height * char height
+
                         let render_config = PdfRenderConfig::new()
-                            .set_target_width(800)
-                            .set_maximum_height(1000);
+                            .set_target_width(target_width)
+                            .set_maximum_height(target_height);
 
                         let bitmap = page.render_with_config(&render_config)?;
 
@@ -362,9 +367,14 @@ impl ChonkerTUI {
 
             if let Ok(document) = pdfium.load_pdf_from_file(&pdf_path, None) {
                 if let Ok(page) = document.pages().get(self.current_page as u16) {
+                    // Calculate render size based on terminal and zoom
+                    let term_size = crossterm::terminal::size().unwrap_or((80, 24));
+                    let base_width = ((term_size.0 as f32 * 0.5) * 7.0) as i32;
+                    let base_height = ((term_size.1 as f32 - 7.0) * 14.0) as i32;
+
                     let render_config = PdfRenderConfig::new()
-                        .set_target_width((800.0 * self.zoom_level) as i32)
-                        .set_maximum_height((1000.0 * self.zoom_level) as i32);
+                        .set_target_width((base_width as f32 * self.zoom_level * 4.0) as i32)
+                        .set_maximum_height((base_height as f32 * self.zoom_level * 4.0) as i32);
 
                     let bitmap = page.render_with_config(&render_config)?;
 
@@ -545,7 +555,7 @@ Layout Analysis:
     }
 
     fn sanitize_clipboard_text(&self, text: &str) -> String {
-        // Simpler sanitization - just replace tabs with spaces and keep the rest
+        // Preserve spaces for rectangular blocks - minimal sanitization
         text.chars()
             .map(|ch| {
                 if ch == '\t' {
@@ -554,15 +564,46 @@ Layout Analysis:
                 } else if ch == '\r' {
                     // Convert CR to LF
                     "\n".to_string()
-                } else if ch.is_control() && ch != '\n' {
-                    // Skip other control characters except newline
+                } else if ch.is_control() && ch != '\n' && ch != ' ' {
+                    // Skip control chars except newline and space
                     String::new()
                 } else {
-                    // Keep everything else
+                    // Keep everything else including spaces
                     ch.to_string()
                 }
             })
             .collect::<String>()
+    }
+    
+    fn is_rectangular_block(&self, text: &str) -> bool {
+        // Check if clipboard content is a rectangular block (uniform line lengths)
+        let lines: Vec<&str> = text.lines().collect();
+        if lines.len() <= 1 {
+            return false;
+        }
+        
+        // Check if all lines have similar length (allowing small variations)
+        let first_len = lines[0].len();
+        let all_similar = lines.iter().all(|line| {
+            let len = line.len();
+            (len as i32 - first_len as i32).abs() <= 2  // Allow 2 char difference
+        });
+        
+        // Also check if lines have consistent leading spaces (columnar data)
+        if all_similar {
+            // Check for consistent indentation suggesting column data
+            let leading_spaces: Vec<usize> = lines.iter()
+                .map(|line| line.chars().take_while(|c| *c == ' ').count())
+                .collect();
+            
+            // If all lines have same leading spaces, it's likely a rectangular block
+            if !leading_spaces.is_empty() {
+                let first_spaces = leading_spaces[0];
+                return leading_spaces.iter().all(|&spaces| spaces == first_spaces);
+            }
+        }
+        
+        all_similar
     }
 
     fn copy_selection(&mut self) {
@@ -669,39 +710,76 @@ Layout Analysis:
                 self.editable_matrix = Some(vec![vec![' '; 80]; 25]);
             }
 
+            // Check if this is a rectangular block first (before borrowing matrix)
+            let is_rect_block = self.is_rectangular_block(&sanitized_text);
+            
             // Use system clipboard content - paste as a block
             if let Some(matrix) = &mut self.editable_matrix {
                 let (start_row, start_col) = self.cursor;
                 let lines: Vec<&str> = sanitized_text.lines().collect();
 
                 // If empty text, treat as single space
-                let lines = if lines.is_empty() {
-                    vec![" "]
-                } else {
-                    lines
-                };
-
-                // For block paste, each line goes to the same column position
-                for (row_offset, line) in lines.iter().enumerate() {
-                    let target_row = start_row + row_offset;
-                    if target_row >= matrix.len() {
-                        // Extend matrix if needed
-                        let width = if matrix.is_empty() {
-                            80
+                let lines = if lines.is_empty() { vec![" "] } else { lines };
+                
+                // If rectangular block, preserve the column structure
+                if is_rect_block && !lines.is_empty() {
+                    // Find the minimum leading spaces (leftmost column position)
+                    let min_leading = lines.iter()
+                        .map(|line| line.chars().take_while(|c| *c == ' ').count())
+                        .min()
+                        .unwrap_or(0);
+                    
+                    // Paste preserving relative column positions
+                    for (row_offset, line) in lines.iter().enumerate() {
+                        let target_row = start_row + row_offset;
+                        if target_row >= matrix.len() {
+                            let width = if matrix.is_empty() {
+                                80
+                            } else {
+                                matrix[0].len().max(80)
+                            };
+                            matrix.resize(target_row + 1, vec![' '; width]);
+                        }
+                        
+                        // Skip the minimum leading spaces, then paste from cursor
+                        let trimmed_line = if min_leading < line.len() {
+                            &line[min_leading..]
                         } else {
-                            matrix[0].len().max(80)
+                            ""
                         };
-                        matrix.resize(target_row + 1, vec![' '; width]);
-                    }
-
-                    // Paste each character of the line starting at start_col
-                    for (col_offset, ch) in line.chars().enumerate() {
-                        let target_col = start_col + col_offset;
-                        if target_row < matrix.len() {
-                            if target_col >= matrix[target_row].len() {
-                                matrix[target_row].resize(target_col + 1, ' ');
+                        
+                        for (col_offset, ch) in trimmed_line.chars().enumerate() {
+                            let target_col = start_col + col_offset;
+                            if target_row < matrix.len() {
+                                if target_col >= matrix[target_row].len() {
+                                    matrix[target_row].resize(target_col + 1, ' ');
+                                }
+                                matrix[target_row][target_col] = ch;
                             }
-                            matrix[target_row][target_col] = ch;
+                        }
+                    }
+                } else {
+                    // Regular paste for non-rectangular content
+                    for (row_offset, line) in lines.iter().enumerate() {
+                        let target_row = start_row + row_offset;
+                        if target_row >= matrix.len() {
+                            let width = if matrix.is_empty() {
+                                80
+                            } else {
+                                matrix[0].len().max(80)
+                            };
+                            matrix.resize(target_row + 1, vec![' '; width]);
+                        }
+
+                        // Paste each character of the line starting at start_col
+                        for (col_offset, ch) in line.chars().enumerate() {
+                            let target_col = start_col + col_offset;
+                            if target_row < matrix.len() {
+                                if target_col >= matrix[target_row].len() {
+                                    matrix[target_row].resize(target_col + 1, ' ');
+                                }
+                                matrix[target_row][target_col] = ch;
+                            }
                         }
                     }
                 }
@@ -853,7 +931,6 @@ Layout Analysis:
                             }
                         }
                         KeyCode::Char('e') => self.extract_matrix()?,
-                        KeyCode::Char('m') => self.extract_matrix()?, // Alternative to 'e'
                         KeyCode::Char('s') => self.export_matrix()?,
                         KeyCode::Char('f') => {
                             self.search_input_active = true;
@@ -1069,6 +1146,7 @@ Layout Analysis:
                     }
                     KeyCode::Char('t')
                         if !key.modifiers.contains(KeyModifiers::CONTROL)
+                            && !key.modifiers.contains(KeyModifiers::SUPER)
                             && self.text_view_mode != TextViewMode::RawMatrix =>
                     {
                         // Toggle theme with 't' key (only when not editing matrix)
@@ -1086,6 +1164,7 @@ Layout Analysis:
                     }
                     KeyCode::Char('l')
                         if !key.modifiers.contains(KeyModifiers::CONTROL)
+                            && !key.modifiers.contains(KeyModifiers::SUPER)
                             && self.text_view_mode != TextViewMode::RawMatrix =>
                     {
                         // Toggle line numbers with 'l' key (only when not editing matrix)
@@ -1252,7 +1331,7 @@ Layout Analysis:
         header_block.render(area, buf);
 
         let commands = vec![
-            "Cmd+O: Open PDF | Cmd+E/M: Extract Text | Tab: Toggle View",
+            "Cmd+O: Open PDF | Cmd+E: Extract Text | Tab: Toggle View | +/-: Zoom",
             "Cmd+C: Copy | Cmd+V: Paste | Cmd+X: Cut | Cmd+S: Save",
             "↑↓←→: Navigate | Shift+↑↓←→: Select | T: Theme (SmartLayout) | L: Line Numbers",
         ];
