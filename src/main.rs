@@ -1023,8 +1023,8 @@ Layout Analysis:
                                 if self.show_line_numbers { "ON" } else { "OFF" }
                             );
                         }
-                        // Zoom controls with Ctrl modifier (avoid Cmd which WezTerm intercepts)
-                        KeyCode::Char('+') | KeyCode::Char('=') if self.pdf_path.is_some() => {
+                        // Use Ctrl+] for zoom in to avoid WezTerm conflicts with +/-
+                        KeyCode::Char(']') if self.pdf_path.is_some() => {
                             // Zoom in PDF - max 120% to prevent issues
                             let new_zoom = (self.zoom_level * 1.05).min(1.2);
                             // Add epsilon comparison to handle floating point precision issues
@@ -1049,8 +1049,8 @@ Layout Analysis:
                                 self.status_message = "Maximum zoom reached (120%)".to_string();
                             }
                         }
-                        KeyCode::Char('-') | KeyCode::Char('_') if self.pdf_path.is_some() => {
-                            // Zoom out PDF - minimum 90% to prevent crashes
+                        KeyCode::Char('[') if self.pdf_path.is_some() => {
+                            // Zoom out PDF with Ctrl+[ - minimum 90% to prevent crashes
                             let new_zoom = (self.zoom_level / 1.05).max(0.9);
                             // Add epsilon comparison to handle floating point precision issues
                             if (new_zoom - self.zoom_level).abs() > 0.001 && new_zoom >= 0.9 {
@@ -1496,7 +1496,7 @@ Layout Analysis:
         let commands = vec![
             "Ctrl+O: Open PDF File | Ctrl+E: Extract PDF to Text Matrix | Tab: Raw/Smart View",
             "Ctrl+C: Copy Selection | Ctrl+V: Paste Text | Ctrl+X: Cut | Ctrl+S: Save Matrix",
-            "Ctrl+/-: Zoom PDF | ↑↓←→: Move Cursor | Shift+Arrows: Select Text | Ctrl+H: Help",
+            "Ctrl+]/[: Zoom In/Out PDF | ↑↓←→: Move Cursor | Shift+Arrows: Select | Ctrl+H: Help",
         ];
 
         for (i, cmd) in commands.iter().enumerate() {
@@ -1777,7 +1777,8 @@ Layout Analysis:
 │ PDF Operations:                                 │
 │   Ctrl+O        Open PDF file dialog            │
 │   Ctrl+E        Extract PDF text to matrix      │
-│   Ctrl+/-       Zoom PDF in/out (90%-120%)      │
+│   Ctrl+]        Zoom PDF in (max 120%)          │
+│   Ctrl+[        Zoom PDF out (min 90%)          │
 │   Ctrl+0        Reset PDF zoom to 100%          │
 │   Arrow Keys    Navigate pages (Smart View)     │
 │   PageUp/Down   Jump 10 pages forward/back      │
