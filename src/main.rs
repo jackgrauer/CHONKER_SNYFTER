@@ -357,10 +357,10 @@ impl ChonkerTUI {
 
     fn render_current_page(&mut self) -> Result<()> {
         // Skip image rendering if zoom is outside safe range to prevent crashes
-        // Use epsilon comparison for floating point
-        if self.zoom_level < 0.79 || self.zoom_level > 1.21 {
+        // Use higher threshold to avoid ratatui_image crashes
+        if self.zoom_level < 0.89 || self.zoom_level > 1.21 {
             self.pdf_render_cache = Some(format!(
-                "Page {}/{}\nZoom: {:.0}%\n\n[Image disabled - zoom out of range]\nZoom must be between 80% and 120%",
+                "Page {}/{}\nZoom: {:.0}%\n\n[Image disabled - zoom out of range]\nZoom must be between 90% and 120%",
                 self.current_page + 1,
                 self.total_pages,
                 self.zoom_level * 100.0
@@ -1030,15 +1030,15 @@ Layout Analysis:
                             }
                         }
                         KeyCode::Char('-') | KeyCode::Char('_') if self.pdf_path.is_some() => {
-                            // Zoom out PDF - minimum 80% to prevent crashes
-                            let new_zoom = (self.zoom_level / 1.05).max(0.8);
+                            // Zoom out PDF - minimum 90% to prevent crashes
+                            let new_zoom = (self.zoom_level / 1.05).max(0.9);
                             // Add epsilon comparison to handle floating point precision issues
-                            if (new_zoom - self.zoom_level).abs() > 0.001 && new_zoom >= 0.8 {
-                                // Round to prevent floating point drift below 0.8
+                            if (new_zoom - self.zoom_level).abs() > 0.001 && new_zoom >= 0.9 {
+                                // Round to prevent floating point drift below 0.9
                                 self.zoom_level = (new_zoom * 100.0).round() / 100.0;
-                                // Ensure we never go below 0.8 due to rounding
-                                if self.zoom_level < 0.8 {
-                                    self.zoom_level = 0.8;
+                                // Ensure we never go below 0.9 due to rounding
+                                if self.zoom_level < 0.9 {
+                                    self.zoom_level = 0.9;
                                 }
                                 self.pdf_image = None; // Clear old image
                                                        // Re-render the page with new zoom level
@@ -1051,7 +1051,7 @@ Layout Analysis:
                                         format!("Zoom: {:.0}%", self.zoom_level * 100.0);
                                 }
                             } else {
-                                self.status_message = "Minimum zoom reached (80%)".to_string();
+                                self.status_message = "Minimum zoom reached (90%)".to_string();
                             }
                         }
                         KeyCode::Char('0') if self.pdf_path.is_some() => {
