@@ -372,11 +372,11 @@ impl ChonkerTUI {
                     let base_width = ((term_size.0 as f32 * 0.5) * 7.0) as i32;
                     let base_height = ((term_size.1 as f32 - 7.0) * 14.0) as i32;
 
-                    // Clamp render dimensions to prevent overflow
+                    // Clamp render dimensions to prevent overflow and very small sizes
                     let target_width =
-                        ((base_width as f32 * self.zoom_level * 4.0) as i32).clamp(100, 8000);
+                        ((base_width as f32 * self.zoom_level * 4.0) as i32).clamp(200, 4000);
                     let target_height =
-                        ((base_height as f32 * self.zoom_level * 4.0) as i32).clamp(100, 8000);
+                        ((base_height as f32 * self.zoom_level * 4.0) as i32).clamp(200, 4000);
 
                     let render_config = PdfRenderConfig::new()
                         .set_target_width(target_width)
@@ -994,8 +994,8 @@ Layout Analysis:
                             self.status_message = format!("Zoom: {:.0}%", self.zoom_level * 100.0);
                         }
                         KeyCode::Char('-') | KeyCode::Char('_') if self.pdf_path.is_some() => {
-                            // Zoom out PDF
-                            self.zoom_level = (self.zoom_level / 1.2).max(0.05);
+                            // Zoom out PDF - prevent going too small
+                            self.zoom_level = (self.zoom_level / 1.2).max(0.1); // Minimum 10%
                             self.pdf_image = None; // Force re-render with new zoom
                             self.status_message = format!("Zoom: {:.0}%", self.zoom_level * 100.0);
                         }
@@ -1418,29 +1418,35 @@ Layout Analysis:
 
         // Try to render PDF as image if available
         if let Some(pdf_image) = &self.pdf_image {
-            // Always recreate the protocol after zoom changes to ensure correct rendering
-            // The old protocol holds a reference to the old image size
-            if let Some(ref mut picker) = self.image_picker {
-                // Create a fresh protocol for the current zoomed image
-                let mut protocol = picker.new_resize_protocol(pdf_image.clone());
+            // Skip rendering if image is too small to prevent crashes
+            let img_width = pdf_image.width();
+            let img_height = pdf_image.height();
+            
+            if img_width >= 50 && img_height >= 50 {
+                // Always recreate the protocol after zoom changes to ensure correct rendering
+                // The old protocol holds a reference to the old image size
+                if let Some(ref mut picker) = self.image_picker {
+                    // Create a fresh protocol for the current zoomed image
+                    let mut protocol = picker.new_resize_protocol(pdf_image.clone());
 
-                // Create the image widget
-                let image_widget = StatefulImage::new(None);
+                    // Create the image widget
+                    let image_widget = StatefulImage::new(None);
 
-                // Render the image widget with the fresh protocol
-                image_widget.render(inner, buf, &mut protocol);
+                    // Render the image widget with the fresh protocol
+                    image_widget.render(inner, buf, &mut protocol);
 
-                // Don't store the protocol as we'll recreate it each frame
-                // This prevents stale image references after zoom
+                    // Don't store the protocol as we'll recreate it each frame
+                    // This prevents stale image references after zoom
+                }
             } else {
-                // Fallback to text if no protocol available
+                // Show message when image is too small
                 let info_text = format!(
-                    "PDF Page {}/{}\nZoom: {:.0}%\nSize: {}x{} pixels\n\n[Image loaded - terminal protocol not available]\n\nPress arrows to navigate pages\nPress 'm' to extract text matrix",
+                    "PDF Page {}/{}\nZoom: {:.0}%\nImage too small to render ({}x{})\n\nZoom in with Ctrl+ to view",
                     self.current_page + 1,
                     self.total_pages,
                     self.zoom_level * 100.0,
-                    pdf_image.width(),
-                    pdf_image.height()
+                    img_width,
+                    img_height
                 );
                 let paragraph = Paragraph::new(info_text).style(Style::default().fg(colors.fg));
                 paragraph.render(inner, buf);
