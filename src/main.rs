@@ -189,6 +189,8 @@ struct ChonkerTUI {
     current_page: usize,
     total_pages: usize,
     zoom_level: f32,
+    auto_fit: bool,
+    pdf_dark_mode: bool,
     pdf_render_cache: Option<String>,
     pdf_image: Option<DynamicImage>,
     image_picker: Option<Picker>,
@@ -258,6 +260,8 @@ impl ChonkerTUI {
             current_page: 0,
             total_pages: 0,
             zoom_level: 1.0, // Start at 100% zoom for safety
+            auto_fit: true,
+            pdf_dark_mode: false,
             pdf_render_cache: None,
             pdf_image: None,
             image_picker: Some(picker),
@@ -382,18 +386,21 @@ impl ChonkerTUI {
                 if let Ok(page) = document.pages().get(self.current_page as u16) {
                     // Calculate render size based on terminal and zoom
                     let term_size = crossterm::terminal::size().unwrap_or((80, 24));
-                    let base_width = ((term_size.0 as f32 * 0.5) * 7.0) as i32;
-                    let base_height = ((term_size.1 as f32 - 7.0) * 14.0) as i32;
-
-                    // Clamp render dimensions to prevent overflow and crashes
-                    // Very conservative limits to avoid any index out of bounds
-                    // Calculate target dimensions with safety margins
-                    let raw_width = (base_width as f32 * self.zoom_level * 2.0) as i32;
-                    let raw_height = (base_height as f32 * self.zoom_level * 2.0) as i32;
-
-                    // Ensure minimum dimensions to prevent rendering issues
-                    let target_width = raw_width.clamp(500, 1500);
-                    let target_height = raw_height.clamp(500, 1500);
+                    
+                    let (target_width, target_height) = if self.auto_fit {
+                        // Auto-fit: Use full pane width and height
+                        let pane_width = ((term_size.0 as f32 * (self.split_ratio as f32 / 100.0)) * 7.0) as i32;
+                        let pane_height = ((term_size.1 as f32 - 7.0) * 14.0) as i32;
+                        // Fit to pane with some margin
+                        (pane_width.clamp(400, 2000), pane_height.clamp(400, 2000))
+                    } else {
+                        // Manual zoom mode
+                        let base_width = ((term_size.0 as f32 * 0.5) * 7.0) as i32;
+                        let base_height = ((term_size.1 as f32 - 7.0) * 14.0) as i32;
+                        let raw_width = (base_width as f32 * self.zoom_level * 2.0) as i32;
+                        let raw_height = (base_height as f32 * self.zoom_level * 2.0) as i32;
+                        (raw_width.clamp(500, 1500), raw_height.clamp(500, 1500))
+                    };
 
                     let render_config = PdfRenderConfig::new()
                         .set_target_width(target_width)
@@ -404,7 +411,21 @@ impl ChonkerTUI {
                     // Get the actual image data from the bitmap
                     let width = bitmap.width() as u32;
                     let height = bitmap.height() as u32;
-                    let bytes = bitmap.as_rgba_bytes().to_vec();
+                    let mut bytes = bitmap.as_rgba_bytes().to_vec();
+                    
+                    // Apply dark mode inversion if enabled
+                    if self.pdf_dark_mode {
+                        // Invert colors for dark mode (RGBA format)
+                        for chunk in bytes.chunks_mut(4) {
+                            if chunk.len() == 4 {
+                                // Invert RGB but keep alpha
+                                chunk[0] = 255 - chunk[0]; // R
+                                chunk[1] = 255 - chunk[1]; // G
+                                chunk[2] = 255 - chunk[2]; // B
+                                // chunk[3] stays the same (alpha)
+                            }
+                        }
+                    }
 
                     // Create image from the actual bitmap data
                     if let Some(rgba_image) = RgbaImage::from_raw(width, height, bytes) {
@@ -1024,8 +1045,8 @@ Layout Analysis:
                             );
                         }
                         // Use Ctrl+] for zoom in to avoid WezTerm conflicts with +/-
-                        KeyCode::Char(']') if self.pdf_path.is_some() => {
-                            // Zoom in PDF - max 120% to prevent issues
+                        KeyCode::Char(']') if self.pdf_path.is_some() && !self.auto_fit => {
+                            // Zoom in PDF - max 120% to prevent issues (only in manual mode)
                             let new_zoom = (self.zoom_level * 1.05).min(1.2);
                             // Add epsilon comparison to handle floating point precision issues
                             if (new_zoom - self.zoom_level).abs() > 0.001 && new_zoom <= 1.2 {
@@ -1049,8 +1070,8 @@ Layout Analysis:
                                 self.status_message = "Maximum zoom reached (120%)".to_string();
                             }
                         }
-                        KeyCode::Char('[') if self.pdf_path.is_some() => {
-                            // Zoom out PDF with Ctrl+[ - minimum 90% to prevent crashes
+                        KeyCode::Char('[') if self.pdf_path.is_some() && !self.auto_fit => {
+                            // Zoom out PDF with Ctrl+[ - minimum 90% to prevent crashes (only in manual mode)
                             let new_zoom = (self.zoom_level / 1.05).max(0.9);
                             // Add epsilon comparison to handle floating point precision issues
                             if (new_zoom - self.zoom_level).abs() > 0.001 && new_zoom >= 0.9 {
@@ -1074,8 +1095,8 @@ Layout Analysis:
                                 self.status_message = "Minimum zoom reached (90%)".to_string();
                             }
                         }
-                        KeyCode::Char('0') if self.pdf_path.is_some() => {
-                            // Reset zoom to safe default
+                        KeyCode::Char('0') if self.pdf_path.is_some() && !self.auto_fit => {
+                            // Reset zoom to safe default (only in manual mode)
                             self.zoom_level = 1.0; // 100% zoom
                             self.pdf_image = None; // Clear old image
                                                    // Re-render the page with new zoom level
@@ -1302,6 +1323,36 @@ Layout Analysis:
                             "Line numbers disabled".to_string()
                         };
                     }
+                    KeyCode::Char('a')
+                        if !key.modifiers.contains(KeyModifiers::CONTROL)
+                            && !key.modifiers.contains(KeyModifiers::SUPER)
+                            && self.pdf_path.is_some() =>
+                    {
+                        // Toggle auto-fit for PDF
+                        self.auto_fit = !self.auto_fit;
+                        self.pdf_image = None; // Force re-render
+                        let _ = self.render_current_page();
+                        self.status_message = if self.auto_fit {
+                            "PDF auto-fit enabled".to_string()
+                        } else {
+                            format!("PDF auto-fit disabled (Zoom: {:.0}%)", self.zoom_level * 100.0)
+                        };
+                    }
+                    KeyCode::Char('d')
+                        if !key.modifiers.contains(KeyModifiers::CONTROL)
+                            && !key.modifiers.contains(KeyModifiers::SUPER)
+                            && self.pdf_path.is_some() =>
+                    {
+                        // Toggle dark mode for PDF
+                        self.pdf_dark_mode = !self.pdf_dark_mode;
+                        self.pdf_image = None; // Force re-render
+                        let _ = self.render_current_page();
+                        self.status_message = if self.pdf_dark_mode {
+                            "PDF dark mode enabled".to_string()
+                        } else {
+                            "PDF dark mode disabled".to_string()
+                        };
+                    }
                     KeyCode::Char(c)
                         if self.text_view_mode == TextViewMode::RawMatrix
                             && !key.modifiers.contains(KeyModifiers::CONTROL) =>
@@ -1309,7 +1360,7 @@ Layout Analysis:
                         // Reset cursor to visible when typing
                         self.cursor_blink_state = true;
                         self.last_blink_time = Instant::now();
-                        
+
                         // Type characters directly in matrix pane
                         if let Some(matrix) = &mut self.editable_matrix {
                             if self.cursor.0 < matrix.len() {
@@ -1498,9 +1549,9 @@ Layout Analysis:
         header_block.render(area, buf);
 
         let commands = vec![
-            "Ctrl+O: Open PDF File | Ctrl+E: Extract PDF to Text Matrix | Tab: Raw/Smart View",
-            "Ctrl+C: Copy Selection | Ctrl+V: Paste Text | Ctrl+X: Cut | Ctrl+S: Save Matrix",
-            "Ctrl+]/[: Zoom In/Out PDF | ↑↓←→: Move Cursor | Shift+Arrows: Select | Ctrl+H: Help",
+            "Ctrl+O: Open PDF | Ctrl+E: Extract Text | Tab: Raw/Smart | A: Auto-fit | D: Dark Mode",
+            "Ctrl+C: Copy | Ctrl+V: Paste | Ctrl+X: Cut | Ctrl+S: Save | Ctrl+]/[: Zoom In/Out",
+            "↑↓←→: Navigate | Shift+Arrows: Select | L: Line Numbers | Ctrl+H: Help",
         ];
 
         for (i, cmd) in commands.iter().enumerate() {
@@ -1781,8 +1832,10 @@ Layout Analysis:
 │ PDF Operations:                                 │
 │   Ctrl+O        Open PDF file dialog            │
 │   Ctrl+E        Extract PDF text to matrix      │
-│   Ctrl+]        Zoom PDF in (max 120%)          │
-│   Ctrl+[        Zoom PDF out (min 90%)          │
+│   A             Toggle auto-fit to window       │
+│   D             Toggle dark mode for PDF        │
+│   Ctrl+]        Zoom PDF in (manual mode)       │
+│   Ctrl+[        Zoom PDF out (manual mode)      │
 │   Ctrl+0        Reset PDF zoom to 100%          │
 │   Arrow Keys    Navigate pages (Smart View)     │
 │   PageUp/Down   Jump 10 pages forward/back      │
