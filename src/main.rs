@@ -1359,12 +1359,22 @@ Layout Analysis:
     }
 
     fn render(&mut self, area: Rect, buf: &mut Buffer) {
+        // Safety check: Don't render if area is too small
+        if area.width < 10 || area.height < 5 {
+            return;
+        }
+        
         let colors = self.theme.colors();
 
         // Fill background with theme color - with bounds checking
         let buf_area = buf.area();
         let buf_width = buf_area.width;
         let buf_height = buf_area.height;
+        
+        // Another safety check for buffer dimensions
+        if buf_width == 0 || buf_height == 0 {
+            return;
+        }
 
         let max_row = area.y.saturating_add(area.height).min(buf_height);
         let max_col = area.x.saturating_add(area.width).min(buf_width);
@@ -1463,6 +1473,11 @@ Layout Analysis:
 
         let inner = pdf_block.inner(area);
         pdf_block.render(area, buf);
+        
+        // Safety check: Don't render if inner area is too small
+        if inner.width < 2 || inner.height < 2 {
+            return;
+        }
 
         // Try to render PDF as image if available
         if let Some(pdf_image) = &self.pdf_image {
@@ -1474,14 +1489,17 @@ Layout Analysis:
                 // Always recreate the protocol after zoom changes to ensure correct rendering
                 // The old protocol holds a reference to the old image size
                 if let Some(ref mut picker) = self.image_picker {
-                    // Create a fresh protocol for the current zoomed image
-                    let mut protocol = picker.new_resize_protocol(pdf_image.clone());
+                    // Extra safety: ensure inner area is valid for image rendering
+                    if inner.width > 0 && inner.height > 0 {
+                        // Create a fresh protocol for the current zoomed image
+                        let mut protocol = picker.new_resize_protocol(pdf_image.clone());
 
-                    // Create the image widget
-                    let image_widget = StatefulImage::new(None);
+                        // Create the image widget
+                        let image_widget = StatefulImage::new(None);
 
-                    // Render the image widget with the fresh protocol
-                    image_widget.render(inner, buf, &mut protocol);
+                        // Render the image widget with the fresh protocol
+                        image_widget.render(inner, buf, &mut protocol);
+                    }
 
                     // Don't store the protocol as we'll recreate it each frame
                     // This prevents stale image references after zoom
@@ -1531,6 +1549,11 @@ Layout Analysis:
 
         let inner = matrix_block.inner(area);
         matrix_block.render(area, buf);
+
+        // Safety check: Don't render if inner area is too small
+        if inner.width < 1 || inner.height < 1 {
+            return;
+        }
 
         // Draw dot matrix background with bounds checking
         for row in 0..inner.height {
@@ -1660,6 +1683,11 @@ Layout Analysis:
 
         let inner = smart_block.inner(area);
         smart_block.render(area, buf);
+
+        // Safety check: Don't render if inner area is too small
+        if inner.width < 1 || inner.height < 1 {
+            return;
+        }
 
         // Draw dot matrix background with bounds checking
         for row in 0..inner.height {
