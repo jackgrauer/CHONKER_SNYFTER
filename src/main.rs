@@ -1514,6 +1514,8 @@ Layout Analysis:
 
     fn render_matrix_pane(&mut self, area: Rect, buf: &mut Buffer) {
         let colors = self.theme.colors();
+        let buf_width = buf.area().width;
+        let buf_height = buf.area().height;
         let border_style = Style::default().fg(colors.teal);
 
         let title = if self.matrix_modified {
@@ -1530,14 +1532,17 @@ Layout Analysis:
         let inner = matrix_block.inner(area);
         matrix_block.render(area, buf);
 
-        // Draw dot matrix background
+        // Draw dot matrix background with bounds checking
         for row in 0..inner.height {
             for col in 0..inner.width {
                 let x = inner.x + col;
                 let y = inner.y + row;
-                buf[(x, y)]
-                    .set_char('·')
-                    .set_style(Style::default().fg(colors.dim));
+                // Check bounds before accessing buffer
+                if x < buf_width && y < buf_height {
+                    buf[(x, y)]
+                        .set_char('·')
+                        .set_style(Style::default().fg(colors.dim));
+                }
             }
         }
 
@@ -1594,7 +1599,10 @@ Layout Analysis:
                 for (len, style) in line_styles {
                     for _ in 0..len {
                         if let Some(ch) = char_iter.next() {
-                            let _ = &mut buf[(current_x, y)].set_char(ch).set_style(style);
+                            // Check bounds before writing to buffer
+                            if current_x < buf_width && y < buf_height {
+                                let _ = &mut buf[(current_x, y)].set_char(ch).set_style(style);
+                            }
                             current_x += 1;
                         }
                     }
@@ -1641,6 +1649,8 @@ Layout Analysis:
 
     fn render_smart_layout_pane(&self, area: Rect, buf: &mut Buffer) {
         let colors = self.theme.colors();
+        let buf_width = buf.area().width;
+        let buf_height = buf.area().height;
         let border_style = Style::default().fg(colors.teal);
 
         let smart_block = Block::default()
@@ -1651,14 +1661,17 @@ Layout Analysis:
         let inner = smart_block.inner(area);
         smart_block.render(area, buf);
 
-        // Draw dot matrix background
+        // Draw dot matrix background with bounds checking
         for row in 0..inner.height {
             for col in 0..inner.width {
                 let x = inner.x + col;
                 let y = inner.y + row;
-                buf[(x, y)]
-                    .set_char('·')
-                    .set_style(Style::default().fg(colors.dim));
+                // Check bounds before accessing buffer
+                if x < buf_width && y < buf_height {
+                    buf[(x, y)]
+                        .set_char('·')
+                        .set_style(Style::default().fg(colors.dim));
+                }
             }
         }
 
