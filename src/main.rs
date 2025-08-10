@@ -1325,10 +1325,14 @@ Layout Analysis:
         let max_row = area.y.saturating_add(area.height).min(buf_height);
         let max_col = area.x.saturating_add(area.width).min(buf_width);
 
-        for row in area.y..max_row {
-            for col in area.x..max_col {
-                if col < buf_width && row < buf_height {
-                    buf[(col, row)].set_style(Style::default().bg(colors.bg));
+        // Ensure we never go out of bounds
+        if area.y < buf_height && area.x < buf_width {
+            for row in area.y..max_row {
+                for col in area.x..max_col {
+                    // The ranges are already clamped but double-check
+                    if col < buf_width && row < buf_height {
+                        buf[(col, row)].set_style(Style::default().bg(colors.bg));
+                    }
                 }
             }
         }
@@ -1421,7 +1425,7 @@ Layout Analysis:
             // Skip rendering if image is too small to prevent crashes
             let img_width = pdf_image.width();
             let img_height = pdf_image.height();
-            
+
             if img_width >= 50 && img_height >= 50 {
                 // Always recreate the protocol after zoom changes to ensure correct rendering
                 // The old protocol holds a reference to the old image size
@@ -1689,12 +1693,19 @@ Layout Analysis:
             height: help_height.min(area.height),
         };
 
-        // Clear background
-        for row in help_area.y..help_area.y + help_area.height {
-            for col in help_area.x..help_area.x + help_area.width {
-                let _ = &mut buf[(col, row)]
-                    .set_char(' ')
-                    .set_style(Style::default().bg(Color::Rgb(10, 15, 20)));
+        // Clear background with bounds checking
+        let buf_width = buf.area().width;
+        let buf_height = buf.area().height;
+        let help_end_row = help_area.y.saturating_add(help_area.height).min(buf_height);
+        let help_end_col = help_area.x.saturating_add(help_area.width).min(buf_width);
+        
+        for row in help_area.y..help_end_row {
+            for col in help_area.x..help_end_col {
+                if col < buf_width && row < buf_height {
+                    buf[(col, row)]
+                        .set_char(' ')
+                        .set_style(Style::default().bg(Color::Rgb(10, 15, 20)));
+                }
             }
         }
 
