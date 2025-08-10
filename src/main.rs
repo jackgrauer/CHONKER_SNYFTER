@@ -356,6 +356,18 @@ impl ChonkerTUI {
     }
 
     fn render_current_page(&mut self) -> Result<()> {
+        // Skip image rendering if zoom is too low to prevent crashes
+        if self.zoom_level < 0.3 {
+            self.pdf_render_cache = Some(format!(
+                "Page {}/{}\nZoom: {:.0}%\n\n[Image disabled at low zoom]\nZoom in with Ctrl+ to view image",
+                self.current_page + 1,
+                self.total_pages,
+                self.zoom_level * 100.0
+            ));
+            self.pdf_image = None;
+            return Ok(());
+        }
+        
         if let Some(pdf_path) = &self.pdf_path.clone() {
             self.cache_misses += 1;
 
@@ -995,9 +1007,15 @@ Layout Analysis:
                         }
                         KeyCode::Char('-') | KeyCode::Char('_') if self.pdf_path.is_some() => {
                             // Zoom out PDF - prevent going too small
-                            self.zoom_level = (self.zoom_level / 1.2).max(0.1); // Minimum 10%
-                            self.pdf_image = None; // Force re-render with new zoom
-                            self.status_message = format!("Zoom: {:.0}%", self.zoom_level * 100.0);
+                            self.zoom_level = (self.zoom_level / 1.2).max(0.2); // Minimum 20% to prevent crashes
+                            // Don't render image if too small to prevent crashes
+                            if self.zoom_level < 0.3 {
+                                self.pdf_image = None; // Clear image, show text only
+                                self.status_message = format!("Zoom: {:.0}% (text only)", self.zoom_level * 100.0);
+                            } else {
+                                self.pdf_image = None; // Force re-render with new zoom
+                                self.status_message = format!("Zoom: {:.0}%", self.zoom_level * 100.0);
+                            }
                         }
                         KeyCode::Char('0') if self.pdf_path.is_some() => {
                             // Reset zoom to default
@@ -1698,7 +1716,7 @@ Layout Analysis:
         let buf_height = buf.area().height;
         let help_end_row = help_area.y.saturating_add(help_area.height).min(buf_height);
         let help_end_col = help_area.x.saturating_add(help_area.width).min(buf_width);
-        
+
         for row in help_area.y..help_end_row {
             for col in help_area.x..help_end_col {
                 if col < buf_width && row < buf_height {
