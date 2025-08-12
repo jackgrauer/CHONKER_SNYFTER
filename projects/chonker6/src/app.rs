@@ -22,6 +22,7 @@ pub struct App {
     last_click_time: std::time::Instant,
     click_count: u8,
     last_click_row: u16,
+    pending_selection: Option<(usize, usize)>, // For auto-scroll + selection
 }
 
 impl App {
@@ -64,6 +65,7 @@ impl App {
             last_click_time: std::time::Instant::now(),
             click_count: 0,
             last_click_row: 0,
+            pending_selection: None,
         };
         
         // Initialize terminal-specific features
@@ -631,10 +633,6 @@ impl App {
                                 if self.click_count == 2 {
                                     // Double-click: select entire line
                                     return Some(Action::SelectTerminalText(line_idx, line_idx));
-                                } else if self.click_count >= 3 {
-                                    // Triple-click: select all terminal content
-                                    let last_line = self.state.ui.terminal_panel.content.len().saturating_sub(1);
-                                    return Some(Action::SelectTerminalText(0, last_line));
                                 } else {
                                     // Single click: start normal selection
                                     return Some(Action::SelectTerminalText(line_idx, line_idx));
@@ -643,23 +641,52 @@ impl App {
                         }
                     }
                     MouseEventKind::Drag(MouseButton::Left) => {
-                        // Update selection
+                        // Update selection with auto-scroll when dragging beyond visible area
                         if let Some((start, _)) = self.state.ui.terminal_panel.selected_lines {
+                            let terminal_height = self.state.ui.terminal_panel.height as u16;
+                            let terminal_end_y = terminal_start_y + terminal_height;
+                            
+                            // Check if we need to auto-scroll
+                            let mut scroll_action = None;
+                            
+                            if mouse_row <= terminal_start_y {
+                                // Dragging above terminal - scroll up
+                                if self.state.ui.terminal_panel.scroll_offset > 0 {
+                                    scroll_action = Some(Action::ScrollTerminalUp);
+                                }
+                            } else if mouse_row >= terminal_end_y {
+                                // Dragging below terminal - scroll down
+                                let max_scroll = self.state.ui.terminal_panel.content.len().saturating_sub(terminal_height as usize);
+                                if self.state.ui.terminal_panel.scroll_offset < max_scroll {
+                                    scroll_action = Some(Action::ScrollTerminalDown);
+                                }
+                            }
+                            
+                            // Always update selection based on current mouse position
                             if mouse_row > terminal_start_y {
                                 let relative_row = (mouse_row - terminal_start_y).saturating_sub(1) as usize;
-                                let line_idx = relative_row + self.state.ui.terminal_panel.scroll_offset;
-                                if line_idx < self.state.ui.terminal_panel.content.len() {
+                                let line_idx = (relative_row + self.state.ui.terminal_panel.scroll_offset)
+                                    .min(self.state.ui.terminal_panel.content.len().saturating_sub(1));
+                                
+                                // If we need to scroll, do that first, then update selection
+                                if let Some(scroll) = scroll_action {
+                                    // Store the current selection to update after scroll
+                                    self.pending_selection = Some((start, line_idx));
+                                    return Some(scroll);
+                                } else {
                                     return Some(Action::SelectTerminalText(start, line_idx));
                                 }
+                            } else if let Some(scroll) = scroll_action {
+                                // Scrolling above terminal area
+                                let line_idx = self.state.ui.terminal_panel.scroll_offset;
+                                self.pending_selection = Some((start, line_idx));
+                                return Some(scroll);
                             }
                         }
                     }
                     MouseEventKind::Up(MouseButton::Left) => {
-                        // On mouse release, automatically copy selected text to clipboard
-                        // This mimics standard terminal behavior
-                        if self.state.ui.terminal_panel.selected_lines.is_some() {
-                            return Some(Action::CopyTerminalSelection);
-                        }
+                        // Mouse release - selection is complete, no auto-copy
+                        // User can manually copy with Ctrl+C
                     }
                     MouseEventKind::ScrollUp => {
                         // Scroll terminal up with mouse wheel
@@ -1083,8 +1110,16 @@ impl App {
         }
         
         // Update state with pure function
-        let (new_state, command) = self.state.clone().update(action);
+        let (new_state, command) = self.state.clone().update(action.clone());
         self.state = new_state;
+        
+        // Handle pending selection after scroll actions
+        if matches!(action, Action::ScrollTerminalUp | Action::ScrollTerminalDown) {
+            if let Some((start, end)) = self.pending_selection.take() {
+                let (new_state, _) = self.state.clone().update(Action::SelectTerminalText(start, end));
+                self.state = new_state;
+            }
+        }
         
         // Execute side effects
         if let Some(cmd) = command {
@@ -1521,8 +1556,7 @@ impl App {
             let terminal_block = Block::default()
                 .title(scroll_indicator)
                 .title_alignment(ratatui::layout::Alignment::Left)
-                .borders(ratatui::widgets::Borders::ALL)
-                .border_style(Style::default().fg(terminal_border_fg))
+                .borders(ratatui::widgets::Borders::NONE)
                 .style(Style::default().bg(terminal_bg));
             
             // Calculate inner area for content
@@ -1532,7 +1566,7 @@ impl App {
             frame.render_widget(terminal_block, terminal_area);
             
             // Prepare terminal content with scrolling - show ALL content if scrolled up
-            let visible_lines = self.state.ui.terminal_panel.height.saturating_sub(2) as usize;
+            let visible_lines = self.state.ui.terminal_panel.height as usize;
             let start = self.state.ui.terminal_panel.scroll_offset;
             let end = (start + visible_lines).min(self.state.ui.terminal_panel.content.len());
             
