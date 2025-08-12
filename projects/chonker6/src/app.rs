@@ -47,8 +47,6 @@ impl App {
         // Use our proper Kitty detection
         let is_kitty = crate::kitty_graphics::test_kitty_graphics();
         
-        eprintln!("Terminal detection: TERM={}, is_kitty={}", term_program, is_kitty);
-        
         let mut app = Self {
             state: AppState::default(),
             running: true,
@@ -356,6 +354,12 @@ impl App {
             return;
         }
         
+        // Clear previous images before rendering new one
+        use std::io::{stdout, Write};
+        let mut out = stdout();
+        let _ = out.write_all(b"\x1b_Ga=d,i=99\x1b\\");
+        let _ = out.flush();
+        
         let (new_state, _) = self.state.clone().update(
             Action::AddTerminalOutput(format!("🖼️ Kitty PDF render: {}x{} at ({},{})", 
                 area.width, area.height, area.x, area.y))
@@ -387,27 +391,22 @@ impl App {
                     );
                     self.state = new_state;
                     
-                    // Position the image within the reserved PDF area
-                    // Add padding and ensure it's within the left panel bounds
-                    let cursor_row = area.y + 1; // Start near top of reserved area
-                    let cursor_col = area.x + 1; // Small left margin
-                    
-                    match crate::kitty_graphics::send_image_to_kitty(
+                    // Use the area-based rendering for better integration with ratatui
+                    match crate::kitty_graphics::render_pdf_in_area(
                         &base64_png,
                         width,
-                        height, 
-                        cursor_row,
-                        cursor_col
+                        height,
+                        &area
                     ) {
                         Ok(()) => {
                             let (new_state, _) = self.state.clone().update(
-                                Action::AddTerminalOutput(format!("✅ PDF displayed via Kitty protocol: {}x{}", width, height))
+                                Action::AddTerminalOutput(format!("✅ PDF displayed via Kitty: {}x{} px", width, height))
                             );
                             self.state = new_state;
                         }
                         Err(e) => {
                             let (new_state, _) = self.state.clone().update(
-                                Action::AddTerminalOutput(format!("❌ Kitty protocol error: {}", e))
+                                Action::AddTerminalOutput(format!("❌ Kitty error: {}", e))
                             );
                             self.state = new_state;
                         }
@@ -877,6 +876,13 @@ impl App {
             // Control commands first - highest priority
             (KeyCode::Char('t'), KeyModifiers::CONTROL) => Some(Action::ToggleTerminalPanel),
             (KeyCode::Char('o'), KeyModifiers::CONTROL) => {
+                // Clear any Kitty images when opening file selector
+                if self.is_kitty {
+                    use std::io::{stdout, Write};
+                    let mut out = stdout();
+                    let _ = out.write_all(b"\x1b_Ga=d,i=99\x1b\\");
+                    let _ = out.flush();
+                }
                 // Activate our custom file selector
                 self.file_selector.activate();
                 Some(Action::SetStatus("Select a PDF file...".to_string()))

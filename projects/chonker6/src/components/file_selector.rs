@@ -194,8 +194,8 @@ impl FileSelector {
             return (0, 0);
         }
         
-        // Use the entire screen for file selection
-        let dialog_bg = Color::Rgb(30, 34, 42);
+        // Use the entire screen for file selection with solid black background
+        let dialog_bg = Color::Black;  // Solid black to prevent bleed-through
         let dialog_block = Block::default()
             .style(Style::default().bg(dialog_bg));
         frame.render_widget(dialog_block, area);
@@ -211,7 +211,7 @@ impl FileSelector {
             .split(area);
         
         // Render header with current path
-        let header_bg = Color::Rgb(40, 44, 52);
+        let header_bg = Color::Rgb(20, 20, 20);  // Darker header
         let header_fg = Color::Rgb(200, 200, 255);
         
         let path_display = self.current_path.display().to_string();
@@ -234,31 +234,31 @@ impl FileSelector {
             .enumerate()
             .map(|(i, entry)| {
                 let (fg, bg, modifiers) = if i == self.selected_index {
-                    // Selected item - bright highlight
+                    // Selected item - bright highlight with solid background
                     (
                         Color::Rgb(255, 255, 200),
-                        Color::Rgb(60, 65, 78),
+                        Color::Rgb(40, 40, 50),  // Darker, more opaque
                         Modifier::empty(),
                     )
                 } else if entry.is_pdf {
                     // PDF files - slightly highlighted
                     (
                         Color::Rgb(150, 200, 255),
-                        dialog_bg,
+                        Color::Black,  // Use solid black
                         Modifier::empty(),
                     )
                 } else if entry.is_dir {
                     // Directories - normal
                     (
                         Color::Rgb(180, 180, 200),
-                        dialog_bg,
+                        Color::Black,  // Use solid black
                         Modifier::empty(),
                     )
                 } else {
                     // Other files - dimmed
                     (
                         Color::Rgb(120, 120, 140),
-                        dialog_bg,
+                        Color::Black,  // Use solid black
                         Modifier::empty(),
                     )
                 };

@@ -1,0 +1,16 @@
+# Rust/Cargo build artifacts
+target/
+/target/
+
+# Mac OS files
+.DS_Store
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Debug files
+*.log
+debug/
