@@ -285,11 +285,11 @@ impl AppState {
                     // Clear any existing selection on new click
                     self.editor.selection = None;
                     
-                    // Determine selection mode based on modifiers
+                    // Determine selection mode based on modifiers - Block is now default
                     let selection_mode = if modifiers.contains(crossterm::event::KeyModifiers::ALT) {
-                        crate::actions::SelectionMode::Block
+                        crate::actions::SelectionMode::Line  // Alt+click for line selection
                     } else {
-                        crate::actions::SelectionMode::Line
+                        crate::actions::SelectionMode::Block // Default to block selection
                     };
                     
                     // Prepare for potential drag selection

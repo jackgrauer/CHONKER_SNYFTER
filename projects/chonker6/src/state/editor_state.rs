@@ -26,7 +26,7 @@ pub struct MouseSelection {
 
 impl Selection {
     pub fn new(start: Position, end: Position) -> Self {
-        Self { start, end, mode: SelectionMode::Line }
+        Self { start, end, mode: SelectionMode::Block }
     }
     
     pub fn new_block(start: Position, end: Position) -> Self {
@@ -140,8 +140,37 @@ impl MouseSelection {
 
 impl Default for EditorState {
     fn default() -> Self {
+        // Create a demo dot matrix with numbers, letters, and symbols
+        let mut matrix = Vec::new();
+        
+        // Create a 40x80 matrix (will auto-expand as needed)
+        let initial_rows = 40;
+        let initial_cols = 80;
+        
+        for row in 0..initial_rows {
+            let mut line = Vec::new();
+            for col in 0..initial_cols {
+                let char = match (row % 10, col % 20) {
+                    // Create a pattern with numbers, letters, and dots
+                    (0, _) => if col % 10 == 0 { ('0' as u8 + ((col / 10) % 10) as u8) as char } else { '.' },
+                    (1, _) => if col % 5 == 0 { ('A' as u8 + ((col / 5) % 26) as u8) as char } else { '.' },
+                    (2, _) => if col % 3 == 0 { ('a' as u8 + ((col / 3) % 26) as u8) as char } else { '.' },
+                    (3, _) => if col % 2 == 0 { '#' } else { '.' },
+                    (4, _) => if col % 4 == 0 { ('0' as u8 + (col % 10) as u8) as char } else { '·' },
+                    (5, _) => if col % 6 == 0 { '█' } else { ' ' },
+                    (6, _) => if col % 8 == 0 { '▓' } else { '░' },
+                    (7, _) => '─',
+                    (8, _) => if col % 10 == 0 { '│' } else { ' ' },
+                    (9, _) => if col % 2 == 0 { '+' } else { '-' },
+                    _ => '·'
+                };
+                line.push(char);
+            }
+            matrix.push(line);
+        }
+        
         Self {
-            matrix: Vec::new(),
+            matrix,
             cursor: Position { row: 0, col: 0 },
             selection: None,
             modified: false,
@@ -153,6 +182,59 @@ impl Default for EditorState {
 impl EditorState {
     pub fn has_content(&self) -> bool {
         !self.matrix.is_empty()
+    }
+    
+    /// Ensure the matrix is large enough to accommodate the given position
+    pub fn ensure_matrix_size(&mut self, pos: Position) {
+        // Expand rows if needed
+        while pos.row >= self.matrix.len() {
+            let current_width = if self.matrix.is_empty() { 80 } else { self.matrix[0].len() };
+            let mut new_row = vec![' '; current_width];
+            
+            // Fill new rows with the pattern from the default matrix
+            let row_idx = self.matrix.len();
+            for col in 0..current_width {
+                let char = match (row_idx % 10, col % 20) {
+                    (0, _) => if col % 10 == 0 { ('0' as u8 + ((col / 10) % 10) as u8) as char } else { '.' },
+                    (1, _) => if col % 5 == 0 { ('A' as u8 + ((col / 5) % 26) as u8) as char } else { '.' },
+                    (2, _) => if col % 3 == 0 { ('a' as u8 + ((col / 3) % 26) as u8) as char } else { '.' },
+                    (3, _) => if col % 2 == 0 { '#' } else { '.' },
+                    (4, _) => if col % 4 == 0 { ('0' as u8 + (col % 10) as u8) as char } else { '·' },
+                    (5, _) => if col % 6 == 0 { '█' } else { ' ' },
+                    (6, _) => if col % 8 == 0 { '▓' } else { '░' },
+                    (7, _) => '─',
+                    (8, _) => if col % 10 == 0 { '│' } else { ' ' },
+                    (9, _) => if col % 2 == 0 { '+' } else { '-' },
+                    _ => '·'
+                };
+                new_row[col] = char;
+            }
+            self.matrix.push(new_row);
+        }
+        
+        // Expand columns if needed
+        if pos.col >= self.matrix.get(0).map_or(0, |row| row.len()) {
+            let target_width = pos.col + 1;
+            for (row_idx, row) in self.matrix.iter_mut().enumerate() {
+                while row.len() < target_width {
+                    let col = row.len();
+                    let char = match (row_idx % 10, col % 20) {
+                        (0, _) => if col % 10 == 0 { ('0' as u8 + ((col / 10) % 10) as u8) as char } else { '.' },
+                        (1, _) => if col % 5 == 0 { ('A' as u8 + ((col / 5) % 26) as u8) as char } else { '.' },
+                        (2, _) => if col % 3 == 0 { ('a' as u8 + ((col / 3) % 26) as u8) as char } else { '.' },
+                        (3, _) => if col % 2 == 0 { '#' } else { '.' },
+                        (4, _) => if col % 4 == 0 { ('0' as u8 + (col % 10) as u8) as char } else { '·' },
+                        (5, _) => if col % 6 == 0 { '█' } else { ' ' },
+                        (6, _) => if col % 8 == 0 { '▓' } else { '░' },
+                        (7, _) => '─',
+                        (8, _) => if col % 10 == 0 { '│' } else { ' ' },
+                        (9, _) => if col % 2 == 0 { '+' } else { '-' },
+                        _ => '·'
+                    };
+                    row.push(char);
+                }
+            }
+        }
     }
     
     pub fn set_matrix(&mut self, matrix: Vec<Vec<char>>) {
@@ -220,6 +302,9 @@ impl EditorState {
     }
     
     pub fn start_mouse_selection(&mut self, pos: Position, mode: SelectionMode) {
+        // Ensure matrix can accommodate this position
+        self.ensure_matrix_size(pos);
+        
         self.mouse_selection = Some(MouseSelection::new(pos, mode));
         // Also set keyboard selection for consistency
         match mode {
@@ -229,6 +314,9 @@ impl EditorState {
     }
     
     pub fn update_mouse_selection(&mut self, pos: Position) {
+        // Ensure matrix can accommodate this position
+        self.ensure_matrix_size(pos);
+        
         if let Some(ref mut mouse_sel) = self.mouse_selection {
             mouse_sel.update_end(pos);
             // Update keyboard selection too
@@ -377,10 +465,8 @@ impl EditorState {
             CursorDirection::Down => {
                 // Always allow moving down to add new content
                 self.cursor.row += 1;
-                // Ensure matrix has enough rows for cursor position
-                while self.cursor.row >= self.matrix.len() {
-                    self.matrix.push(vec![' '; 80]);
-                }
+                // Ensure matrix can accommodate new cursor position
+                self.ensure_matrix_size(self.cursor);
             }
             CursorDirection::Left => {
                 if self.cursor.col > 0 {
@@ -399,10 +485,8 @@ impl EditorState {
                 // Always allow moving right to add new content
                 self.cursor.col += 1;
                 
-                // Ensure we have the current row
-                while self.cursor.row >= self.matrix.len() {
-                    self.matrix.push(vec![' '; 80]);
-                }
+                // Ensure matrix can accommodate new cursor position
+                self.ensure_matrix_size(self.cursor);
             }
             CursorDirection::Home => {
                 self.cursor.col = 0;

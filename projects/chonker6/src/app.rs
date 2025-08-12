@@ -808,34 +808,47 @@ impl App {
     
     /// Convert screen coordinates to matrix position
     fn screen_to_matrix_pos(&self, screen_col: u16, screen_row: u16) -> Option<crate::actions::Position> {
-        // Calculate panel boundaries more accurately
-        let frame_area = ratatui::layout::Rect {
-            x: 0, y: 0, width: 80, height: 24, // Assume standard terminal size for now
-        };
-        
-        // Split into main and status areas
-        let main_area_height = frame_area.height.saturating_sub(1);
-        
-        // Split main area horizontally (50-50 split)
-        let panel_width = frame_area.width / 2;
-        
-        // Check if mouse is in the right panel (text panel)
-        let right_panel_start = panel_width;
-        
-        if screen_col >= right_panel_start && screen_row < main_area_height {
-            // Mouse is in text panel
-            let panel_col = screen_col - right_panel_start;
+        // Get the actual terminal size
+        if let Ok((term_width, term_height)) = crossterm::terminal::size() {
+            // Account for terminal panel if visible
+            let terminal_panel_height = if self.state.ui.terminal_panel.visible {
+                self.state.ui.terminal_panel.height + 1 // +1 for separator
+            } else {
+                0
+            };
             
-            // Account for padding (2 chars horizontal, 1 char vertical for header + 1 blank line)
-            if panel_col >= 2 && screen_row >= 3 {
-                Some(crate::actions::Position {
-                    row: (screen_row.saturating_sub(3)) as usize,
-                    col: (panel_col.saturating_sub(2)) as usize,
-                })
+            // Main area excludes status bar and terminal panel
+            let main_area_height = term_height.saturating_sub(1 + terminal_panel_height);
+            
+            // 50-50 horizontal split for PDF and text panels
+            let text_panel_start = term_width / 2;
+            let text_panel_width = term_width - text_panel_start;
+            
+            // Check if mouse is in the text panel (right side)
+            if screen_col >= text_panel_start && screen_row < main_area_height {
+                // Convert to panel-relative coordinates
+                let panel_col = screen_col - text_panel_start;
+                
+                // Account for panel border (1 char on each side) and header (2 rows)
+                let content_start_col = 1;  // Left border
+                let content_start_row = 2;  // Top border + header
+                
+                if panel_col >= content_start_col && screen_row >= content_start_row {
+                    let matrix_col = (panel_col - content_start_col) as usize;
+                    let matrix_row = (screen_row - content_start_row) as usize;
+                    
+                    Some(crate::actions::Position {
+                        row: matrix_row,
+                        col: matrix_col,
+                    })
+                } else {
+                    None
+                }
             } else {
                 None
             }
         } else {
+            // Fallback if terminal size detection fails
             None
         }
     }
