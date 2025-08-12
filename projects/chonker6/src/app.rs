@@ -877,9 +877,9 @@ impl App {
                 // Convert to panel-relative coordinates
                 let panel_col = screen_col - text_panel_start;
                 
-                // Account for panel border (1 char on each side) and header (2 rows)
-                let content_start_col = 1;  // Left border
-                let content_start_row = 2;  // Top border + header
+                // Account for text area margin: horizontal=2, vertical=1
+                let content_start_col = 2;  // Left margin (2 chars)
+                let content_start_row = 1;  // Top margin (1 row)
                 
                 if panel_col >= content_start_col && screen_row >= content_start_row {
                     let matrix_col = (panel_col - content_start_col) as usize;
