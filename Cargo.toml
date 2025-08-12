@@ -1,0 +1,56 @@
+[package]
+name = "chonker6"
+version = "0.1.0"
+edition = "2021"
+authors = ["Jack"]
+description = "Terminal-native PDF viewer with clean architecture"
+
+[dependencies]
+# Core TUI framework
+ratatui = "0.28"
+crossterm = "0.28"
+
+# PDF handling
+pdfium-render = "0.8"
+
+# Image support
+image = "0.24"
+ratatui-image = "1.0"
+
+# Async runtime
+tokio = { version = "1.0", features = ["full"] }
+
+# Error handling
+anyhow = "1.0"
+thiserror = "1.0"
+
+# Configuration
+serde = { version = "1.0", features = ["derive"] }
+toml = "0.8"
+dirs = "5.0"
+
+# Clipboard
+copypasta = "0.10"
+
+# File dialogs
+rfd = "0.14"
+
+# Logging
+log = "0.4"
+env_logger = "0.11"
+
+# Base64 encoding for iTerm2 image protocol
+base64 = "0.21"
+
+[features]
+default = ["iterm2", "kitty"]
+iterm2 = []
+kitty = []
+sixel = []
+ascii-only = []
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
