@@ -140,37 +140,9 @@ impl MouseSelection {
 
 impl Default for EditorState {
     fn default() -> Self {
-        // Create a demo dot matrix with numbers, letters, and symbols
-        let mut matrix = Vec::new();
-        
-        // Create a 40x80 matrix (will auto-expand as needed)
-        let initial_rows = 40;
-        let initial_cols = 80;
-        
-        for row in 0..initial_rows {
-            let mut line = Vec::new();
-            for col in 0..initial_cols {
-                let char = match (row % 10, col % 20) {
-                    // Create a pattern with numbers, letters, and dots
-                    (0, _) => if col % 10 == 0 { ('0' as u8 + ((col / 10) % 10) as u8) as char } else { '.' },
-                    (1, _) => if col % 5 == 0 { ('A' as u8 + ((col / 5) % 26) as u8) as char } else { '.' },
-                    (2, _) => if col % 3 == 0 { ('a' as u8 + ((col / 3) % 26) as u8) as char } else { '.' },
-                    (3, _) => if col % 2 == 0 { '#' } else { '.' },
-                    (4, _) => if col % 4 == 0 { ('0' as u8 + (col % 10) as u8) as char } else { '·' },
-                    (5, _) => if col % 6 == 0 { '█' } else { ' ' },
-                    (6, _) => if col % 8 == 0 { '▓' } else { '░' },
-                    (7, _) => '─',
-                    (8, _) => if col % 10 == 0 { '│' } else { ' ' },
-                    (9, _) => if col % 2 == 0 { '+' } else { '-' },
-                    _ => '·'
-                };
-                line.push(char);
-            }
-            matrix.push(line);
-        }
-        
+        // Start with empty matrix - will be populated when text is extracted
         Self {
-            matrix,
+            matrix: Vec::new(),
             cursor: Position { row: 0, col: 0 },
             selection: None,
             modified: false,
@@ -191,23 +163,9 @@ impl EditorState {
             let current_width = if self.matrix.is_empty() { 80 } else { self.matrix[0].len() };
             let mut new_row = vec![' '; current_width];
             
-            // Fill new rows with the pattern from the default matrix
-            let row_idx = self.matrix.len();
+            // Fill new rows with dots
             for col in 0..current_width {
-                let char = match (row_idx % 10, col % 20) {
-                    (0, _) => if col % 10 == 0 { ('0' as u8 + ((col / 10) % 10) as u8) as char } else { '.' },
-                    (1, _) => if col % 5 == 0 { ('A' as u8 + ((col / 5) % 26) as u8) as char } else { '.' },
-                    (2, _) => if col % 3 == 0 { ('a' as u8 + ((col / 3) % 26) as u8) as char } else { '.' },
-                    (3, _) => if col % 2 == 0 { '#' } else { '.' },
-                    (4, _) => if col % 4 == 0 { ('0' as u8 + (col % 10) as u8) as char } else { '·' },
-                    (5, _) => if col % 6 == 0 { '█' } else { ' ' },
-                    (6, _) => if col % 8 == 0 { '▓' } else { '░' },
-                    (7, _) => '─',
-                    (8, _) => if col % 10 == 0 { '│' } else { ' ' },
-                    (9, _) => if col % 2 == 0 { '+' } else { '-' },
-                    _ => '·'
-                };
-                new_row[col] = char;
+                new_row[col] = '.';
             }
             self.matrix.push(new_row);
         }
@@ -215,23 +173,9 @@ impl EditorState {
         // Expand columns if needed
         if pos.col >= self.matrix.get(0).map_or(0, |row| row.len()) {
             let target_width = pos.col + 1;
-            for (row_idx, row) in self.matrix.iter_mut().enumerate() {
+            for row in self.matrix.iter_mut() {
                 while row.len() < target_width {
-                    let col = row.len();
-                    let char = match (row_idx % 10, col % 20) {
-                        (0, _) => if col % 10 == 0 { ('0' as u8 + ((col / 10) % 10) as u8) as char } else { '.' },
-                        (1, _) => if col % 5 == 0 { ('A' as u8 + ((col / 5) % 26) as u8) as char } else { '.' },
-                        (2, _) => if col % 3 == 0 { ('a' as u8 + ((col / 3) % 26) as u8) as char } else { '.' },
-                        (3, _) => if col % 2 == 0 { '#' } else { '.' },
-                        (4, _) => if col % 4 == 0 { ('0' as u8 + (col % 10) as u8) as char } else { '·' },
-                        (5, _) => if col % 6 == 0 { '█' } else { ' ' },
-                        (6, _) => if col % 8 == 0 { '▓' } else { '░' },
-                        (7, _) => '─',
-                        (8, _) => if col % 10 == 0 { '│' } else { ' ' },
-                        (9, _) => if col % 2 == 0 { '+' } else { '-' },
-                        _ => '·'
-                    };
-                    row.push(char);
+                    row.push('.');
                 }
             }
         }
@@ -368,14 +312,31 @@ impl EditorState {
         if let Some(ref selection) = self.selection {
             let (min_pos, max_pos) = selection.get_bounds();
             
-            for row in min_pos.row..=max_pos.row {
-                if row < self.matrix.len() {
-                    let start_col = if row == min_pos.row { min_pos.col } else { 0 };
-                    let end_col = if row == max_pos.row { max_pos.col.min(self.matrix[row].len()) } else { self.matrix[row].len() };
-                    
-                    for col in start_col..end_col {
-                        if col < self.matrix[row].len() {
-                            self.matrix[row][col] = ' ';
+            match selection.mode {
+                SelectionMode::Block => {
+                    // Block mode: only delete the rectangular region
+                    for row in min_pos.row..=max_pos.row {
+                        if row < self.matrix.len() {
+                            for col in min_pos.col..=max_pos.col {
+                                if col < self.matrix[row].len() {
+                                    self.matrix[row][col] = ' ';
+                                }
+                            }
+                        }
+                    }
+                },
+                SelectionMode::Line => {
+                    // Line mode: traditional terminal-style deletion
+                    for row in min_pos.row..=max_pos.row {
+                        if row < self.matrix.len() {
+                            let start_col = if row == min_pos.row { min_pos.col } else { 0 };
+                            let end_col = if row == max_pos.row { max_pos.col.min(self.matrix[row].len()) } else { self.matrix[row].len() };
+                            
+                            for col in start_col..end_col {
+                                if col < self.matrix[row].len() {
+                                    self.matrix[row][col] = ' ';
+                                }
+                            }
                         }
                     }
                 }
@@ -388,6 +349,10 @@ impl EditorState {
     }
     
     pub fn paste_text(&mut self, text: String) {
+        self.paste_text_with_mode(text, SelectionMode::Line);
+    }
+    
+    pub fn paste_text_with_mode(&mut self, text: String, mode: SelectionMode) {
         let lines: Vec<&str> = text.lines().collect();
         if lines.is_empty() {
             return;
@@ -402,37 +367,68 @@ impl EditorState {
             self.matrix.push(vec![' '; 80]);
         }
         
-        for (row_offset, line) in lines.iter().enumerate() {
-            let target_row = start_row + row_offset;
-            let needed_cols = start_col + line.len();
-            
-            if target_row < self.matrix.len() {
-                // Extend row if needed
-                if self.matrix[target_row].len() < needed_cols {
-                    self.matrix[target_row].resize(needed_cols, ' ');
+        match mode {
+            SelectionMode::Block => {
+                // Block mode: maintain rectangular structure
+                for (row_offset, line) in lines.iter().enumerate() {
+                    let target_row = start_row + row_offset;
+                    let needed_cols = start_col + line.len();
+                    
+                    if target_row < self.matrix.len() {
+                        // Extend row if needed
+                        if self.matrix[target_row].len() < needed_cols {
+                            self.matrix[target_row].resize(needed_cols, ' ');
+                        }
+                        
+                        // Paste characters maintaining block structure
+                        for (col_offset, ch) in line.chars().enumerate() {
+                            let target_col = start_col + col_offset;
+                            if target_col < self.matrix[target_row].len() {
+                                self.matrix[target_row][target_col] = ch;
+                            }
+                        }
+                    }
                 }
                 
-                // Paste characters
-                for (col_offset, ch) in line.chars().enumerate() {
-                    let target_col = start_col + col_offset;
-                    if target_col < self.matrix[target_row].len() {
-                        self.matrix[target_row][target_col] = ch;
+                // For block mode, keep cursor at start position
+                // User can see the rectangular paste result
+                self.cursor = Position { row: start_row, col: start_col };
+            },
+            SelectionMode::Line => {
+                // Line mode: traditional paste behavior
+                for (row_offset, line) in lines.iter().enumerate() {
+                    let target_row = start_row + row_offset;
+                    let needed_cols = start_col + line.len();
+                    
+                    if target_row < self.matrix.len() {
+                        // Extend row if needed
+                        if self.matrix[target_row].len() < needed_cols {
+                            self.matrix[target_row].resize(needed_cols, ' ');
+                        }
+                        
+                        // Paste characters
+                        for (col_offset, ch) in line.chars().enumerate() {
+                            let target_col = start_col + col_offset;
+                            if target_col < self.matrix[target_row].len() {
+                                self.matrix[target_row][target_col] = ch;
+                            }
+                        }
+                    }
+                }
+                
+                // Move cursor to end of pasted text
+                if let Some(last_line) = lines.last() {
+                    if lines.len() == 1 {
+                        self.cursor.col = start_col + last_line.len();
+                    } else {
+                        self.cursor.row = start_row + lines.len() - 1;
+                        self.cursor.col = last_line.len();
                     }
                 }
             }
         }
         
         self.modified = true;
-        
-        // Move cursor to end of pasted text
-        if let Some(last_line) = lines.last() {
-            if lines.len() == 1 {
-                self.cursor.col = start_col + last_line.len();
-            } else {
-                self.cursor.row = start_row + lines.len() - 1;
-                self.cursor.col = last_line.len();
-            }
-        }
     }
     
     pub fn is_position_selected(&self, pos: Position) -> bool {

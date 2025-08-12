@@ -49,6 +49,7 @@ kitty = []
 sixel = []
 ascii-only = []
 
+
 [profile.release]
 opt-level = 3
 lto = true

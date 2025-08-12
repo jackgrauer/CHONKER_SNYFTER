@@ -56,15 +56,6 @@ impl PdfState {
                     self.current_page -= 1;
                 }
             }
-            PageDirection::First => {
-                self.current_page = 0;
-            }
-            PageDirection::Last => {
-                self.current_page = self.page_count.saturating_sub(1);
-            }
-            PageDirection::Jump(page) => {
-                self.current_page = page.min(self.page_count.saturating_sub(1));
-            }
         }
     }
     

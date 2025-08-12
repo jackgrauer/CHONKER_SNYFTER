@@ -10,18 +10,54 @@ pub struct PdfEngine {
 impl PdfEngine {
     pub fn new() -> Result<Self> {
         // Initialize PDFium with the bundled library
-        // Try multiple paths to find the library
-        let pdfium = Pdfium::new(
-            Pdfium::bind_to_library(Pdfium::pdfium_platform_library_name_at_path("./lib"))
-                .or_else(|_| Pdfium::bind_to_library(Pdfium::pdfium_platform_library_name_at_path("./projects/chonker6/lib")))
-                .or_else(|_| Pdfium::bind_to_library(Pdfium::pdfium_platform_library_name_at_path("/Users/jack/chonker6/projects/chonker6/lib")))
-                .or_else(|_| Pdfium::bind_to_system_library())?
-        );
+        // Try multiple paths to find the library with better error reporting
+        let lib_paths = [
+            "./lib",
+            "./projects/chonker6/lib", 
+            "/Users/jack/chonker6/projects/chonker6/lib",
+        ];
         
-        Ok(Self {
-            pdfium,
-            current_path: None,
-        })
+        let mut last_error = None;
+        for path in &lib_paths {
+            let lib_name = Pdfium::pdfium_platform_library_name_at_path(path);
+            eprintln!("Trying PDFium library at: {}", lib_name.display());
+            
+            match Pdfium::bind_to_library(&lib_name) {
+                Ok(binding) => {
+                    eprintln!("✓ Successfully bound to PDFium library at: {}", lib_name.display());
+                    let pdfium = Pdfium::new(binding);
+                    return Ok(Self {
+                        pdfium,
+                        current_path: None,
+                    });
+                }
+                Err(e) => {
+                    eprintln!("✗ Failed to bind to {}: {}", lib_name.display(), e);
+                    last_error = Some(e);
+                }
+            }
+        }
+        
+        // Try system library as fallback
+        eprintln!("Trying system PDFium library...");
+        match Pdfium::bind_to_system_library() {
+            Ok(binding) => {
+                eprintln!("✓ Successfully bound to system PDFium library");
+                let pdfium = Pdfium::new(binding);
+                Ok(Self {
+                    pdfium,
+                    current_path: None,
+                })
+            }
+            Err(e) => {
+                eprintln!("✗ Failed to bind to system library: {}", e);
+                Err(anyhow::anyhow!(
+                    "Failed to initialize PDFium library. Last error: {:?}. \
+                     Make sure to set DYLD_LIBRARY_PATH or run with ./run_chonker6.sh", 
+                    last_error.unwrap_or(e)
+                ))
+            }
+        }
     }
     
     pub fn load_pdf(&mut self, path: &PathBuf) -> Result<(usize, String)> {
@@ -177,7 +213,7 @@ impl PdfEngine {
         }
     }
     
-    pub fn render_page_for_kitty(&self, page_index: usize, width_px: u32, height_px: u32) -> Result<(Vec<u8>, u32, u32)> {
+    pub fn render_page_for_kitty(&self, page_index: usize, width_px: u32, height_px: u32) -> Result<(Vec<u8>, u32, u32, String)> {
         if let Some(path) = &self.current_path {
             let document = self.pdfium.load_pdf_from_file(path, None)?;
             let page = document.pages().get(page_index as u16)?;
@@ -210,11 +246,29 @@ impl PdfEngine {
                     .rotate_if_landscape(PdfPageRenderRotation::None, false)
             )?;
             
-            // Get raw RGBA bytes - Kitty can handle raw image data
+            // Get raw RGBA bytes from PDFium
             let rgba_bytes = bitmap.as_rgba_bytes();
             
-            // Return the raw RGBA data with actual dimensions
-            Ok((rgba_bytes, render_width, render_height))
+            // Convert RGBA bytes to PNG format for Kitty
+            use image::{ImageBuffer, RgbaImage};
+            let img: RgbaImage = ImageBuffer::from_raw(render_width, render_height, rgba_bytes)
+                .ok_or_else(|| anyhow::anyhow!("Failed to create image buffer from RGBA data"))?;
+            
+            // Encode as PNG
+            let mut png_data = Vec::new();
+            {
+                use std::io::Cursor;
+                let mut cursor = Cursor::new(&mut png_data);
+                img.write_to(&mut cursor, image::ImageFormat::Png)
+                    .map_err(|e| anyhow::anyhow!("Failed to encode PNG: {}", e))?;
+            }
+            
+            // Convert to base64 for Kitty protocol
+            use base64::Engine;
+            let base64_png = base64::engine::general_purpose::STANDARD.encode(&png_data);
+            
+            // Return PNG data, dimensions, and base64 string
+            Ok((png_data, render_width, render_height, base64_png))
         } else {
             Err(anyhow::anyhow!("No PDF loaded"))
         }

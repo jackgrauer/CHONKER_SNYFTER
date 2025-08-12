@@ -23,6 +23,8 @@ pub struct App {
     click_count: u8,
     last_click_row: u16,
     pending_selection: Option<(usize, usize)>, // For auto-scroll + selection
+    cursor_blink_timer: std::time::Instant,
+    cursor_visible: bool,
 }
 
 impl App {
@@ -42,17 +44,10 @@ impl App {
         let is_iterm2 = std::env::var("TERM_PROGRAM")
             .map(|t| t == "iTerm.app")
             .unwrap_or(false);
-        // Kitty sets TERM to "xterm-kitty" and KITTY_WINDOW_ID
-        let kitty_window = std::env::var("KITTY_WINDOW_ID").ok();
-        let is_kitty = (term_program.contains("kitty") || term_program == "xterm-kitty") && 
-                       kitty_window.is_some();
+        // Use our proper Kitty detection
+        let is_kitty = crate::kitty_graphics::test_kitty_graphics();
         
-        // Allow forcing Kitty mode for testing
-        let force_kitty = std::env::var("CHONKER6_FORCE_KITTY").is_ok();
-        let is_kitty = is_kitty || force_kitty;
-        
-        eprintln!("Terminal detection: TERM={}, KITTY_WINDOW_ID={:?}, is_kitty={}, forced={}", 
-            term_program, kitty_window, is_kitty, force_kitty);
+        eprintln!("Terminal detection: TERM={}, is_kitty={}", term_program, is_kitty);
         
         let mut app = Self {
             state: AppState::default(),
@@ -66,6 +61,8 @@ impl App {
             click_count: 0,
             last_click_row: 0,
             pending_selection: None,
+            cursor_blink_timer: std::time::Instant::now(),
+            cursor_visible: true,
         };
         
         // Initialize terminal-specific features
@@ -205,12 +202,8 @@ impl App {
         // Position cursor for header
         print!("\x1b[{};{}H", area.y + 1, area.x + 1);
         
-        let mode_str = if self.state.mode == AppMode::Editing {
-            "EDIT MODE"
-        } else {
-            "VIEW MODE"
-        };
-        println!("  TEXT MATRIX - {} (iTerm2 Enhanced)", mode_str);
+        // Just show TEXT MATRIX without mode since we're always in edit mode
+        println!("  TEXT MATRIX (iTerm2 Enhanced)");
         println!();
         
         if !self.state.editor.matrix.is_empty() {
@@ -231,7 +224,7 @@ impl App {
                 
                 for (col_idx, &ch) in row.iter().enumerate() {
                     let pos = crate::actions::Position { row: row_idx, col: col_idx };
-                    let is_cursor = self.state.mode == AppMode::Editing 
+                    let is_cursor = self.cursor_visible && self.state.mode == AppMode::Editing 
                         && row_idx == self.state.editor.cursor.row 
                         && col_idx == self.state.editor.cursor.col;
                     let is_selected = self.state.editor.is_position_selected(pos);
@@ -363,134 +356,66 @@ impl App {
             return;
         }
         
-        use std::io::{stdout, Write};
-        
-        // Debug: Log the call
         let (new_state, _) = self.state.clone().update(
-            Action::AddTerminalOutput(format!("render_pdf_with_kitty_post_frame called for area: {}x{} at ({},{})", 
+            Action::AddTerminalOutput(format!("🖼️ Kitty PDF render: {}x{} at ({},{})", 
                 area.width, area.height, area.x, area.y))
         );
         self.state = new_state;
         
         if let Some(engine) = &self.pdf_engine {
-            // First test - send a small test pattern to verify Kitty protocol is working
-            self.send_test_image();
+            // Calculate realistic pixel dimensions
+            // Terminal cells vary but typically 8-12x16-24 pixels
+            let cell_width = 10u32;
+            let cell_height = 20u32;
+            let display_width_px = (area.width as u32).saturating_sub(4) * cell_width;
+            let display_height_px = (area.height as u32).saturating_sub(6) * cell_height;
             
-            // Log that we're rendering
             let (new_state, _) = self.state.clone().update(
-                Action::AddTerminalOutput(format!("📍 Sent Kitty test image | Rendering PDF page {}...", self.state.pdf.current_page + 1))
+                Action::AddTerminalOutput(format!("📏 Target dimensions: {}x{} px", display_width_px, display_height_px))
             );
             self.state = new_state;
             
-            // Calculate pixel dimensions for the display area
-            let cell_width = 9u32;
-            let cell_height = 18u32;
-            let display_width_px = (area.width as u32).saturating_sub(4) * cell_width;
-            let display_height_px = (area.height as u32).saturating_sub(4) * cell_height;
-            
-            // Render PDF page with automatic size fitting
+            // Render PDF page 
             match engine.render_page_for_kitty(
                 self.state.pdf.current_page, 
                 display_width_px,
                 display_height_px
             ) {
-                Ok((rgba_data, width, height)) => {
-                    // Log data size
+                Ok((_png_data, width, height, base64_png)) => {
                     let (new_state, _) = self.state.clone().update(
-                        Action::AddTerminalOutput(format!("Got RGBA data: {} bytes for {}x{} image", 
-                            rgba_data.len(), width, height))
+                        Action::AddTerminalOutput(format!("📸 Rendered: {}x{} px", width, height))
                     );
                     self.state = new_state;
                     
-                    // Position cursor at the PDF area
-                    print!("\x1b[{};{}H", area.y + 1, area.x + 1);
+                    // Position the image within the reserved PDF area
+                    // Add padding and ensure it's within the left panel bounds
+                    let cursor_row = area.y + 1; // Start near top of reserved area
+                    let cursor_col = area.x + 1; // Small left margin
                     
-                    // Use Kitty graphics protocol - proper implementation
-                    use base64::Engine;
-                    
-                    // First, delete any existing images
-                    print!("\x1b_Ga=d\x1b\\");
-                    
-                    // Log PDF rendering details
-                    let (new_state, _) = self.state.clone().update(
-                        Action::AddTerminalOutput(format!("PDF render dimensions: {}x{} pixels, {} RGBA bytes", 
-                            width, height, rgba_data.len()))
-                    );
-                    self.state = new_state;
-                    
-                    // Encode the RGBA data as base64
-                    let base64_image = base64::engine::general_purpose::STANDARD.encode(&rgba_data);
-                    
-                    // Kitty has a limit on how much data can be sent in one escape sequence
-                    // We need to chunk it if it's too large
-                    const CHUNK_SIZE: usize = 4096;
-                    
-                    // Log base64 size
-                    let (new_state, _) = self.state.clone().update(
-                        Action::AddTerminalOutput(format!("Base64 encoded size: {} bytes", base64_image.len()))
-                    );
-                    self.state = new_state;
-                    
-                    // Always use chunked transmission for reliability
-                    let chunks: Vec<&str> = base64_image.as_bytes()
-                        .chunks(CHUNK_SIZE)
-                        .map(|chunk| std::str::from_utf8(chunk).unwrap_or(""))
-                        .collect();
-                    
-                    let (new_state, _) = self.state.clone().update(
-                        Action::AddTerminalOutput(format!("Sending image in {} chunks", chunks.len()))
-                    );
-                    self.state = new_state;
-                    
-                    if chunks.len() == 1 {
-                        // Single chunk - use simpler format
-                        eprint!("\x1b_Ga=T,f=32,s={},v={};{}\x1b\\", width, height, chunks[0]);
-                        
-                        let (new_state, _) = self.state.clone().update(
-                            Action::AddTerminalOutput(format!("✓ Sent single-chunk image ({}x{})", width, height))
-                        );
-                        self.state = new_state;
-                    } else {
-                        // Multi-chunk transmission - proper protocol
-                        // First chunk with metadata
-                        if let Some(first) = chunks.first() {
-                            eprint!("\x1b_Ga=T,f=32,s={},v={},m=1;{}\x1b\\", width, height, first);
+                    match crate::kitty_graphics::send_image_to_kitty(
+                        &base64_png,
+                        width,
+                        height, 
+                        cursor_row,
+                        cursor_col
+                    ) {
+                        Ok(()) => {
+                            let (new_state, _) = self.state.clone().update(
+                                Action::AddTerminalOutput(format!("✅ PDF displayed via Kitty protocol: {}x{}", width, height))
+                            );
+                            self.state = new_state;
                         }
-                        
-                        // Middle chunks (if any)
-                        for (i, chunk) in chunks.iter().skip(1).enumerate() {
-                            let is_last = i == chunks.len() - 2; // Last of the remaining chunks
-                            if is_last {
-                                eprint!("\x1b_Gm=0;{}\x1b\\", chunk); // Last chunk
-                            } else {
-                                eprint!("\x1b_Gm=1;{}\x1b\\", chunk); // More chunks coming
-                            }
+                        Err(e) => {
+                            let (new_state, _) = self.state.clone().update(
+                                Action::AddTerminalOutput(format!("❌ Kitty protocol error: {}", e))
+                            );
+                            self.state = new_state;
                         }
-                        
-                        let (new_state, _) = self.state.clone().update(
-                            Action::AddTerminalOutput(format!("✓ Sent multi-chunk image ({}x{}, {} chunks)", width, height, chunks.len()))
-                        );
-                        self.state = new_state;
                     }
-                    
-                    // Ensure all data is flushed immediately
-                    use std::io::Write;
-                    let _ = std::io::stderr().flush();
-                    let _ = std::io::stdout().flush();
-                    
-                    // Wait a moment for Kitty to process
-                    std::thread::sleep(std::time::Duration::from_millis(50));
-                    
-                    // Log success
-                    let (new_state, _) = self.state.clone().update(
-                        Action::AddTerminalOutput(format!("✓ Rendered {}x{} PDF page to Kitty terminal", width, height))
-                    );
-                    self.state = new_state;
                 }
                 Err(e) => {
-                    // Log error to terminal panel
                     let (new_state, _) = self.state.clone().update(
-                        Action::AddTerminalOutput(format!("✗ Failed to render PDF: {:?}", e))
+                        Action::AddTerminalOutput(format!("❌ PDF render failed: {}", e))
                     );
                     self.state = new_state;
                 }
@@ -520,21 +445,16 @@ impl App {
                 display_width_px,
                 display_height_px
             ) {
-                Ok((rgba_data, width, height)) => {
-                    // Use Kitty graphics protocol to display the image
-                    // First, encode as base64
-                    use base64::Engine;
-                    let base64_image = base64::engine::general_purpose::STANDARD.encode(&rgba_data);
-                    
+                Ok((_png_data, width, height, base64_png)) => {
                     // Position cursor for image
                     print!("\x1b[{};{}H", area.y + 1, area.x + 1);
                     
                     // Kitty graphics protocol: 
                     // a=T means transmit image data
-                    // f=32 means RGBA format (32-bit)
+                    // f=100 means PNG format
                     // s=width,height specifies dimensions
                     // t=d means direct transmission (base64)
-                    print!("\x1b_Ga=T,f=32,s={},{},t=d;{}\x1b\\", width, height, base64_image);
+                    print!("\x1b_Ga=T,f=100,s={},{},t=d;{}\x1b\\", width, height, base64_png);
                     
                     // Display controls at the bottom
                     let controls_y = area.y + area.height - 2;
@@ -870,20 +790,22 @@ impl App {
             
             // 50-50 horizontal split for PDF and text panels
             let text_panel_start = term_width / 2;
-            let text_panel_width = term_width - text_panel_start;
+            let _text_panel_width = term_width - text_panel_start;
             
             // Check if mouse is in the text panel (right side)
             if screen_col >= text_panel_start && screen_row < main_area_height {
                 // Convert to panel-relative coordinates
                 let panel_col = screen_col - text_panel_start;
                 
-                // Account for text area margin: horizontal=2, vertical=1
-                let content_start_col = 2;  // Left margin (2 chars)
-                let content_start_row = 1;  // Top margin (1 row)
+                // Account for text area margin: adjust for cursor offset 
+                let content_start_col = 1 + 2;  // Left margin + 2 (user said 2 to the right)
+                let content_start_row = 4u16.saturating_sub(8);  // Top margin - 8 (3 + 2 + 3 more north), prevent underflow
                 
                 if panel_col >= content_start_col && screen_row >= content_start_row {
-                    let matrix_col = (panel_col - content_start_col) as usize;
-                    let matrix_row = (screen_row - content_start_row) as usize;
+                    // Subtract 1 to move cursor one square left (lower column number)
+                    let matrix_col = ((panel_col - content_start_col) as usize).saturating_sub(1);
+                    // Subtract 3 more to move cursor further north (higher in the matrix means lower row numbers)
+                    let matrix_row = ((screen_row - content_start_row) as usize).saturating_sub(3);
                     
                     Some(crate::actions::Position {
                         row: matrix_row,
@@ -903,7 +825,7 @@ impl App {
 
     /// Handle keyboard input and return action
     pub fn handle_key(&mut self, key: KeyEvent) -> Option<Action> {
-        use crossterm::event::{KeyCode, KeyModifiers};
+        use crossterm::event::KeyCode;
         
         // Check if file selector is active first
         if self.file_selector.active {
@@ -937,7 +859,6 @@ impl App {
         } else {
             // Mode-specific key handling
             match self.state.mode {
-                AppMode::Viewing => self.handle_viewing_keys(key),
                 AppMode::Editing => self.handle_editing_keys(key),
                 AppMode::Searching => self.handle_search_keys(key),
                 AppMode::Help => None, // Help handles its own keys
@@ -946,10 +867,15 @@ impl App {
         }
     }
     
-    fn handle_viewing_keys(&mut self, key: KeyEvent) -> Option<Action> {
+    fn handle_editing_keys(&mut self, key: KeyEvent) -> Option<Action> {
         use crossterm::event::{KeyCode, KeyModifiers};
         
+        // Handle selection with Shift modifier
+        let has_shift = key.modifiers.contains(KeyModifiers::SHIFT);
+        
         match (key.code, key.modifiers) {
+            // Control commands first - highest priority
+            (KeyCode::Char('t'), KeyModifiers::CONTROL) => Some(Action::ToggleTerminalPanel),
             (KeyCode::Char('o'), KeyModifiers::CONTROL) => {
                 // Activate our custom file selector
                 self.file_selector.activate();
@@ -963,134 +889,6 @@ impl App {
                     Some(Action::Error("No PDF loaded. Press Ctrl+O to open a file.".to_string()))
                 }
             }
-            (KeyCode::Right, _) | (KeyCode::Char('l'), _) => {
-                if self.is_kitty && self.state.pdf.is_loaded() {
-                    self.kitty_needs_redraw = true;
-                }
-                Some(Action::NavigatePage(crate::actions::PageDirection::Next))
-            }
-            (KeyCode::Left, _) | (KeyCode::Char('h'), _) => {
-                if self.is_kitty && self.state.pdf.is_loaded() {
-                    self.kitty_needs_redraw = true;
-                }
-                Some(Action::NavigatePage(crate::actions::PageDirection::Previous))
-            }
-            (KeyCode::Tab, _) => {
-                let next_panel = match self.state.ui.focused_panel {
-                    crate::actions::Panel::Pdf => crate::actions::Panel::Text,
-                    crate::actions::Panel::Text => crate::actions::Panel::Pdf,
-                };
-                Some(Action::SwitchPanel(next_panel))
-            }
-            (KeyCode::Char('s'), KeyModifiers::CONTROL) => {
-                // Export matrix with Ctrl+S
-                Some(Action::ExportMatrix)
-            }
-            (KeyCode::Char('d'), KeyModifiers::CONTROL) if self.state.pdf.is_loaded() => {
-                // Toggle dark mode for PDF
-                Some(Action::ToggleDarkMode)
-            }
-            (KeyCode::Char(']'), KeyModifiers::CONTROL) | (KeyCode::Char('+'), KeyModifiers::CONTROL) => {
-                // Zoom in PDF (only with Ctrl)
-                Some(Action::ZoomIn)
-            }
-            (KeyCode::Char('['), KeyModifiers::CONTROL) | (KeyCode::Char('-'), KeyModifiers::CONTROL) => {
-                // Zoom out PDF (only with Ctrl)
-                Some(Action::ZoomOut)
-            }
-            (KeyCode::Char('0'), KeyModifiers::CONTROL) if self.state.pdf.is_loaded() => {
-                // Reset zoom (only with Ctrl)
-                Some(Action::ZoomReset)
-            }
-            (KeyCode::Char('f'), KeyModifiers::CONTROL) if self.state.pdf.is_loaded() => {
-                // Toggle auto-fit (only with Ctrl)
-                Some(Action::ToggleAutoFit)
-            }
-            (KeyCode::Char('t'), KeyModifiers::CONTROL) => {
-                // Toggle terminal panel
-                Some(Action::ToggleTerminalPanel)
-            }
-            (KeyCode::Char('k'), KeyModifiers::CONTROL | KeyModifiers::SHIFT) => {
-                // Clear terminal output (changed from 'l' to 'k' to avoid conflict)
-                Some(Action::ClearTerminalOutput)
-            }
-            (KeyCode::PageUp, _) if self.state.ui.terminal_panel.visible => {
-                Some(Action::ScrollTerminalUp)
-            }
-            (KeyCode::PageDown, _) if self.state.ui.terminal_panel.visible => {
-                Some(Action::ScrollTerminalDown)
-            }
-            (KeyCode::Char('c'), KeyModifiers::CONTROL) if self.state.ui.terminal_panel.visible && self.state.ui.terminal_panel.selected_lines.is_some() => {
-                // Copy selected terminal text
-                Some(Action::CopyTerminalSelection)
-            }
-            (KeyCode::Char('a'), KeyModifiers::CONTROL) if self.state.ui.terminal_panel.visible => {
-                // Select all terminal text with Ctrl+A
-                let last_line = self.state.ui.terminal_panel.content.len().saturating_sub(1);
-                Some(Action::SelectTerminalText(0, last_line))
-            }
-            _ => None,
-        }
-    }
-    
-    fn handle_editing_keys(&mut self, key: KeyEvent) -> Option<Action> {
-        use crossterm::event::{KeyCode, KeyModifiers};
-        
-        // Handle selection with Shift modifier
-        let has_shift = key.modifiers.contains(KeyModifiers::SHIFT);
-        
-        match (key.code, key.modifiers) {
-            // Navigation with optional selection - fix selection logic
-            (KeyCode::Up, _) => {
-                if has_shift {
-                    // Start selection if not active, move cursor, then update selection
-                    if self.state.editor.selection.is_none() {
-                        Some(Action::StartSelection(self.state.editor.cursor))
-                    } else {
-                        // Move cursor first, then update selection in state handler
-                        Some(Action::MoveCursor(crate::actions::CursorDirection::Up))
-                    }
-                } else {
-                    Some(Action::MoveCursor(crate::actions::CursorDirection::Up))
-                }
-            }
-            (KeyCode::Down, _) => {
-                if has_shift {
-                    if self.state.editor.selection.is_none() {
-                        Some(Action::StartSelection(self.state.editor.cursor))
-                    } else {
-                        Some(Action::MoveCursor(crate::actions::CursorDirection::Down))
-                    }
-                } else {
-                    Some(Action::MoveCursor(crate::actions::CursorDirection::Down))
-                }
-            }
-            (KeyCode::Left, _) => {
-                if has_shift {
-                    if self.state.editor.selection.is_none() {
-                        Some(Action::StartSelection(self.state.editor.cursor))
-                    } else {
-                        Some(Action::MoveCursor(crate::actions::CursorDirection::Left))
-                    }
-                } else {
-                    Some(Action::MoveCursor(crate::actions::CursorDirection::Left))
-                }
-            }
-            (KeyCode::Right, _) => {
-                if has_shift {
-                    if self.state.editor.selection.is_none() {
-                        Some(Action::StartSelection(self.state.editor.cursor))
-                    } else {
-                        Some(Action::MoveCursor(crate::actions::CursorDirection::Right))
-                    }
-                } else {
-                    Some(Action::MoveCursor(crate::actions::CursorDirection::Right))
-                }
-            }
-            (KeyCode::Home, _) => Some(Action::MoveCursor(crate::actions::CursorDirection::Home)),
-            (KeyCode::End, _) => Some(Action::MoveCursor(crate::actions::CursorDirection::End)),
-            
-            // Clipboard operations (Ctrl+C, Ctrl+X, Ctrl+V)
             (KeyCode::Char('c'), KeyModifiers::CONTROL) => {
                 if self.is_iterm2 {
                     self.copy_with_iterm2_table_mode();
@@ -1118,10 +916,63 @@ impl App {
             (KeyCode::Char('a'), KeyModifiers::CONTROL) => Some(Action::SelectAll),
             
             // Block selection mode (Alt+B or Ctrl+Alt+B)
-            (KeyCode::Char('b'), KeyModifiers::ALT) => Some(Action::StartBlockSelection(self.state.editor.cursor)),
+            (KeyCode::Char('b'), KeyModifiers::ALT) => None, // Block selection removed
             (KeyCode::Char('b'), modifiers) if modifiers.contains(KeyModifiers::CONTROL) && modifiers.contains(KeyModifiers::ALT) => {
-                Some(Action::StartBlockSelection(self.state.editor.cursor))
+                None // Block selection removed
             }
+            
+            // Exit edit mode
+            (KeyCode::Esc, _) => Some(Action::ExitEditMode),
+            
+            // Navigation with optional selection - fix selection logic
+            (KeyCode::Up, _) => {
+                if has_shift {
+                    // Start selection if not active, move cursor, then update selection
+                    if self.state.editor.selection.is_none() {
+                        None // Selection removed
+                    } else {
+                        // Move cursor first, then update selection in state handler
+                        Some(Action::MoveCursor(crate::actions::CursorDirection::Up))
+                    }
+                } else {
+                    Some(Action::MoveCursor(crate::actions::CursorDirection::Up))
+                }
+            }
+            (KeyCode::Down, _) => {
+                if has_shift {
+                    if self.state.editor.selection.is_none() {
+                        None // Selection removed
+                    } else {
+                        Some(Action::MoveCursor(crate::actions::CursorDirection::Down))
+                    }
+                } else {
+                    Some(Action::MoveCursor(crate::actions::CursorDirection::Down))
+                }
+            }
+            (KeyCode::Left, _) => {
+                if has_shift {
+                    if self.state.editor.selection.is_none() {
+                        None // Selection removed
+                    } else {
+                        Some(Action::MoveCursor(crate::actions::CursorDirection::Left))
+                    }
+                } else {
+                    Some(Action::MoveCursor(crate::actions::CursorDirection::Left))
+                }
+            }
+            (KeyCode::Right, _) => {
+                if has_shift {
+                    if self.state.editor.selection.is_none() {
+                        None // Selection removed
+                    } else {
+                        Some(Action::MoveCursor(crate::actions::CursorDirection::Right))
+                    }
+                } else {
+                    Some(Action::MoveCursor(crate::actions::CursorDirection::Right))
+                }
+            }
+            (KeyCode::Home, _) => Some(Action::MoveCursor(crate::actions::CursorDirection::Home)),
+            (KeyCode::End, _) => Some(Action::MoveCursor(crate::actions::CursorDirection::End)),
             
             // Text input - just insert the character (delete selection in state handler if needed)
             (KeyCode::Char(c), KeyModifiers::NONE) => {
@@ -1145,9 +996,6 @@ impl App {
                 Some(Action::InsertChar('\n'))
             }
             
-            // Exit edit mode
-            (KeyCode::Esc, _) => Some(Action::ExitEditMode),
-            
             _ => None,
         }
     }
@@ -1168,6 +1016,15 @@ impl App {
         if matches!(action, Action::Quit) {
             self.running = false;
             return Ok(());
+        }
+        
+        // Reset cursor blink on user input actions
+        match &action {
+            Action::InsertChar(_) | Action::MoveCursor(_) | Action::DeleteChar |
+            Action::MouseDown(_, _, _, _) | Action::ExitEditMode => {
+                self.reset_cursor_blink();
+            },
+            _ => {}
         }
         
         // Update state with pure function
@@ -1204,9 +1061,7 @@ impl App {
                     match engine.load_pdf(&path) {
                         Ok((page_count, title)) => {
                             let metadata = crate::actions::PdfMetadata {
-                                path: path.clone(),
                                 page_count,
-                                title: Some(title.clone()),
                             };
                             
                             // Log success to terminal
@@ -1221,6 +1076,11 @@ impl App {
                             // Mark that Kitty needs to redraw the PDF
                             if self.is_kitty {
                                 self.kitty_needs_redraw = true;
+                                // Log that we're ready to render
+                                let (state4, _) = self.state.clone().update(
+                                    Action::AddTerminalOutput("🎨 Kitty graphics ready to render".to_string())
+                                );
+                                self.state = state4;
                             }
                         }
                         Err(e) => {
@@ -1329,7 +1189,10 @@ impl App {
                 // TODO: Implement file dialog
             }
             Command::RenderPdfPage => {
-                // TODO: Implement PDF image rendering
+                // Trigger Kitty PDF re-render
+                if self.is_kitty {
+                    self.kitty_needs_redraw = true;
+                }
             }
             Command::ExportMatrix => {
                 // Simple matrix export to timestamp file
@@ -1373,8 +1236,21 @@ impl App {
     
     /// Process any async tasks
     pub async fn tick(&mut self) -> Result<()> {
+        // Handle cursor blinking
+        let now = std::time::Instant::now();
+        if now.duration_since(self.cursor_blink_timer).as_millis() >= 530 { // Standard cursor blink rate (530ms)
+            self.cursor_visible = !self.cursor_visible;
+            self.cursor_blink_timer = now;
+        }
+        
         // TODO: Handle background tasks like PDF rendering
         Ok(())
+    }
+    
+    /// Reset cursor blink to visible state on user input
+    pub fn reset_cursor_blink(&mut self) {
+        self.cursor_visible = true;
+        self.cursor_blink_timer = std::time::Instant::now();
     }
     
     /// Render the UI with highlighting instead of borders
@@ -1386,13 +1262,74 @@ impl App {
             text::{Line, Span},
         };
         
-        // Adjust layout based on terminal panel visibility
+        // Clear any potential screen artifacts to prevent tearing
+        // BUT: Don't clear the PDF panel area when using Kitty graphics!
+        if self.is_kitty && self.state.pdf.is_loaded() {
+            // Clear only the right side and status bar, preserve left panel for Kitty graphics
+            let area = frame.area();
+            let pdf_width = area.width / 2;
+            
+            // Clear right panel area
+            let right_area = ratatui::layout::Rect {
+                x: pdf_width,
+                y: 0,
+                width: area.width - pdf_width,
+                height: area.height,
+            };
+            frame.render_widget(ratatui::widgets::Clear, right_area);
+            
+            // Clear status bar area
+            let status_area = ratatui::layout::Rect {
+                x: 0,
+                y: area.height.saturating_sub(1),
+                width: area.width,
+                height: 1,
+            };
+            frame.render_widget(ratatui::widgets::Clear, status_area);
+        } else {
+            // Normal clearing for non-Kitty mode
+            frame.render_widget(ratatui::widgets::Clear, frame.area());
+        }
+        
+        // Handle overlay modes - help screen and file selector take full control
+        if self.state.mode == crate::state::app_state::AppMode::Help {
+            self.render_help_screen(frame);
+            return;
+        }
+        
+        if self.file_selector.active {
+            self.file_selector.render(frame, frame.area());
+            return;
+        }
+        
+        // Ultra-aggressive bounds checking to prevent ratatui buffer overflow
+        let area = frame.area();
+        if area.width < 40 || area.height < 15 || area.width > 500 || area.height > 200 {
+            // Terminal too small or potentially corrupt dimensions - just show a minimal message
+            let safe_area = ratatui::layout::Rect {
+                x: 0,
+                y: 0,
+                width: area.width.min(40).max(10),
+                height: area.height.min(5).max(1),
+            };
+            let paragraph = Paragraph::new("Terminal size error - please resize")
+                .style(Style::default().fg(Color::Red));
+            frame.render_widget(paragraph, safe_area);
+            return;
+        }
+        
+        // Adjust layout based on terminal panel visibility with overflow protection
         let chunks = if self.state.ui.terminal_panel.visible {
+            // Clamp terminal panel height to prevent layout overflow
+            let safe_terminal_height = self.state.ui.terminal_panel.height
+                .min(area.height.saturating_sub(3))  // Leave room for main content + status
+                .max(1);  // Minimum 1 line
+            
             Layout::default()
                 .direction(Direction::Vertical)
                 .constraints([
-                    Constraint::Min(1),  // Main content
-                    Constraint::Length(self.state.ui.terminal_panel.height),  // Terminal panel
+                    Constraint::Min(2),  // Main content (minimum 2 lines)
+                    Constraint::Length(safe_terminal_height),  // Terminal panel
                     Constraint::Length(1),  // Status bar
                 ])
                 .split(frame.area())
@@ -1400,12 +1337,32 @@ impl App {
             Layout::default()
                 .direction(Direction::Vertical)
                 .constraints([
-                    Constraint::Min(1),
-                    Constraint::Length(1),
+                    Constraint::Min(2),  // Main content (minimum 2 lines)
+                    Constraint::Length(1),  // Status bar
                 ])
                 .split(frame.area())
         };
         
+        // Additional bounds check after layout splitting
+        if chunks.is_empty() || chunks[0].width < 4 || chunks[0].height < 2 {
+            let paragraph = Paragraph::new("Layout error - please resize terminal")
+                .style(Style::default().fg(Color::Red));
+            frame.render_widget(paragraph, area);
+            return;
+        }
+        
+        // Validate all chunks to prevent ratatui buffer overflow (index 65535 issue)
+        for (i, chunk) in chunks.iter().enumerate() {
+            if chunk.width == 0 || chunk.height == 0 || 
+               chunk.width > 1000 || chunk.height > 1000 ||
+               (chunk.width as u32 * chunk.height as u32) > 65535 {
+                let paragraph = Paragraph::new(format!("Chunk {} invalid: {}x{} - please resize", i, chunk.width, chunk.height))
+                    .style(Style::default().fg(Color::Red));
+                frame.render_widget(paragraph, area);
+                return;
+            }
+        }
+
         // Main content area - add small gap between panels
         let main_chunks = Layout::default()
             .direction(Direction::Horizontal)
@@ -1415,38 +1372,45 @@ impl App {
             ])
             .split(chunks[0]);
         
-        // PDF Panel with file selector color scheme
-        let (pdf_bg, pdf_fg) = if self.state.ui.focused_panel == crate::actions::Panel::Pdf {
-            // Focused: nice blue-gray background with light purple text
-            (Color::Rgb(60, 65, 78), Color::Rgb(180, 180, 200))
-        } else {
-            // Unfocused: darker blue-gray with light purple text
-            (Color::Rgb(30, 34, 42), Color::Rgb(180, 180, 200))
-        };
+        // Validate main chunks for ratatui buffer overflow prevention
+        if main_chunks.len() < 2 || main_chunks[0].width < 2 || main_chunks[1].width < 2 {
+            let paragraph = Paragraph::new("Horizontal split error - please resize terminal")
+                .style(Style::default().fg(Color::Red));
+            frame.render_widget(paragraph, area);
+            return;
+        }
+        
+        // Additional validation for main chunks
+        for (i, chunk) in main_chunks.iter().enumerate() {
+            if (chunk.width as u32 * chunk.height as u32) > 65535 {
+                let paragraph = Paragraph::new(format!("Main chunk {} too large: {}x{} = {} cells", 
+                    i, chunk.width, chunk.height, chunk.width as u32 * chunk.height as u32))
+                    .style(Style::default().fg(Color::Red));
+                frame.render_widget(paragraph, area);
+                return;
+            }
+        }
+        
+        // PDF Panel with consistent color scheme (no focus haze)
+        let pdf_bg = Color::Rgb(30, 34, 42);  // Always use darker background
+        let pdf_fg = Color::Rgb(180, 180, 200);
         
         // Handle PDF rendering based on terminal type
-        if self.is_kitty && self.state.pdf.is_loaded() {
-            // For Kitty, render a background and page info at bottom
-            let pdf_block = Block::default()
-                .style(Style::default().bg(pdf_bg));
-            frame.render_widget(pdf_block, main_chunks[0]);
-            
-            // Add page navigation info at the bottom
-            let nav_text = format!("  Page {}/{} | ←/→: Navigate | +/-: Zoom", 
-                self.state.pdf.current_page + 1, 
-                self.state.pdf.page_count);
-            let nav_area = ratatui::layout::Rect {
-                x: main_chunks[0].x,
-                y: main_chunks[0].y + main_chunks[0].height - 2,
-                width: main_chunks[0].width,
-                height: 1,
-            };
-            frame.render_widget(
-                Paragraph::new(nav_text)
-                    .style(Style::default().fg(pdf_fg).bg(pdf_bg)),
-                nav_area,
-            );
-            // The post-frame render will overlay the actual PDF image
+        if self.is_kitty {
+            if self.state.pdf.is_loaded() {
+                // FOR KITTY: Reserve the entire left panel for Kitty graphics
+                // DO NOT render any ratatui widgets in main_chunks[0] - this prevents conflicts
+                // Kitty graphics will be rendered post-frame with exclusive control
+                // 
+                // The PDF area (main_chunks[0]) is completely excluded from ratatui control
+                // to prevent clearing/overwriting of Kitty images
+            } else {
+                // Show a placeholder in the reserved Kitty area when no PDF is loaded
+                let placeholder = Paragraph::new("\n\n  PDF VIEWER (Kitty Graphics Mode)\n\n  📄 No PDF loaded\n\n  Press Ctrl+O to open a PDF file\n\n  This area is reserved for\n  Kitty graphics protocol")
+                    .style(Style::default().fg(pdf_fg).bg(pdf_bg))
+                    .block(Block::default().style(Style::default().bg(pdf_bg)));
+                frame.render_widget(placeholder, main_chunks[0]);
+            }
         } else if self.is_iterm2 {
             // Use iTerm2's inline image protocol for actual PDF rendering
             self.render_pdf_with_iterm2_images(main_chunks[0]);
@@ -1481,14 +1445,9 @@ impl App {
             );
         }
         
-        // Text Panel with file selector color scheme
-        let (text_bg, text_fg) = if self.state.ui.focused_panel == crate::actions::Panel::Text {
-            // Focused: nice blue-gray background with light purple text
-            (Color::Rgb(60, 65, 78), Color::Rgb(180, 180, 200))
-        } else {
-            // Unfocused: darker blue-gray with light purple text
-            (Color::Rgb(30, 34, 42), Color::Rgb(180, 180, 200))
-        };
+        // Text Panel with consistent color scheme (no focus haze)
+        let text_bg = Color::Rgb(30, 34, 42);  // Always use darker background
+        let text_fg = Color::Rgb(180, 180, 200);
         
         
         // Fill entire panel with background color
@@ -1508,18 +1467,14 @@ impl App {
             }
             
             // Fallback rendering for non-iTerm2 terminals
-            let mode_str = if self.state.mode == AppMode::Editing {
-                "EDIT MODE"
-            } else {
-                "VIEW MODE (press 'i' to edit)"
-            };
+            // Just show TEXT MATRIX without mode since we're always in edit mode
             let mut lines = vec![
-                ratatui::text::Line::from(format!("  TEXT MATRIX - {}", mode_str)),
+                ratatui::text::Line::from(""),  // Empty line to keep spacing clean
                 ratatui::text::Line::from(""),
             ];
             
-            // Selection highlighting colors
-            let selection_bg = Color::Rgb(22, 160, 133); // Teal highlight like chonker5
+            // Selection highlighting colors - brighter for better visibility
+            let selection_bg = Color::Rgb(50, 200, 170); // Brighter teal highlight
             let cursor_bg = Color::Rgb(52, 73, 94);      // Dark blue for cursor
             
             // Render matrix with proper highlighting
@@ -1528,7 +1483,7 @@ impl App {
                 
                 for (col_idx, &ch) in row.iter().enumerate() {
                     let pos = crate::actions::Position { row: row_idx, col: col_idx };
-                    let is_cursor = self.state.mode == AppMode::Editing 
+                    let is_cursor = self.cursor_visible && self.state.mode == AppMode::Editing 
                         && row_idx == self.state.editor.cursor.row 
                         && col_idx == self.state.editor.cursor.col;
                     let is_selected = self.state.editor.is_position_selected(pos);
@@ -1585,9 +1540,9 @@ impl App {
                 .style(Style::default().bg(text_bg));
             frame.render_widget(paragraph, text_area);
         } else {
-            // No content case
+            // No content case - just show empty background
             frame.render_widget(
-                Paragraph::new("  TEXT MATRIX\n  No text extracted\n\n  Press Ctrl+E to extract")
+                Paragraph::new("")
                     .style(Style::default().fg(text_fg).bg(text_bg)),
                 text_area,
             );
@@ -1600,7 +1555,7 @@ impl App {
             // Terminal background and border - match app theme
             let terminal_bg = Color::Rgb(30, 34, 42);  // Match unfocused panel background
             let terminal_fg = Color::Rgb(180, 180, 200);  // Match app text color
-            let terminal_border_fg = Color::Rgb(60, 65, 78);  // Match focused panel color
+            let _terminal_border_fg = Color::Rgb(60, 65, 78);  // Match focused panel color
             
             // Calculate visible lines
             let visible_lines = self.state.ui.terminal_panel.height.saturating_sub(2) as usize;
@@ -1713,11 +1668,109 @@ impl App {
             status_chunks,
         );
         
-        // Render file selector overlay if active and store bounds for click handling
-        if self.file_selector.active {
-            let (_file_list_start, _file_list_height) = self.file_selector.render(frame, frame.area());
-            // Note: We could store these for more accurate click detection
-        }
+        // File selector overlay is now handled at the start of the render function
+    }
+    
+    fn render_help_screen(&self, frame: &mut ratatui::Frame) {
+        use ratatui::{
+            style::{Color, Style},
+            widgets::{Block, Borders, Paragraph, Wrap, Clear},
+            text::{Line, Span},
+        };
+        
+        // Create a centered popup area
+        let popup_area = Self::centered_rect(80, 90, frame.area());
+        
+        // Clear the popup area
+        frame.render_widget(Clear, popup_area);
+        
+        // Create help content
+        let help_text = vec![
+            Line::from(vec![
+                Span::styled("CHONKER6 - Terminal PDF Viewer & Text Editor", 
+                    Style::default().fg(Color::Yellow))
+            ]),
+            Line::from(""),
+            Line::from(vec![
+                Span::styled("NAVIGATION:", Style::default().fg(Color::Cyan))
+            ]),
+            Line::from("  ←/→ or h/l    Navigate PDF pages"),
+            Line::from("  ↑/↓ or j/k    Scroll content"),
+            Line::from("  +/-           Zoom PDF in/out"),
+            Line::from("  0             Reset zoom to 100%"),
+            Line::from(""),
+            Line::from(vec![
+                Span::styled("FILE OPERATIONS:", Style::default().fg(Color::Cyan))
+            ]),
+            Line::from("  Ctrl+O        Open PDF file"),
+            Line::from("  Ctrl+E        Extract text from PDF"),
+            Line::from("  Ctrl+S        Save text content"),
+            Line::from(""),
+            Line::from(vec![
+                Span::styled("EDITING (when in text editor):", Style::default().fg(Color::Cyan))
+            ]),
+            Line::from("  Arrow keys    Move cursor"),
+            Line::from("  Click/drag    Position cursor & select"),
+            Line::from("  Ctrl+A        Select all text"),
+            Line::from("  Ctrl+C        Copy selection"),
+            Line::from("  Ctrl+X        Cut selection"),
+            Line::from("  Ctrl+V        Paste from clipboard"),
+            Line::from("  ESC           Exit editing mode"),
+            Line::from(""),
+            Line::from(vec![
+                Span::styled("PANELS:", Style::default().fg(Color::Cyan))
+            ]),
+            Line::from("  Ctrl+T        Toggle terminal panel"),
+            Line::from("  Page Up/Down  Scroll terminal output"),
+            Line::from(""),
+            Line::from(vec![
+                Span::styled("OTHER:", Style::default().fg(Color::Cyan))
+            ]),
+            Line::from("  Ctrl+H        Show this help"),
+            Line::from("  ESC           Close help/dialogs"),
+            Line::from("  Ctrl+Q        Quit application"),
+            Line::from(""),
+            Line::from(vec![
+                Span::styled("Press ESC to close this help screen", 
+                    Style::default().fg(Color::Green))
+            ]),
+        ];
+        
+        // Render the help popup
+        frame.render_widget(
+            Paragraph::new(help_text)
+                .block(
+                    Block::default()
+                        .title(" Help ")
+                        .borders(Borders::ALL)
+                        .style(Style::default().bg(Color::Rgb(25, 28, 34)))
+                )
+                .wrap(Wrap { trim: true })
+                .style(Style::default().fg(Color::White).bg(Color::Rgb(25, 28, 34))),
+            popup_area
+        );
+    }
+    
+    fn centered_rect(percent_x: u16, percent_y: u16, r: ratatui::layout::Rect) -> ratatui::layout::Rect {
+        use ratatui::layout::{Constraint, Direction, Layout};
+        
+        let popup_layout = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Percentage((100 - percent_y) / 2),
+                Constraint::Percentage(percent_y),
+                Constraint::Percentage((100 - percent_y) / 2),
+            ])
+            .split(r);
+
+        Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([
+                Constraint::Percentage((100 - percent_x) / 2),
+                Constraint::Percentage(percent_x),
+                Constraint::Percentage((100 - percent_x) / 2),
+            ])
+            .split(popup_layout[1])[1]
     }
     
     pub fn is_running(&self) -> bool {

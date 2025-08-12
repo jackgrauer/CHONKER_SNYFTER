@@ -3,6 +3,7 @@ mod state;
 mod app;
 mod components;
 mod services;
+mod kitty_graphics;
 
 use anyhow::Result;
 use crossterm::{

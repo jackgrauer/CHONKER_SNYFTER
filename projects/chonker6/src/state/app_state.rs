@@ -14,7 +14,6 @@ pub struct AppState {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum AppMode {
-    Viewing,      // Just viewing PDF
     Editing,      // Editing matrix
     Commanding,   // Command palette open
     Searching,    // Search mode active
@@ -40,7 +39,7 @@ impl Default for AppState {
             pdf: PdfState::default(),
             editor: EditorState::default(),
             ui: UiState::default(),
-            mode: AppMode::Viewing,
+            mode: AppMode::Editing,
             status_message: "Welcome to Chonker6".to_string(),
             error_message: None,
         }
@@ -133,21 +132,13 @@ impl AppState {
                 self.status_message = "Text extracted - ready to edit. ESC to exit edit mode.".to_string();
                 (self, None)
             }
-            Action::EnterEditMode => {
-                if self.editor.has_content() {
-                    self.mode = AppMode::Editing;
-                    self.status_message = "Edit mode enabled. Use arrows to navigate, type to edit.".to_string();
-                } else {
-                    self.error_message = Some("No text to edit. Extract text first with Ctrl+E.".to_string());
-                }
-                (self, None)
-            }
             Action::ExitEditMode => {
-                self.mode = AppMode::Viewing;
-                self.status_message = "Returned to view mode.".to_string();
+                // Since we only have edit mode now, this just resets focus
+                self.ui.focused_panel = Panel::Pdf;
+                self.status_message = "Focus returned to PDF panel.".to_string();
                 (self, None)
             }
-            Action::InsertChar(c) if self.mode == AppMode::Editing => {
+            Action::InsertChar(c) => {
                 // Clear selection first if it exists, then insert character
                 if self.editor.selection.is_some() {
                     self.editor.delete_selection();
@@ -161,7 +152,7 @@ impl AppState {
                 }
                 (self, None)
             }
-            Action::MoveCursor(dir) if self.mode == AppMode::Editing => {
+            Action::MoveCursor(dir) => {
                 self.editor.move_cursor(dir);
                 // Update selection if active
                 if self.editor.selection.is_some() {
@@ -169,77 +160,66 @@ impl AppState {
                 }
                 (self, None)
             }
-            Action::DeleteChar if self.mode == AppMode::Editing => {
+            Action::DeleteChar => {
                 self.editor.delete_char();
                 (self, None)
             }
-            Action::StartSelection(_) if self.mode == AppMode::Editing => {
-                self.editor.start_selection();
-                (self, None)
-            }
-            Action::StartBlockSelection(_) if self.mode == AppMode::Editing => {
-                self.editor.start_block_selection();
-                self.status_message = "Block selection mode - use arrows to select rectangular region".to_string();
-                (self, None)
-            }
-            Action::UpdateSelection(_) if self.mode == AppMode::Editing => {
-                self.editor.update_selection();
-                (self, None)
-            }
-            Action::EndSelection => {
-                self.editor.end_selection();
-                (self, None)
-            }
             Action::Copy => {
+                // Debug: Check if we have a selection
+                let has_selection = self.editor.selection.is_some();
+                let has_mouse_selection = self.editor.mouse_selection.is_some();
+                
                 if let Some(text) = self.editor.get_selected_text() {
+                    self.status_message = format!("Copied {} characters (selection: {}, mouse: {})", 
+                        text.len(), has_selection, has_mouse_selection);
                     (self, Some(Command::CopyToClipboard(text)))
                 } else {
-                    self.error_message = Some("No text selected".to_string());
+                    self.error_message = Some(format!("No text selected (selection: {}, mouse: {})", 
+                        has_selection, has_mouse_selection));
                     (self, None)
                 }
             }
             Action::Cut => {
+                // Debug: Check if we have a selection
+                let has_selection = self.editor.selection.is_some();
+                let has_mouse_selection = self.editor.mouse_selection.is_some();
+                
                 if let Some(text) = self.editor.get_selected_text() {
                     self.editor.delete_selection();
+                    self.status_message = format!("Cut {} characters (selection: {}, mouse: {})", 
+                        text.len(), has_selection, has_mouse_selection);
                     (self, Some(Command::CopyToClipboard(text)))
                 } else {
-                    self.error_message = Some("No text selected".to_string());
+                    self.error_message = Some(format!("No text selected for cut (selection: {}, mouse: {})", 
+                        has_selection, has_mouse_selection));
                     (self, None)
                 }
             }
             Action::Paste(text) => {
-                if self.mode == AppMode::Editing {
-                    self.editor.paste_text(text);
-                    self.status_message = "Text pasted".to_string();
+                // Use block mode if we have a block selection active
+                let paste_mode = if let Some(ref selection) = self.editor.selection {
+                    selection.mode
                 } else {
-                    self.error_message = Some("Must be in edit mode to paste".to_string());
-                }
+                    crate::actions::SelectionMode::Block // Default to block mode
+                };
+                self.editor.paste_text_with_mode(text, paste_mode);
+                self.status_message = "Text pasted".to_string();
                 (self, None)
             }
             Action::PasteFromSystem => {
-                if self.mode == AppMode::Editing {
-                    (self, Some(Command::PasteFromClipboard))
-                } else {
-                    self.error_message = Some("Must be in edit mode to paste".to_string());
-                    (self, None)
-                }
+                // Always in edit mode
+                (self, Some(Command::PasteFromClipboard))
             }
             Action::SelectAll => {
-                if self.mode == AppMode::Editing {
-                    self.editor.select_all();
-                    self.status_message = "All text selected".to_string();
-                } else {
-                    self.error_message = Some("Must be in edit mode to select".to_string());
-                }
+                // Always in edit mode
+                self.editor.select_all();
+                self.status_message = "All text selected".to_string();
                 (self, None)
             }
             Action::DeleteSelection => {
-                if self.mode == AppMode::Editing {
-                    self.editor.delete_selection();
-                    self.status_message = "Selection deleted".to_string();
-                } else {
-                    self.error_message = Some("Must be in edit mode".to_string());
-                }
+                // Always in edit mode
+                self.editor.delete_selection();
+                self.status_message = "Selection deleted".to_string();
                 (self, None)
             }
             Action::ExportMatrix => {
@@ -262,7 +242,7 @@ impl AppState {
                 (self, None)
             }
             Action::HideHelp => {
-                self.mode = AppMode::Viewing;
+                self.mode = AppMode::Editing;
                 (self, None)
             }
             Action::SetStatus(msg) => {
@@ -276,54 +256,51 @@ impl AppState {
             
             // Mouse actions
             Action::MouseDown(col, row, _button, modifiers) => {
-                if self.mode == AppMode::Editing {
-                    let pos = crate::actions::Position { row: row as usize, col: col as usize };
-                    
-                    // Move cursor to click position immediately
-                    self.editor.cursor = pos;
-                    
-                    // Clear any existing selection on new click
-                    self.editor.selection = None;
-                    
-                    // Determine selection mode based on modifiers - Block is now default
-                    let selection_mode = if modifiers.contains(crossterm::event::KeyModifiers::ALT) {
-                        crate::actions::SelectionMode::Line  // Alt+click for line selection
-                    } else {
-                        crate::actions::SelectionMode::Block // Default to block selection
-                    };
-                    
-                    // Prepare for potential drag selection
-                    self.editor.start_mouse_selection(pos, selection_mode);
-                    
-                    self.status_message = "Click to position cursor, drag to select".to_string();
-                }
+                // Always in edit mode
+                let pos = crate::actions::Position { row: row as usize, col: col as usize };
+                
+                // Move cursor to click position immediately
+                self.editor.cursor = pos;
+                
+                // Clear any existing selection on new click
+                self.editor.selection = None;
+                
+                // Determine selection mode based on modifiers - Block is now default
+                let selection_mode = if modifiers.contains(crossterm::event::KeyModifiers::ALT) {
+                    crate::actions::SelectionMode::Line  // Alt+click for line selection
+                } else {
+                    crate::actions::SelectionMode::Block // Default to block selection
+                };
+                
+                // Prepare for potential drag selection
+                self.editor.start_mouse_selection(pos, selection_mode);
+                
+                self.status_message = "Click to position cursor, drag to select".to_string();
                 (self, None)
             }
             Action::MouseDrag(col, row) => {
-                if self.mode == AppMode::Editing {
-                    let pos = crate::actions::Position { row: row as usize, col: col as usize };
-                    self.editor.update_mouse_selection(pos);
-                }
+                // Always in edit mode
+                let pos = crate::actions::Position { row: row as usize, col: col as usize };
+                self.editor.update_mouse_selection(pos);
                 (self, None)
             }
             Action::MouseUp(col, row) => {
-                if self.mode == AppMode::Editing {
-                    let pos = crate::actions::Position { row: row as usize, col: col as usize };
-                    
-                    // Check if this was a click (no drag) or a selection
-                    if let Some(ref mouse_sel) = self.editor.mouse_selection {
-                        if mouse_sel.start == pos {
-                            // Just a click - clear selection and position cursor
-                            self.editor.cursor = pos;
-                            self.editor.selection = None;
-                            self.editor.mouse_selection = None;
-                            self.status_message = format!("Cursor at ({}, {})", pos.row + 1, pos.col + 1);
-                        } else {
-                            // Drag selection completed
-                            self.editor.update_mouse_selection(pos);
-                            self.editor.complete_mouse_selection();
-                            self.status_message = "Selection completed".to_string();
-                        }
+                // Always in edit mode
+                let pos = crate::actions::Position { row: row as usize, col: col as usize };
+                
+                // Check if this was a click (no drag) or a selection
+                if let Some(ref mouse_sel) = self.editor.mouse_selection {
+                    if mouse_sel.start == pos {
+                        // Just a click - clear selection and position cursor
+                        self.editor.cursor = pos;
+                        self.editor.selection = None;
+                        self.editor.mouse_selection = None;
+                        self.status_message = format!("Cursor at ({}, {})", pos.row + 1, pos.col + 1);
+                    } else {
+                        // Drag selection completed
+                        self.editor.update_mouse_selection(pos);
+                        self.editor.complete_mouse_selection();
+                        self.status_message = "Selection completed".to_string();
                     }
                 }
                 (self, None)
@@ -337,16 +314,6 @@ impl AppState {
                 } else {
                     "Terminal panel hidden (Ctrl+T to show)".to_string()
                 };
-                (self, None)
-            }
-            Action::ResizeTerminalPanel(delta) => {
-                let new_height = if delta > 0 {
-                    (self.ui.terminal_panel.height + delta.abs() as u16).min(20)
-                } else {
-                    self.ui.terminal_panel.height.saturating_sub(delta.abs() as u16).max(3)
-                };
-                self.ui.terminal_panel.height = new_height;
-                self.status_message = format!("Terminal panel height: {} lines", new_height);
                 (self, None)
             }
             Action::ClearTerminalOutput => {
@@ -379,8 +346,18 @@ impl AppState {
                         if lines_count == 1 { "" } else { "s" });
                     (self, Some(Command::CopyToClipboard(text)))
                 } else {
-                    self.error_message = Some("No terminal text selected".to_string());
-                    (self, None)
+                    // Auto-select all terminal content and copy
+                    let all_text = self.ui.terminal_panel.content.join("\n");
+                    if !all_text.is_empty() {
+                        let lines_count = self.ui.terminal_panel.content.len();
+                        self.status_message = format!("Copied all {} line{} from terminal", 
+                            lines_count, 
+                            if lines_count == 1 { "" } else { "s" });
+                        (self, Some(Command::CopyToClipboard(all_text)))
+                    } else {
+                        self.error_message = Some("No terminal content to copy".to_string());
+                        (self, None)
+                    }
                 }
             }
             

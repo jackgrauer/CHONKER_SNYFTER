@@ -11,7 +11,6 @@ pub enum Action {
     OpenPdf(PathBuf),
     PdfLoaded(PdfMetadata),
     NavigatePage(PageDirection),
-    SetZoom(ZoomLevel),
     ZoomIn,
     ZoomOut,
     ZoomReset,
@@ -22,15 +21,10 @@ pub enum Action {
     ExtractMatrix,
     MatrixExtracted(Vec<Vec<char>>),
     ExportMatrix,
-    EnterEditMode,
     ExitEditMode,
     InsertChar(char),
     DeleteChar,
     MoveCursor(CursorDirection),
-    StartSelection(Position),
-    StartBlockSelection(Position),
-    UpdateSelection(Position),
-    EndSelection,
     Copy,
     Cut,
     Paste(String),
@@ -40,16 +34,11 @@ pub enum Action {
     
     // UI actions
     SwitchPanel(Panel),
-    ToggleTheme,
-    ResizeSplit(i8),
     ShowHelp,
     HideHelp,
-    ShowCommandPalette,
-    HideCommandPalette,
     
     // Terminal Panel actions
     ToggleTerminalPanel,
-    ResizeTerminalPanel(i16),  // Positive = bigger, negative = smaller
     ClearTerminalOutput,
     AddTerminalOutput(String),
     ScrollTerminalUp,
@@ -57,13 +46,6 @@ pub enum Action {
     SelectTerminalText(usize, usize),  // Start and end line indices
     CopyTerminalSelection,
     
-    // Search
-    StartSearch,
-    UpdateSearchQuery(String),
-    SearchNext,
-    SearchPrevious,
-    EndSearch,
-    ClearSearch,
     
     // System
     Error(String),
@@ -73,28 +55,15 @@ pub enum Action {
 
 #[derive(Debug, Clone)]
 pub struct PdfMetadata {
-    pub path: PathBuf,
     pub page_count: usize,
-    pub title: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy)]
 pub enum PageDirection {
     Next,
     Previous,
-    First,
-    Last,
-    Jump(usize),
 }
 
-#[derive(Debug, Clone, Copy)]
-pub enum ZoomLevel {
-    FitWidth,
-    FitHeight,
-    Percentage(f32),
-    Increase,
-    Decrease,
-}
 
 #[derive(Debug, Clone, Copy)]
 pub enum CursorDirection {
