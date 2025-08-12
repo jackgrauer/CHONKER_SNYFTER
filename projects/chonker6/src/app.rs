@@ -373,9 +373,12 @@ impl App {
         self.state = new_state;
         
         if let Some(engine) = &self.pdf_engine {
+            // First test - send a small test pattern to verify Kitty protocol is working
+            self.send_test_image();
+            
             // Log that we're rendering
             let (new_state, _) = self.state.clone().update(
-                Action::AddTerminalOutput(format!("Rendering PDF page {} with Kitty graphics...", self.state.pdf.current_page + 1))
+                Action::AddTerminalOutput(format!("📍 Sent Kitty test image | Rendering PDF page {}...", self.state.pdf.current_page + 1))
             );
             self.state = new_state;
             
@@ -408,6 +411,13 @@ impl App {
                     // First, delete any existing images
                     print!("\x1b_Ga=d\x1b\\");
                     
+                    // Log PDF rendering details
+                    let (new_state, _) = self.state.clone().update(
+                        Action::AddTerminalOutput(format!("PDF render dimensions: {}x{} pixels, {} RGBA bytes", 
+                            width, height, rgba_data.len()))
+                    );
+                    self.state = new_state;
+                    
                     // Encode the RGBA data as base64
                     let base64_image = base64::engine::general_purpose::STANDARD.encode(&rgba_data);
                     
@@ -421,44 +431,59 @@ impl App {
                     );
                     self.state = new_state;
                     
-                    if base64_image.len() <= CHUNK_SIZE {
-                        // Small image - send in one go
-                        print!("\x1b_Ga=T,f=32,s={},{};{}\x1b\\", width, height, base64_image);
+                    // Always use chunked transmission for reliability
+                    let chunks: Vec<&str> = base64_image.as_bytes()
+                        .chunks(CHUNK_SIZE)
+                        .map(|chunk| std::str::from_utf8(chunk).unwrap_or(""))
+                        .collect();
+                    
+                    let (new_state, _) = self.state.clone().update(
+                        Action::AddTerminalOutput(format!("Sending image in {} chunks", chunks.len()))
+                    );
+                    self.state = new_state;
+                    
+                    if chunks.len() == 1 {
+                        // Single chunk - use simpler format
+                        eprint!("\x1b_Ga=T,f=32,s={},v={};{}\x1b\\", width, height, chunks[0]);
                         
                         let (new_state, _) = self.state.clone().update(
-                            Action::AddTerminalOutput(format!("Sent single-chunk image to Kitty"))
+                            Action::AddTerminalOutput(format!("✓ Sent single-chunk image ({}x{})", width, height))
                         );
                         self.state = new_state;
                     } else {
-                        // Large image - send in chunks
-                        let chunks: Vec<&str> = base64_image.as_bytes()
-                            .chunks(CHUNK_SIZE)
-                            .map(|chunk| std::str::from_utf8(chunk).unwrap_or(""))
-                            .collect();
-                        
-                        // First chunk with image metadata
+                        // Multi-chunk transmission - proper protocol
+                        // First chunk with metadata
                         if let Some(first) = chunks.first() {
-                            print!("\x1b_Ga=T,f=32,s={},{},m=1;{}\x1b\\", width, height, first);
+                            eprint!("\x1b_Ga=T,f=32,s={},v={},m=1;{}\x1b\\", width, height, first);
                         }
                         
-                        // Middle chunks
-                        for chunk in chunks.iter().skip(1).take(chunks.len().saturating_sub(2)) {
-                            print!("\x1b_Gm=1;{}\x1b\\", chunk);
-                        }
-                        
-                        // Last chunk
-                        if chunks.len() > 1 {
-                            if let Some(last) = chunks.last() {
-                                print!("\x1b_G;{}\x1b\\", last);
+                        // Middle chunks (if any)
+                        for (i, chunk) in chunks.iter().skip(1).enumerate() {
+                            let is_last = i == chunks.len() - 2; // Last of the remaining chunks
+                            if is_last {
+                                eprint!("\x1b_Gm=0;{}\x1b\\", chunk); // Last chunk
+                            } else {
+                                eprint!("\x1b_Gm=1;{}\x1b\\", chunk); // More chunks coming
                             }
                         }
+                        
+                        let (new_state, _) = self.state.clone().update(
+                            Action::AddTerminalOutput(format!("✓ Sent multi-chunk image ({}x{}, {} chunks)", width, height, chunks.len()))
+                        );
+                        self.state = new_state;
                     }
                     
-                    stdout().flush().unwrap();
+                    // Ensure all data is flushed immediately
+                    use std::io::Write;
+                    let _ = std::io::stderr().flush();
+                    let _ = std::io::stdout().flush();
+                    
+                    // Wait a moment for Kitty to process
+                    std::thread::sleep(std::time::Duration::from_millis(50));
                     
                     // Log success
                     let (new_state, _) = self.state.clone().update(
-                        Action::AddTerminalOutput(format!("✓ Rendered {}x{} image to Kitty", width, height))
+                        Action::AddTerminalOutput(format!("✓ Rendered {}x{} PDF page to Kitty terminal", width, height))
                     );
                     self.state = new_state;
                 }
@@ -806,6 +831,29 @@ impl App {
         }
     }
     
+    /// Send a small test image to verify Kitty graphics protocol is working
+    fn send_test_image(&self) {
+        // Create a small 4x4 red test image (RGBA format)
+        let width = 4u32;
+        let height = 4u32;
+        let mut rgba_data = Vec::new();
+        
+        // Red pixels: R=255, G=0, B=0, A=255
+        for _ in 0..(width * height) {
+            rgba_data.extend_from_slice(&[255, 0, 0, 255]); // Red pixel
+        }
+        
+        use base64::Engine;
+        use std::io::Write;
+        let base64_image = base64::engine::general_purpose::STANDARD.encode(&rgba_data);
+        
+        // Send simple test image
+        eprint!("\x1b_Ga=T,f=32,s={},v={};{}\x1b\\", width, height, base64_image);
+        let _ = std::io::stderr().flush();
+        
+        // Note: This is a test function, logging will be done by caller
+    }
+
     /// Convert screen coordinates to matrix position
     fn screen_to_matrix_pos(&self, screen_col: u16, screen_row: u16) -> Option<crate::actions::Position> {
         // Get the actual terminal size
