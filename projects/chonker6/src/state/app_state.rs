@@ -373,6 +373,10 @@ impl AppState {
             }
             Action::CopyTerminalSelection => {
                 if let Some(text) = self.ui.terminal_panel.get_selected_text() {
+                    let lines_count = text.lines().count();
+                    self.status_message = format!("Copied {} line{} from terminal", 
+                        lines_count, 
+                        if lines_count == 1 { "" } else { "s" });
                     (self, Some(Command::CopyToClipboard(text)))
                 } else {
                     self.error_message = Some("No terminal text selected".to_string());

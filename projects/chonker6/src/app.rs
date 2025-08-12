@@ -19,12 +19,22 @@ pub struct App {
     is_iterm2: bool,
     is_kitty: bool,
     kitty_needs_redraw: bool,
+    last_click_time: std::time::Instant,
+    click_count: u8,
+    last_click_row: u16,
 }
 
 impl App {
     pub fn new() -> Self {
         // Try to initialize PDF engine
-        let pdf_engine = PdfEngine::new().ok();
+        let pdf_engine = match PdfEngine::new() {
+            Ok(engine) => Some(engine),
+            Err(e) => {
+                eprintln!("Warning: Failed to initialize PDF engine: {}", e);
+                eprintln!("Make sure to run with: ./run_chonker6.sh or set DYLD_LIBRARY_PATH");
+                None
+            }
+        };
         
         // Detect terminal type
         let term_program = std::env::var("TERM").unwrap_or_default();
@@ -32,8 +42,16 @@ impl App {
             .map(|t| t == "iTerm.app")
             .unwrap_or(false);
         // Kitty sets TERM to "xterm-kitty" and KITTY_WINDOW_ID
+        let kitty_window = std::env::var("KITTY_WINDOW_ID").ok();
         let is_kitty = (term_program.contains("kitty") || term_program == "xterm-kitty") && 
-                       std::env::var("KITTY_WINDOW_ID").is_ok();
+                       kitty_window.is_some();
+        
+        // Allow forcing Kitty mode for testing
+        let force_kitty = std::env::var("CHONKER6_FORCE_KITTY").is_ok();
+        let is_kitty = is_kitty || force_kitty;
+        
+        eprintln!("Terminal detection: TERM={}, KITTY_WINDOW_ID={:?}, is_kitty={}, forced={}", 
+            term_program, kitty_window, is_kitty, force_kitty);
         
         let mut app = Self {
             state: AppState::default(),
@@ -43,6 +61,9 @@ impl App {
             is_iterm2,
             is_kitty,
             kitty_needs_redraw: false,
+            last_click_time: std::time::Instant::now(),
+            click_count: 0,
+            last_click_row: 0,
         };
         
         // Initialize terminal-specific features
@@ -50,6 +71,13 @@ impl App {
             app.initialize_iterm2_mode();
         } else if is_kitty {
             app.initialize_kitty_mode();
+        }
+        
+        // Add initialization message to status
+        if app.pdf_engine.is_none() {
+            app.state.status_message = "⚠️ PDF engine not initialized - run with ./run_chonker6.sh".to_string();
+        } else {
+            app.state.status_message = "Ready - Press Ctrl+O to open PDF".to_string();
         }
         
         app
@@ -327,7 +355,7 @@ impl App {
         stdout().flush().unwrap();
     }
     
-    pub fn render_pdf_with_kitty_post_frame(&self, area: ratatui::layout::Rect) {
+    pub fn render_pdf_with_kitty_post_frame(&mut self, area: ratatui::layout::Rect) {
         // This should be called AFTER the frame has been rendered to terminal
         if !self.state.pdf.is_loaded() {
             return;
@@ -335,7 +363,20 @@ impl App {
         
         use std::io::{stdout, Write};
         
+        // Debug: Log the call
+        let (new_state, _) = self.state.clone().update(
+            Action::AddTerminalOutput(format!("render_pdf_with_kitty_post_frame called for area: {}x{} at ({},{})", 
+                area.width, area.height, area.x, area.y))
+        );
+        self.state = new_state;
+        
         if let Some(engine) = &self.pdf_engine {
+            // Log that we're rendering
+            let (new_state, _) = self.state.clone().update(
+                Action::AddTerminalOutput(format!("Rendering PDF page {} with Kitty graphics...", self.state.pdf.current_page + 1))
+            );
+            self.state = new_state;
+            
             // Calculate pixel dimensions for the display area
             let cell_width = 9u32;
             let cell_height = 18u32;
@@ -349,10 +390,15 @@ impl App {
                 display_height_px
             ) {
                 Ok((rgba_data, width, height)) => {
-                    // Clear the left panel area first
-                    for y in 0..area.height.min(20) {
-                        print!("\x1b[{};{}H\x1b[K", area.y + y + 1, area.x + 1);
-                    }
+                    // Log data size
+                    let (new_state, _) = self.state.clone().update(
+                        Action::AddTerminalOutput(format!("Got RGBA data: {} bytes for {}x{} image", 
+                            rgba_data.len(), width, height))
+                    );
+                    self.state = new_state;
+                    
+                    // Position cursor at the PDF area
+                    print!("\x1b[{};{}H", area.y + 1, area.x + 1);
                     
                     // Use Kitty graphics protocol - proper implementation
                     use base64::Engine;
@@ -367,9 +413,20 @@ impl App {
                     // We need to chunk it if it's too large
                     const CHUNK_SIZE: usize = 4096;
                     
+                    // Log base64 size
+                    let (new_state, _) = self.state.clone().update(
+                        Action::AddTerminalOutput(format!("Base64 encoded size: {} bytes", base64_image.len()))
+                    );
+                    self.state = new_state;
+                    
                     if base64_image.len() <= CHUNK_SIZE {
                         // Small image - send in one go
                         print!("\x1b_Ga=T,f=32,s={},{};{}\x1b\\", width, height, base64_image);
+                        
+                        let (new_state, _) = self.state.clone().update(
+                            Action::AddTerminalOutput(format!("Sent single-chunk image to Kitty"))
+                        );
+                        self.state = new_state;
                     } else {
                         // Large image - send in chunks
                         let chunks: Vec<&str> = base64_image.as_bytes()
@@ -396,11 +453,19 @@ impl App {
                     }
                     
                     stdout().flush().unwrap();
+                    
+                    // Log success
+                    let (new_state, _) = self.state.clone().update(
+                        Action::AddTerminalOutput(format!("✓ Rendered {}x{} image to Kitty", width, height))
+                    );
+                    self.state = new_state;
                 }
                 Err(e) => {
-                    // Log error to terminal panel instead of stderr
-                    let _error_msg = format!("Failed to render PDF: {:?}", e);
-                    // Note: We can't easily update state from here, but the error is visible in status
+                    // Log error to terminal panel
+                    let (new_state, _) = self.state.clone().update(
+                        Action::AddTerminalOutput(format!("✗ Failed to render PDF: {:?}", e))
+                    );
+                    self.state = new_state;
                 }
             }
         }
@@ -545,12 +610,35 @@ impl App {
                 // Mouse is in terminal panel area
                 match mouse.kind {
                     MouseEventKind::Down(MouseButton::Left) => {
-                        // Start selection
+                        // Handle double/triple click
+                        let now = std::time::Instant::now();
+                        let time_since_last = now.duration_since(self.last_click_time);
+                        
+                        if time_since_last.as_millis() < 500 && mouse_row == self.last_click_row {
+                            self.click_count += 1;
+                        } else {
+                            self.click_count = 1;
+                        }
+                        
+                        self.last_click_time = now;
+                        self.last_click_row = mouse_row;
+                        
                         if mouse_row > terminal_start_y {
                             let relative_row = (mouse_row - terminal_start_y).saturating_sub(1) as usize;
                             let line_idx = relative_row + self.state.ui.terminal_panel.scroll_offset;
+                            
                             if line_idx < self.state.ui.terminal_panel.content.len() {
-                                return Some(Action::SelectTerminalText(line_idx, line_idx));
+                                if self.click_count == 2 {
+                                    // Double-click: select entire line
+                                    return Some(Action::SelectTerminalText(line_idx, line_idx));
+                                } else if self.click_count >= 3 {
+                                    // Triple-click: select all terminal content
+                                    let last_line = self.state.ui.terminal_panel.content.len().saturating_sub(1);
+                                    return Some(Action::SelectTerminalText(0, last_line));
+                                } else {
+                                    // Single click: start normal selection
+                                    return Some(Action::SelectTerminalText(line_idx, line_idx));
+                                }
                             }
                         }
                     }
@@ -567,8 +655,11 @@ impl App {
                         }
                     }
                     MouseEventKind::Up(MouseButton::Left) => {
-                        // Just end selection, don't auto-copy
-                        // User can manually copy with Ctrl+C if needed
+                        // On mouse release, automatically copy selected text to clipboard
+                        // This mimics standard terminal behavior
+                        if self.state.ui.terminal_panel.selected_lines.is_some() {
+                            return Some(Action::CopyTerminalSelection);
+                        }
                     }
                     MouseEventKind::ScrollUp => {
                         // Scroll terminal up with mouse wheel
@@ -844,6 +935,11 @@ impl App {
             (KeyCode::Char('c'), KeyModifiers::CONTROL) if self.state.ui.terminal_panel.visible && self.state.ui.terminal_panel.selected_lines.is_some() => {
                 // Copy selected terminal text
                 Some(Action::CopyTerminalSelection)
+            }
+            (KeyCode::Char('a'), KeyModifiers::CONTROL) if self.state.ui.terminal_panel.visible => {
+                // Select all terminal text with Ctrl+A
+                let last_line = self.state.ui.terminal_panel.content.len().saturating_sub(1);
+                Some(Action::SelectTerminalText(0, last_line))
             }
             _ => None,
         }
@@ -1234,20 +1330,27 @@ impl App {
         
         // Handle PDF rendering based on terminal type
         if self.is_kitty && self.state.pdf.is_loaded() {
-            // For Kitty, render PDF image after the frame is drawn
-            // We'll store the area and render it in a post-render step
-            // For now, show a placeholder in the frame buffer
+            // For Kitty, render a background and page info at bottom
             let pdf_block = Block::default()
                 .style(Style::default().bg(pdf_bg));
             frame.render_widget(pdf_block, main_chunks[0]);
             
-            let pdf_area = main_chunks[0].inner(Margin { vertical: 1, horizontal: 2 });
+            // Add page navigation info at the bottom
+            let nav_text = format!("  Page {}/{} | ←/→: Navigate | +/-: Zoom", 
+                self.state.pdf.current_page + 1, 
+                self.state.pdf.page_count);
+            let nav_area = ratatui::layout::Rect {
+                x: main_chunks[0].x,
+                y: main_chunks[0].y + main_chunks[0].height - 2,
+                width: main_chunks[0].width,
+                height: 1,
+            };
             frame.render_widget(
-                Paragraph::new("  PDF VIEWER (Kitty)\n  Loading...")
+                Paragraph::new(nav_text)
                     .style(Style::default().fg(pdf_fg).bg(pdf_bg)),
-                pdf_area,
+                nav_area,
             );
-            // Note: Actual Kitty image rendering happens after frame.render() in main loop
+            // The post-frame render will overlay the actual PDF image
         } else if self.is_iterm2 {
             // Use iTerm2's inline image protocol for actual PDF rendering
             self.render_pdf_with_iterm2_images(main_chunks[0]);
@@ -1541,6 +1644,11 @@ impl App {
     pub fn should_render_kitty_pdf(&mut self) -> bool {
         if self.is_kitty && self.state.pdf.is_loaded() && self.kitty_needs_redraw {
             self.kitty_needs_redraw = false;
+            // Log that we're about to render
+            let (new_state, _) = self.state.clone().update(
+                Action::AddTerminalOutput(format!("Kitty redraw triggered for page {}", self.state.pdf.current_page + 1))
+            );
+            self.state = new_state;
             true
         } else {
             false

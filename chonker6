@@ -1,0 +1,17 @@
+#!/bin/bash
+
+# Convenient launcher for chonker6 from anywhere
+# Place this in your PATH or create an alias
+
+# Fixed path to chonker6 installation
+CHONKER6_DIR="/Users/jack/chonker6/projects/chonker6"
+
+# Check if chonker6 directory exists
+if [ ! -d "$CHONKER6_DIR" ]; then
+    echo "Error: chonker6 not found at $CHONKER6_DIR"
+    echo "Please update the path in this script"
+    exit 1
+fi
+
+# Run the launcher script
+exec "$CHONKER6_DIR/run_chonker6.sh" "$@"

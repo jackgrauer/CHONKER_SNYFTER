@@ -109,4 +109,22 @@ impl TerminalPanelState {
             None
         }
     }
+    
+    pub fn start_selection(&mut self, line: usize) {
+        if line < self.content.len() {
+            self.selected_lines = Some((line, line));
+        }
+    }
+    
+    pub fn update_selection(&mut self, line: usize) {
+        if let Some((start, _)) = self.selected_lines {
+            if line < self.content.len() {
+                self.selected_lines = Some((start, line));
+            }
+        }
+    }
+    
+    pub fn clear_selection(&mut self) {
+        self.selected_lines = None;
+    }
 }
