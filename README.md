@@ -1,119 +1,267 @@
-# Chonker5-TUI
+# CHONKER 🐹
 
-A terminal user interface (TUI) version of Chonker5 - PDF character matrix viewer and editor.
+## 🚀 CHONKER9 - Terminal PDF Editor Supremacy
+
+### [CHONKER9 (Rust Terminal Editor)](chonker9/) ⭐ **NEW & RECOMMENDED**
+Advanced terminal PDF viewer with spatial editing capabilities - the future of PDF editing
+
+### CHONKER (Python GUI) - Legacy
+Original ML-powered PDF processing with PyQt6 interface
 
 ## Features
 
-- **Three-pane interface**: PDF preview, character matrix editor, and smart layout analysis
-- **PDF Image Display**: Shows actual PDF pages in terminal (requires image-capable terminal)
-- **Direct editing**: Just type to edit text, no mode switching required
-- **Matrix editing**: Edit extracted character matrices in real-time
-- **Smart Layout**: Structural analysis of PDF documents with 's' key toggle
-- **Advanced Copy/Cut/Paste**: 
-  - Rectangular selection with Shift+arrows
-  - Standard Ctrl+C/X/V shortcuts
-  - Preserves 2D text layout
-- **Search**: Find text with Ctrl+F, navigate with F3/Shift+F3
-- **Export**: Save edited matrices with native file dialogs (Ctrl+S)
-- **Native File Dialogs**: macOS native open/save dialogs
-- **Adjustable layout**: Resize panes with Ctrl+/- 
-- **Page navigation**: Arrow keys or PageUp/PageDown to move between PDF pages
-- **Mouse support**: Click to focus panes and position cursor
+### 🦀 CHONKER9 (Rust) - THE FUTURE
+- **Terminal PDF Editing**: WYSIWYG editing with spatial layout preservation
+- **ALTO XML Processing**: Uses pdfalto for high-quality text extraction  
+- **Ropey Text Engine**: O(log n) text operations for large documents
+- **Cosmic Text Layout**: Advanced text shaping and typography
+- **Mouse & Selection**: Click-to-position cursor with block selection
+- **Crash-Safe**: Robust bounds checking for reliable editing
+- **Lightning Fast**: 2MB binary, instant startup, minimal dependencies
+- **Native Feel**: Terminal-based but with modern editor features
 
-## Building
+### 🐍 CHONKER (Python) - Legacy Support
+- ML-Powered Extraction with Docling models
+- Parquet export for data analysis
+- PyQt6 GUI interface
 
+## Quick Start
+
+### CHONKER (Python GUI)
 ```bash
-# Build the TUI version
-cargo build --release --manifest-path Cargo-tui.toml
+# Run with launcher
+./run_chonker.sh
 
-# Or run directly
-cargo run --release --manifest-path Cargo-tui.toml
+# Or manually
+source .venv/bin/activate
+python chonker.py
 ```
 
-## Usage
-
-### Key Bindings
-
-#### Navigation
-- `Tab` - Switch focus between PDF and Matrix panes
-- `Arrow Keys` - Navigate (context-sensitive)
-  - In PDF pane: ← → change pages
-  - In Matrix pane: ↑ ↓ ← → move cursor
-- `PageUp/PageDown` - Jump 10 pages in PDF
-
-#### Editing (Matrix pane)
-- **Type any character** - Direct text input at cursor
-- `Backspace` - Delete character
-- `Delete` - Delete character forward
-- `Enter` - Insert new line
-
-#### Selection & Clipboard
-- `Shift + Arrow Keys` - Start/extend rectangular selection
-- `Ctrl+C` - Copy selection
-- `Ctrl+X` - Cut selection  
-- `Ctrl+V` - Paste
-- `Ctrl+A` - Select all
-- `Esc` - Cancel selection
-
-#### File Operations
-- `o` - Open PDF file
-- `m` - Extract character matrix from current page
-- `Ctrl+S` - Export matrix to text file
-- `Ctrl+Shift+S` - Export with timestamp
-
-#### Search
-- `Ctrl+F` - Find text
-- `F3` - Find next
-- `Shift+F3` - Find previous
-- `Esc` - Cancel search
-
-#### UI Controls
-- `Ctrl +` - Increase PDF pane size
-- `Ctrl -` - Decrease PDF pane size
-- `?` - Show help
-- `Ctrl+Q` - Quit application
-
-### Terminal Requirements
-
-- **Minimum**: 80x24 characters
-- **Recommended**: 120x40 characters or larger
-- **Unicode support**: Required for proper character display
-
-### PDF Library Setup
-
-The TUI version uses the same PDFium library as the GUI version:
-
+### CHONKER9 (Rust Terminal)
 ```bash
-# macOS
-cp ./lib/libpdfium.dylib /usr/local/lib/
+# Build and run
+cd chonker9
+cargo build --release
+./target/release/chonker9 document.pdf
 
-# Linux
-cp ./lib/libpdfium.so /usr/local/lib/
-
-# Windows
-# Place pdfium.dll in the same directory as the executable
+# Or install globally
+cargo install --path chonker9
+chonker9 document.pdf
 ```
 
-## Architecture
+## Installation
 
-The TUI version maintains the core functionality of Chonker5 while adapting to terminal constraints:
+```bash
+# Clone the repository
+git clone https://github.com/jackgrauer/CHONKER_SNYFTER.git
+cd CHONKER_SNYFTER
 
-- **PDF Rendering**: Currently shows metadata; full image support available with `ratatui-image`
-- **Character Matrix**: Same extraction logic as GUI version
-- **Editing**: Simplified but functionally equivalent to GUI matrix editor
-- **Performance**: Optimized for terminal rendering with virtual scrolling
+# Install uv (if not already installed)
+curl -LsSf https://astral.sh/uv/install.sh | sh
 
-## Limitations
+# Set up environment
+./migrate_to_uv.sh
+```
 
-- PDF preview is simplified (ASCII representation) without the `images` feature
-- No drag-and-drop for moving text blocks (use cut/paste instead)
-- File selection via text input instead of file dialog
-- No Ferrules integration in base version (can be added)
+## Keyboard Shortcuts
 
-## Future Enhancements
+### CHONKER (Python)
+- **Cmd+O**: Open PDF from File
+- **Cmd+U**: Open PDF from URL
+- **Cmd+P**: Extract to HTML
+- **Cmd+E**: Export to Parquet
+- **Cmd+F**: Toggle Search
+- **Cmd+Q**: Quit application
 
-1. **Image Support**: Enable `ratatui-image` for actual PDF rendering in supported terminals
-2. **Ferrules Integration**: Add Smart Layout extraction 
-3. **Multiple Tabs**: Support multiple PDFs open simultaneously
-4. **Search**: Find text within character matrix
-5. **Export**: Save edited matrices back to text/PDF
+### CHONKER9 (Rust)
+- **Arrow Keys**: Navigate cursor
+- **Shift+Arrows**: Block selection
+- **Click & Drag**: Mouse selection
+- **Ctrl+A**: Select all
+- **Ctrl+S**: Save edited text
+- **Ctrl+Q**: Quit editor
+- **Home/End**: Line navigation
+
+## Export Format: Parquet
+
+When you export (Cmd+E), CHONKER creates a directory with 4 Parquet files:
+
+### 1. `chonker_exports.parquet`
+Export metadata including:
+- Export ID and timestamp
+- Source PDF path
+- Original and edited HTML (for change tracking)
+- User who performed QC
+- Edit count
+
+### 2. `chonker_content.parquet`
+Document structure and content:
+- Element type (h1, p, table, etc.)
+- Element order (preserves document flow)
+- Full text content
+- Complete HTML with formatting
+- Page numbers
+- Metadata (level, position)
+
+### 3. `chonker_styles.parquet`
+Text formatting information:
+- Bold, italic, underline flags
+- Font sizes
+- Text colors
+- Preserves all visual styling
+
+### 4. `chonker_semantics.parquet`
+Content classification:
+- Semantic roles (header, financial_text, data_table, etc.)
+- Word and character counts
+- Confidence scores
+- Enables intelligent filtering
+
+### Why Parquet?
+
+- **10-100x faster** queries than row-based formats
+- **70% smaller** files due to columnar compression
+- **Universal support** - works with Python, R, Rust, SQL engines
+- **Cloud-native** - integrates with S3, BigQuery, Snowflake
+- **Perfect for SNYFTER** - Rust-based analysis tool for financial documents
+
+## Project Structure
+
+```
+CHONKER_SNYFTER/
+├── chonker.py                         # Main Python application
+├── chonker9/                          # Rust terminal editor
+│   ├── src/main.rs                   # Terminal PDF editor
+│   ├── Cargo.toml                    # Rust dependencies
+│   └── README.md                     # Chonker9 documentation
+├── snyfter/                           # Rust PDF preprocessing
+├── pyproject.toml                     # Python configuration
+├── requirements.txt                   # Python dependencies
+└── README.md                          # This file
+```
+
+## Dependencies
+
+### CHONKER (Python)
+- PyQt6 & PyQt6-WebEngine (UI framework)
+- Docling (ML-powered PDF extraction)
+- DuckDB (SQL database engine)
+- BeautifulSoup4 (HTML processing)
+- pandas (Data manipulation)
+
+### CHONKER9 (Rust)
+- crossterm (Terminal UI framework)
+- quick-xml (ALTO XML parsing)
+- ropey (Advanced text editing)
+- cosmic-text (Text layout engine)
+
+## Development
+
+```bash
+# Python development
+source .venv/bin/activate
+uv pip install -r requirements.txt
+
+# Rust development
+cd chonker9
+cargo build --release
+
+# Run tests
+just test
+
+# Format code
+just format
+
+# Clean build artifacts
+just clean
+```
+
+## Using the Parquet Export
+
+### Python Example
+```python
+import pandas as pd
+import pyarrow.parquet as pq
+
+# Read the exported data
+content = pd.read_parquet('output/chonker_content.parquet')
+styles = pd.read_parquet('output/chonker_styles.parquet')
+semantics = pd.read_parquet('output/chonker_semantics.parquet')
+
+# Find all bold financial text
+bold_financial = content.merge(styles, left_on='content_id', right_on='element_id') \
+                       .merge(semantics, on='element_id') \
+                       .query("style_bold == True and semantic_role == 'financial_text'")
+
+# Get all headers from page 5
+page5_headers = content[
+    (content['element_type'].isin(['h1', 'h2', 'h3'])) & 
+    (content['element_metadata'].str.contains('"page": 5'))
+]
+```
+
+### Rust/SNYFTER Example
+```rust
+use arrow::record_batch::RecordBatch;
+use parquet::arrow::ArrowReader;
+
+// Lightning-fast columnar analytics
+let content = ParquetReader::new("chonker_content.parquet")?;
+let financial_elements = content
+    .filter(|row| row.semantic_role == "financial_text")
+    .select(&["element_text", "page"])
+    .collect();
+```
+
+### DuckDB Query
+```sql
+-- Query Parquet files directly without loading
+SELECT c.element_text, s.style_bold, sem.semantic_role
+FROM 'output/chonker_content.parquet' c
+JOIN 'output/chonker_styles.parquet' s ON c.content_id = s.element_id
+JOIN 'output/chonker_semantics.parquet' sem ON c.element_id = sem.element_id
+WHERE s.style_bold = true AND sem.semantic_role = 'header';
+```
+
+## Snyfter Integration
+
+CHONKER now works with **Snyfter**, a high-performance PDF preprocessing tool written in Rust. Snyfter prepares scanned or image-heavy PDFs for better text extraction.
+
+### Workflow
+1. **Analyze PDFs** with Snyfter to check if preprocessing is needed
+2. **Enhance PDFs** that have low text density  
+3. **Process with CHONKER** for spatial layout extraction
+
+See the [Snyfter README](snyfter/README.md) for detailed usage.
+
+## Recent Updates
+
+### 2025-09-04 - CHONKER9 Added 🦀
+- **NEW**: Advanced terminal PDF editor with spatial editing
+- **ALTO XML Integration**: High-quality text extraction via pdfalto
+- **Ropey + Cosmic Text**: Professional-grade text editing engine
+- **Mouse Support**: Click-to-position cursor and drag selection
+- **Block Selection**: Keyboard and mouse-based text selection
+- **Crash-Safe**: Robust bounds checking for stable editing
+
+### 2025-07-28 - MAJOR REFACTOR 🐹
+- **FIXED TEXT OVERLAP ISSUE!** Complete architectural overhaul
+  - New `BoundingBox` class with unified coordinate system (top-left origin)
+  - `SpatialLayoutEngine` detects and resolves overlaps before rendering
+  - Clean separation: PDF → Document → Layout → HTML
+  - Modular architecture replaces 2400-line monolith
+- **Spatial Layout Engine**:
+  - Items on same line shift horizontally to avoid overlap
+  - Different lines shift vertically
+  - Row grouping for form-like structures
+  - Dynamic font sizing based on available space
+- **Sacred hamster preserved**: All UI elements and wisdom intact
+- **Result**: NO MORE TEXT OVERLAPPING! Form fields align properly!
+
+## License
+
+MIT License - Feel free to use this hamster-powered technology responsibly!
+
+---
+
+Built with 🐹 by the CHONKER development team
